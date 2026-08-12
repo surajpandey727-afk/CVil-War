@@ -5,8 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.config.constants import SUPPORTED_PLATFORMS
-
 
 class JobSearchRequest(BaseModel):
     """Request body for multi-platform job search."""
