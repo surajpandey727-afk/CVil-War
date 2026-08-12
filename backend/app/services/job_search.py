@@ -11,7 +11,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SUPPORTED_PLATFORMS
 from app.config.settings import get_settings
 from app.core.automation.platforms import platform_registry
 from app.core.automation.platforms.base import JobListing
@@ -74,7 +74,11 @@ async def search_jobs(
         limit=request.limit,
     )
 
-    platforms_to_search = request.platforms or platform_registry.list_platforms()
+    # `is None` rather than a truthiness check: an explicit empty list is a valid request
+    # meaning "search nothing", and `or` would have turned it into "search everything".
+    platforms_to_search = (
+        list(SUPPORTED_PLATFORMS) if request.platforms is None else request.platforms
+    )
 
     if not platforms_to_search:
         logger.warning("job_search.no_platforms_available")

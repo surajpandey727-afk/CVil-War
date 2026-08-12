@@ -13,7 +13,15 @@ QUEUE_APPLY = "cvilwar:queue:apply"
 # NOTE: status/purpose enums now live in app.models.enums (single source of truth).
 
 # Supported platforms
-SUPPORTED_PLATFORMS = ["linkedin", "indeed", "glassdoor"]
+# Keyless API sources — these are the ones that actually return results.
+API_JOB_SOURCES = ["remotive", "jobicy", "arbeitnow", "remoteok"]
+# Browser-scraped platforms. Currently non-functional (docs/PHASE0_AUDIT.md §4.3.1) and kept
+# only so the apply-side keeps its platform identifiers.
+BROWSER_PLATFORMS = ["linkedin", "indeed", "glassdoor"]
+# Default search fan-out. API sources lead: a default of the three browser platforms alone
+# meant every search hit only the broken path and returned zero, regardless of what else was
+# registered — the request default silently overrode the registry.
+SUPPORTED_PLATFORMS = [*API_JOB_SOURCES, *BROWSER_PLATFORMS]
 
 # Resume templates
 RESUME_TEMPLATES = ["modern", "classic", "creative", "executive", "minimal"]

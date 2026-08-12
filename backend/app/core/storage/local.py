@@ -14,6 +14,33 @@ import aiofiles
 from app.core.storage.base import StoredObject
 
 
+def _extended(path: Path) -> Path:
+    """Opt a Windows path out of the 260-character ``MAX_PATH`` limit.
+
+    Storage keys are inherently long — ``users/<32-char id>/uploads/<32-char>.pdf`` is ~60
+    characters before the root. Add a checkout that is itself deeply nested (a synced
+    "OneDrive - Some Long Company Name" folder is the common case) and writes fail with a bare
+    ``FileNotFoundError`` from inside the thread-pool executor, which reads like a missing
+    directory rather than a path-length problem.
+
+    Prefixing an absolute path with ``\\\\?\\`` tells the Win32 API to skip ``MAX_PATH``
+    normalisation, raising the limit to ~32,767 characters. The prefix demands a fully
+    qualified path with backslash separators and no ``.``/``..`` components, which is why this
+    is applied only after ``resolve()`` — and only to the value handed to the filesystem, never
+    to the traversal check or to any key stored in the database.
+
+    No-op off Windows, where no such limit exists.
+    """
+    if os.name != "nt":
+        return path
+    text = os.path.abspath(str(path))
+    if text.startswith("\\\\?\\"):
+        return path
+    if text.startswith("\\\\"):  # UNC share: \\server\share -> \\?\UNC\server\share
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path("\\\\?\\" + text)
+
+
 class LocalFileStorage:
     """Stores objects under a local root. ``url_for`` returns a signed local route path."""
 
@@ -26,7 +53,7 @@ class LocalFileStorage:
         root = self._root.resolve()
         if not str(resolved).startswith(str(root)):
             raise ValueError(f"path traversal rejected for key: {key}")
-        return resolved
+        return _extended(resolved)
 
     async def put(self, key: str, data: bytes, *, content_type: str) -> StoredObject:
         path = self._path(key)

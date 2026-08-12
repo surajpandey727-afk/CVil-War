@@ -43,10 +43,11 @@ class TestFullJobSearchToApplicationPipeline:
     async def test_full_job_search_to_application_pipeline(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        # Step 1: POST /api/v1/jobs/search -- placeholder returns empty
+        # Step 1: POST /api/v1/jobs/search with no sources selected. Pinned to [] so this
+        # end-to-end test stays hermetic — the default fan-out now calls four live job APIs.
         resp = await client.post(
             "/api/v1/jobs/search",
-            json={"query": "python developer", "location": "remote"},
+            json={"query": "python developer", "location": "remote", "platforms": []},
         )
         assert resp.status_code == 200
         body = resp.json()

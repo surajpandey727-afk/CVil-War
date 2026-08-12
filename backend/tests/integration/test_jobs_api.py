@@ -18,10 +18,16 @@ def job_data(sample_job_data):
 class TestSearchJobs:
     """Tests for POST /api/v1/jobs/search."""
 
-    async def test_search_returns_empty_results(self, client):
+    async def test_search_with_no_platforms_selected_returns_empty(self, client):
+        """Explicitly selecting no sources must short-circuit, not fan out.
+
+        This previously asserted that a DEFAULT search returns zero — which only held because
+        every default platform was broken. It now pins the real contract and, importantly,
+        keeps the suite off the network: a default search hits four live job APIs.
+        """
         response = await client.post(
             f"{API_PREFIX}/search",
-            json={"query": "python developer", "location": "Remote"},
+            json={"query": "python developer", "location": "Remote", "platforms": []},
         )
 
         assert response.status_code == 200

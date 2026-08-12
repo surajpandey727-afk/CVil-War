@@ -5,13 +5,18 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.config.constants import SUPPORTED_PLATFORMS
+
 
 class JobSearchRequest(BaseModel):
     """Request body for multi-platform job search."""
 
     query: str = Field(..., min_length=1, max_length=500)
     location: str = ""
-    platforms: list[str] = Field(default_factory=lambda: ["linkedin", "indeed", "glassdoor"])
+    # None (omitted) means "use the configured default fan-out"; an explicit [] means
+    # "search nothing". A plain list default cannot express that difference — `[] or DEFAULT`
+    # silently searched every registered source when the caller asked for none.
+    platforms: list[str] | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=20, ge=1, le=100)
 

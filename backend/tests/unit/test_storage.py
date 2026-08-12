@@ -163,3 +163,31 @@ class TestStorageFactory:
             with pytest.raises(ValueError, match="Unknown storage provider"):
                 factory.get_storage()
         factory.get_storage.cache_clear()
+
+
+class TestWindowsLongPaths:
+    """Storage keys are long by design; a deep checkout must not break uploads."""
+
+    async def test_writes_and_reads_back_beyond_max_path(self, tmp_path):
+        """Reproduces the real failure: a >260-char absolute path raised FileNotFoundError
+        from inside the aiofiles thread-pool, which looked like a missing directory."""
+        # Deliberately NOT pre-created: plain Path.mkdir cannot build a tree this deep either
+        # (WinError 206), so letting put() create it exercises the real code path.
+        deep = tmp_path
+        for _ in range(6):
+            deep = deep / ("d" * 30)
+
+        store = LocalFileStorage(str(deep), SECRET)
+        key = f"users/{'a' * 32}/uploads/{'b' * 32}.pdf"
+        full = str((deep / key).resolve())
+        assert len(full) > 260, f"fixture must exceed MAX_PATH, got {len(full)}"
+
+        await store.put(key, b"%PDF-1.4 payload", content_type="application/pdf")
+        assert await store.exists(key) is True
+        assert await store.get(key) == b"%PDF-1.4 payload"
+
+    def test_path_traversal_is_still_rejected(self, tmp_path):
+        """The extended-length prefix must not weaken the traversal guard."""
+        store = LocalFileStorage(str(tmp_path), SECRET)
+        with pytest.raises(ValueError, match="path traversal"):
+            store._path("../../etc/passwd")

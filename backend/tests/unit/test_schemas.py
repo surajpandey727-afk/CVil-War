@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.config.constants import SUPPORTED_PLATFORMS
 from app.schemas.analytics import (
     ATSScoreDistribution,
     DashboardStats,
@@ -32,7 +33,12 @@ class TestJobSearchRequest:
         req = JobSearchRequest(query="python developer")
         assert req.query == "python developer"
         assert req.location == ""
-        assert req.platforms == ["linkedin", "indeed", "glassdoor"]
+        # API sources lead the default fan-out. Defaulting to the three browser platforms
+        # alone made every search hit only the broken scrape path and return zero,
+        # silently overriding whatever else was registered.
+        # None means 'use the default fan-out'; an explicit [] means 'search nothing'.
+        assert req.platforms is None
+        assert SUPPORTED_PLATFORMS[:4] == ["remotive", "jobicy", "arbeitnow", "remoteok"]
         assert req.filters == {}
         assert req.limit == 20
 
