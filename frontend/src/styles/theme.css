@@ -12,11 +12,18 @@ body { background: #0a0c0e; }
   --bg:#0a0c0e;--bg-2:#0c0f11;--surface:#131719;--surface-2:#181d20;--surface-3:#0e1214;--hover:#1b2125;
   --border:rgba(255,255,255,.075);--border-2:rgba(255,255,255,.13);--border-3:rgba(255,255,255,.2);
   --text:#e9eef1;--text-2:#a2acb2;--text-3:#69737a;--text-4:#495159;
-  --accent:#1fd8c0;--accent-2:#42e7d3;--accent-3:#11b6a2;--accent-ink:#04120f;
-  --accent-soft:rgba(31,216,192,.13);--accent-line:rgba(31,216,192,.34);--accent-glow:rgba(31,216,192,.3);
+  /* Brand: ultramarine accent (#4166F5) with a royal-blue secondary.
+     accent-ink is white — white on #4166F5 is 4.7:1 (AA for body text), whereas near-black
+     on it is only 4.4:1, so the previous dark ink would have failed once the hue changed. */
+  --accent:#4166f5;--accent-2:#6d88f8;--accent-3:#2c4bd1;--accent-ink:#ffffff;
+  --accent-soft:rgba(65,102,245,.15);--accent-line:rgba(65,102,245,.38);--accent-glow:rgba(65,102,245,.34);
+  --secondary:#4169e1;--secondary-2:#6d8ae8;--secondary-ink:#ffffff;
+  --secondary-soft:rgba(65,105,225,.14);--secondary-line:rgba(65,105,225,.34);
   --q:#7f8a99;--q-soft:rgba(127,138,153,.14);
   --review:#f5b13f;--review-soft:rgba(245,177,63,.14);--review-line:rgba(245,177,63,.34);
-  --approved:#4f9cf9;--approved-soft:rgba(79,156,249,.14);
+  /* Was #4f9cf9 — near-identical to the new blue accent, so an "approved" pill read as a
+     brand element. Shifted to sky/cyan to stay distinguishable from accent and secondary. */
+  --approved:#38bdf8;--approved-soft:rgba(56,189,248,.14);
   --applied:#3ecf7a;--applied-soft:rgba(62,207,122,.14);
   --interview:#a488fb;--interview-soft:rgba(164,136,251,.15);
   --offer:#22e0a1;--offer-soft:rgba(34,224,161,.15);
@@ -35,11 +42,15 @@ body { background: #0a0c0e; }
   --bg:#f3f5f6;--bg-2:#eaedef;--surface:#ffffff;--surface-2:#f5f7f8;--surface-3:#eef1f3;--hover:#eef1f3;
   --border:rgba(12,20,26,.09);--border-2:rgba(12,20,26,.15);--border-3:rgba(12,20,26,.26);
   --text:#0e1518;--text-2:#4b565d;--text-3:#78838a;--text-4:#9aa4aa;
-  --accent:#0aa895;--accent-2:#0cbfaa;--accent-3:#08897b;--accent-ink:#ffffff;
-  --accent-soft:rgba(10,168,149,.1);--accent-line:rgba(10,168,149,.28);--accent-glow:rgba(10,168,149,.22);
+  /* Light theme darkens the accent to #2f52d9: #4166F5 on white is only 4.7:1, and the accent
+     is used as text (links, active nav) — this lifts it to ~6.5:1 while staying the same hue. */
+  --accent:#2f52d9;--accent-2:#4166f5;--accent-3:#22409f;--accent-ink:#ffffff;
+  --accent-soft:rgba(47,82,217,.1);--accent-line:rgba(47,82,217,.3);--accent-glow:rgba(47,82,217,.22);
+  --secondary:#3a5fd0;--secondary-2:#4169e1;--secondary-ink:#ffffff;
+  --secondary-soft:rgba(58,95,208,.1);--secondary-line:rgba(58,95,208,.28);
   --q:#6b7480;--q-soft:rgba(107,116,128,.1);
   --review:#c4820a;--review-soft:rgba(196,130,10,.1);--review-line:rgba(196,130,10,.28);
-  --approved:#2b7de6;--approved-soft:rgba(43,125,230,.1);
+  --approved:#0e8fc4;--approved-soft:rgba(14,143,196,.1);
   --applied:#12a259;--applied-soft:rgba(18,162,89,.1);
   --interview:#7b5ce6;--interview-soft:rgba(123,92,230,.11);
   --offer:#0bab72;--offer-soft:rgba(11,171,114,.11);
