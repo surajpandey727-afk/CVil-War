@@ -1,0 +1,253 @@
+"""Unit tests for app.core.llm.client.LLMClient."""
+
+from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from pydantic import BaseModel
+
+from app.core.exceptions import LLMProviderError, LLMRateLimitError
+from app.core.llm.client import LLMClient, LLMResponse
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class SampleOutput(BaseModel):
+    """Pydantic model for structured output tests."""
+    title: str
+    score: float
+
+
+def _make_settings_mock() -> MagicMock:
+    """Build a mock settings object matching the LLM config shape."""
+    settings = MagicMock()
+    llm = MagicMock()
+    llm.default_model = "openai/gpt-4o"
+    llm.temperature = 0.7
+    llm.max_tokens = 1024
+    llm.fallback_providers = []
+    llm.bedrock_region = "us-east-1"
+    llm.portkey_api_key.get_secret_value.return_value = ""
+    llm.openai_api_key.get_secret_value.return_value = "sk-test"
+    llm.groq_api_key.get_secret_value.return_value = ""
+    llm.gemini_api_key.get_secret_value.return_value = ""
+    llm.openrouter_api_key.get_secret_value.return_value = ""
+    settings.llm = llm
+    return settings
+
+
+def _make_completion_response(content: str = "Hello world") -> MagicMock:
+    """Build a mock litellm completion response."""
+    response = MagicMock()
+    response.choices = [MagicMock()]
+    response.choices[0].message.content = content
+    usage = MagicMock()
+    usage.prompt_tokens = 10
+    usage.completion_tokens = 20
+    usage.total_tokens = 30
+    response.usage = usage
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def client() -> LLMClient:
+    with patch("app.core.llm.client.get_settings", return_value=_make_settings_mock()):
+        with patch("app.core.llm.client.litellm"):
+            return LLMClient()
+
+
+# ---------------------------------------------------------------------------
+# complete - success
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteSuccess:
+    async def test_complete_returns_llm_response(self, client: LLMClient) -> None:
+        mock_response = _make_completion_response("Generated text")
+
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.001
+            mock_litellm.Usage = MagicMock
+            result = await client.complete("Write something")
+
+        assert isinstance(result, LLMResponse)
+        assert result.content == "Generated text"
+        assert result.prompt_tokens == 10
+        assert result.completion_tokens == 20
+
+    async def test_complete_uses_default_model(self, client: LLMClient) -> None:
+        mock_response = _make_completion_response()
+
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+            result = await client.complete("prompt")
+
+        assert result.model == "openai/gpt-4o"
+
+
+class TestBedrock:
+    """AWS Bedrock is platform-authenticated (AWS credential chain), not a per-user BYO key."""
+
+    def _bedrock_client(self, region: str = "us-east-1") -> LLMClient:
+        settings = _make_settings_mock()
+        settings.llm.default_model = "bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0"
+        settings.llm.fallback_providers = ["groq", "openrouter"]
+        settings.llm.bedrock_region = region
+        with patch("app.core.llm.client.get_settings", return_value=settings):
+            with patch("app.core.llm.client.litellm"):
+                return LLMClient()
+
+    def test_bedrock_primary_has_no_cross_provider_fallbacks(self) -> None:
+        # A bedrock/<id> model must not spawn nonsense fallbacks like groq/anthropic.claude...
+        chain = self._bedrock_client()._get_model_chain(None)
+        assert chain == ["bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0"]
+
+    async def test_complete_passes_aws_region_and_no_api_key(self) -> None:
+        client = self._bedrock_client(region="us-west-2")
+        resp = _make_completion_response("ok")
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=resp)
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+            await client.complete("hi")
+        kwargs = mock_litellm.acompletion.call_args.kwargs
+        assert kwargs["model"].startswith("bedrock/")
+        assert kwargs["aws_region_name"] == "us-west-2"
+        assert "api_key" not in kwargs  # Bedrock uses AWS creds, never an api_key
+
+
+# ---------------------------------------------------------------------------
+# complete - fallback on error
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteFallback:
+    async def test_complete_falls_back_on_api_error(self, client: LLMClient) -> None:
+        mock_response = _make_completion_response("fallback result")
+
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            api_error = type("APIError", (Exception,), {})
+            mock_litellm.APIError = api_error
+            mock_litellm.RateLimitError = type("RateLimitError", (Exception,), {})
+            mock_litellm.Timeout = type("Timeout", (Exception,), {})
+
+            # First call fails, configure fallback
+            client._llm.fallback_providers = ["groq"]
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[api_error("fail"), mock_response]
+            )
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+
+            result = await client.complete("prompt")
+
+        assert result.content == "fallback result"
+
+
+# ---------------------------------------------------------------------------
+# complete - rate limit
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteRateLimit:
+    async def test_complete_raises_rate_limit_error(self, client: LLMClient) -> None:
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            rate_error = type("RateLimitError", (Exception,), {})
+            mock_litellm.RateLimitError = rate_error
+            mock_litellm.Timeout = type("Timeout", (Exception,), {})
+            mock_litellm.APIError = type("APIError", (Exception,), {})
+            mock_litellm.acompletion = AsyncMock(side_effect=rate_error("limit"))
+
+            with pytest.raises(LLMRateLimitError):
+                await client.complete("prompt")
+
+
+# ---------------------------------------------------------------------------
+# complete_with_structured_output
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredOutput:
+    async def test_parses_json_into_pydantic_model(self, client: LLMClient) -> None:
+        json_content = json.dumps({"title": "Engineer", "score": 0.95})
+        mock_response = _make_completion_response(json_content)
+
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+
+            result = await client.complete_with_structured_output(
+                "prompt", SampleOutput
+            )
+
+        assert isinstance(result, SampleOutput)
+        assert result.title == "Engineer"
+        assert result.score == pytest.approx(0.95)
+
+    async def test_raises_provider_error_on_invalid_json(self, client: LLMClient) -> None:
+        mock_response = _make_completion_response("not valid json {{{")
+
+        with patch("app.core.llm.client.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+
+            with pytest.raises(LLMProviderError, match="Failed to parse"):
+                await client.complete_with_structured_output("prompt", SampleOutput)
+
+
+# ---------------------------------------------------------------------------
+# per-user usage persistence (Phase 3.6)
+# ---------------------------------------------------------------------------
+
+
+def _client_with_user(user_id: str = "u-1") -> LLMClient:
+    with patch("app.core.llm.client.get_settings", return_value=_make_settings_mock()):
+        with patch("app.core.llm.client.litellm"):
+            return LLMClient(user_id=user_id)
+
+
+class TestUsagePersist:
+    async def test_persists_usage_for_bound_user(self) -> None:
+        client = _client_with_user("u-42")
+        mock_response = _make_completion_response("ok")
+
+        with patch("app.core.llm.client.litellm") as mock_litellm, patch(
+            "app.core.llm.usage_tracker.persist_usage_for_user", new=AsyncMock()
+        ) as persist:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.002
+            mock_litellm.Usage = MagicMock
+            await client.complete("prompt", purpose="cover_letter")
+
+        persist.assert_awaited_once()
+        call = persist.await_args
+        assert call.args[0] == "u-42"
+        assert isinstance(call.args[1], LLMResponse)
+        assert call.args[2] == "cover_letter"
+
+    async def test_no_persist_when_unbound(self, client: LLMClient) -> None:
+        mock_response = _make_completion_response("ok")
+
+        with patch("app.core.llm.client.litellm") as mock_litellm, patch(
+            "app.core.llm.usage_tracker.persist_usage_for_user", new=AsyncMock()
+        ) as persist:
+            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_litellm.completion_cost.return_value = 0.0
+            mock_litellm.Usage = MagicMock
+            await client.complete("prompt")
+
+        persist.assert_not_awaited()

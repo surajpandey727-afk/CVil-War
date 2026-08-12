@@ -1,0 +1,31 @@
+# Production worker image — adds Chromium for browser-use live-apply (heavier than the API).
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# WeasyPrint + spaCy runtime libraries.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libffi-dev libcairo2 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY backend/pyproject.toml ./
+COPY backend/app/ ./app/
+# Document templates (repo root) — the worker also renders resumes/cover letters via run_apply.
+COPY templates/ ./templates/
+
+RUN pip install ".[postgres,aws]" \
+    && python -m spacy download en_core_web_sm
+
+# Chromium + its system deps for browser-use (installed to a shared, world-readable path).
+RUN playwright install chromium --with-deps \
+    && chmod -R a+rx /ms-playwright
+
+RUN useradd -m appuser && mkdir -p /app/data && chown -R appuser:appuser /app
+USER appuser
+
+CMD ["arq", "app.workers.tasks.WorkerSettings"]

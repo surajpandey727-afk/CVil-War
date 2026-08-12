@@ -1,0 +1,55 @@
+"""Pydantic schemas for authentication endpoints."""
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RegisterRequest(BaseModel):
+    """New-account registration payload."""
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = None
+
+
+class TokenResponse(BaseModel):
+    """Access-token response (refresh token is set as an httpOnly cookie)."""
+
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    """Public view of a user account."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    full_name: str | None = None
+    is_active: bool
+    is_superuser: bool = False
+
+
+class WSTicketResponse(BaseModel):
+    """Short-lived ticket for authenticating a WebSocket handshake."""
+
+    ticket: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request a password-reset link for an email address."""
+
+    email: str = Field(min_length=3, max_length=320)
+
+
+class ResetPasswordRequest(BaseModel):
+    """Redeem a reset token and set a new password."""
+
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    """Generic message envelope for endpoints with no resource body."""
+
+    message: str

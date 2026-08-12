@@ -1,0 +1,259 @@
+"""Resume management API routes."""
+
+import os
+from pathlib import Path
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
+
+from app.api.deps import CurrentUser, get_tenant_db
+from app.core.exceptions import RecordNotFoundError
+from app.core.ratelimit import rate_limit
+from app.core.storage import StorageService, get_storage
+from app.schemas.resume import (
+    ResumeGenerateRequest,
+    ResumeListResponse,
+    ResumeOptimizeRequest,
+    ResumeResponse,
+    ResumeScoreRequest,
+    ResumeScoreResponse,
+    ResumeUploadResponse,
+)
+from app.schemas.settings import CandidateProfileSchema
+from app.services import resume as resume_service
+
+logger = structlog.get_logger(__name__)
+router = APIRouter()
+
+# Per-client rate cap on the costly LLM/CPU-backed endpoints (BYO-key cost + DoS guard).
+_COSTLY = Depends(rate_limit(30, 60))
+
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@router.post(
+    "/upload",
+    response_model=ResumeUploadResponse,
+    status_code=201,
+    summary="Upload a resume file",
+)
+async def upload_resume(
+    file: UploadFile,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeUploadResponse:
+    """Upload a PDF or DOCX resume for parsing and storage."""
+    # Validate file extension
+    file_ext = Path(file.filename or "").suffix.lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only PDF and DOCX files accepted, got '{file_ext}'",
+        )
+
+    # Validate MIME type
+    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid file type: {file.content_type}",
+        )
+
+    # Validate file size by reading in chunks to avoid loading huge files into memory
+    size = 0
+    chunk_size = 64 * 1024  # 64KB
+    while chunk := await file.read(chunk_size):
+        size += len(chunk)
+        if size > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="File too large. Max 10MB.")
+    await file.seek(0)
+
+    return await resume_service.upload_resume(db, file, user.id)
+
+
+@router.get(
+    "/",
+    response_model=ResumeListResponse,
+    summary="List all resumes",
+)
+async def list_resumes(
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeListResponse:
+    """List all uploaded and generated resumes."""
+    return await resume_service.list_resumes(db)
+
+
+@router.post(
+    "/generate",
+    response_model=ResumeResponse,
+    status_code=201,
+    dependencies=[_COSTLY],
+    summary="Generate a tailored resume",
+)
+async def generate_resume(
+    request: ResumeGenerateRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeResponse:
+    """Generate a job-tailored resume from a base resume.
+
+    Tailors the base resume to the target job via the per-user LLM and renders
+    PDF/DOCX through the document generator.
+    """
+    return await resume_service.generate_tailored_resume(db, request, user.id)
+
+
+@router.post(
+    "/{resume_id}/score",
+    response_model=ResumeScoreResponse,
+    dependencies=[_COSTLY],
+    summary="Score resume against a job",
+)
+async def score_resume(
+    resume_id: str,
+    request: ResumeScoreRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeScoreResponse:
+    """Score a resume's ATS compatibility against a specific job."""
+    return await resume_service.score_resume(db, resume_id, request)
+
+
+@router.post(
+    "/{resume_id}/optimize",
+    response_model=ResumeResponse,
+    dependencies=[_COSTLY],
+    summary="Optimize resume for ATS",
+)
+async def optimize_resume(
+    resume_id: str,
+    user: CurrentUser,
+    request: ResumeOptimizeRequest = ResumeOptimizeRequest(),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeResponse:
+    """Optimize a resume for ATS keyword matching using LLM rewriting.
+
+    Creates a new optimized resume linked to the original with improved
+    ATS compatibility scores.
+    """
+    return await resume_service.optimize_resume(db, resume_id, user.id, request.job_id)
+
+
+@router.get(
+    "/{resume_id}/download",
+    summary="Download resume file",
+)
+async def download_resume(
+    resume_id: str,
+    user: CurrentUser,
+    format: str = Query(default="pdf", pattern="^(pdf|docx)$"),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> FileResponse:
+    """Download a resume in PDF or DOCX format (materialized from per-tenant storage)."""
+    resume = await resume_service.get_resume(db, resume_id)
+
+    key = resume.file_path_pdf if format == "pdf" else resume.file_path_docx
+    if not key:
+        raise RecordNotFoundError("Resume file", resume_id)
+    try:
+        tmp_path = await StorageService(get_storage(), user.id).materialize_to_temp(
+            key, suffix=f".{format}"
+        )
+    except (FileNotFoundError, PermissionError) as exc:
+        raise RecordNotFoundError("Resume file", resume_id) from exc
+
+    media_type = (
+        "application/pdf"
+        if format == "pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return FileResponse(
+        path=tmp_path,
+        media_type=media_type,
+        filename=f"{resume.name}.{format}",
+        background=BackgroundTask(os.remove, tmp_path),  # delete the temp after streaming
+    )
+
+
+@router.get(
+    "/{resume_id}/profile-data",
+    response_model=CandidateProfileSchema,
+    summary="Extract profile data from a resume",
+)
+async def extract_profile_from_resume(
+    resume_id: str,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> CandidateProfileSchema:
+    """Extract structured candidate profile data from a resume.
+
+    Parses the resume's stored text content using DocumentParser's
+    section extraction and contact info regex to build a structured
+    CandidateProfile that can pre-fill the profile editor.
+    """
+    resume = await resume_service.get_resume(db, resume_id)
+    content = resume.content_text or ""
+
+    if not content.strip():
+        logger.warning("profile_extract_empty_resume", resume_id=resume_id)
+        return CandidateProfileSchema()
+
+    from app.core.documents.parser import DocumentParser
+
+    parser = DocumentParser()
+    contact = parser._extract_contact_info(content)
+    sections = parser._extract_sections(content)
+    skills = parser._extract_skills_from_text(content, sections)
+
+    # Derive the full name from the first non-empty line before any section
+    full_name = ""
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if (
+            stripped
+            and stripped.lower().rstrip(":") not in sections
+            and "@" not in stripped
+            and "http" not in stripped.lower()
+        ):
+            full_name = stripped
+            break
+
+    summary = ""
+    for key in ("summary", "objective", "professional summary", "profile"):
+        if key in sections:
+            summary = sections[key]
+            break
+
+    certifications: list[str] = []
+    for key in ("certifications", "certificates", "licenses"):
+        if key in sections:
+            cert_text = sections[key]
+            certifications = [
+                line.lstrip("-*\u2022\u2023 ").strip()
+                for line in cert_text.split("\n")
+                if line.strip()
+            ]
+            break
+
+    logger.info(
+        "profile_data_extracted",
+        resume_id=resume_id,
+        skills_count=len(skills),
+        has_contact=bool(contact),
+    )
+
+    return CandidateProfileSchema(
+        full_name=full_name,
+        email=contact.get("email", ""),
+        phone=contact.get("phone", ""),
+        linkedin_url=contact.get("linkedin", ""),
+        github_url=contact.get("github", ""),
+        summary=summary,
+        skills=skills,
+        certifications=certifications,
+    )

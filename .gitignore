@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+.vs-code/
+*.swp
+*.swo
+*~
+.claude
+.claude/
+
+# Data (runtime generated)
+# NOTE: these patterns are deliberately UNANCHORED (no leading path segment) so they
+# also catch backend/data/... — the previous `data/db/*.db` form was anchored to the
+# repo root and silently let `backend/data/db/autoapply.db` (real user data) be staged.
+**/data/db/*.db
+**/data/db/*.db-journal
+**/data/db/*.db-wal
+**/data/db/*.db-shm
+**/data/sessions/*
+!**/data/sessions/.gitkeep
+**/data/vector_indices/*
+!**/data/vector_indices/.gitkeep
+**/data/generated/*
+!**/data/generated/resumes/.gitkeep
+!**/data/generated/cover_letters/.gitkeep
+**/data/logs/*
+!**/data/logs/.gitkeep
+**/data/uploads/*
+!**/data/uploads/.gitkeep
+**/data/storage/*
+!**/data/storage/.gitkeep
+
+# Never commit real secrets or credential material
+*.pem
+*.key
+!**/*.key.example
+secrets.json
+credentials.json
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Docker
+docker/.env
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+temp.py
+.qodo
+uv.lock
