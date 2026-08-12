@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.config.settings import get_settings
 from app.core.exceptions import LLMProviderError, LLMRateLimitError, LLMTimeoutError
+from app.core.llm.keyring import get_keyring, is_quota_exhausted
 from app.observability.metrics import (
     llm_cost_usd,
     llm_latency_seconds,
@@ -65,6 +66,9 @@ class LLMClient:
         self._credentials = credentials
         # When set, every successful call persists an LLMUsage row owned by this user.
         self._user_id = user_id
+        # Rotating key pool, shared process-wide so a key parked as exhausted by one request
+        # stays parked for the next. Per-user BYO-key requests bypass it entirely.
+        self._keyring = get_keyring("deepseek", self._llm.deepseek_api_keys.get_secret_value())
         self._configure_portkey()
         self._configure_api_keys()
 
@@ -116,6 +120,40 @@ class LLMClient:
         ]
         return [primary, *fallbacks]
 
+    def _get_attempts(self, model: str | None) -> list[tuple[str, str | None]]:
+        """Expand the model chain into ``(model, api_key)`` attempts.
+
+        A model served by a pooled provider becomes one attempt per *usable* key, so a spent
+        key rotates to the next key on the same model rather than degrading to a weaker
+        fallback provider. Keys already in cooldown are skipped rather than re-tried.
+
+        ``api_key`` is None when the key comes from litellm's global registry or the AWS
+        credential chain (Bedrock).
+        """
+        chain = self._get_model_chain(model)
+        attempts: list[tuple[str, str | None]] = []
+        for attempt_model in chain:
+            provider = attempt_model.split("/")[0] if "/" in attempt_model else "openai"
+            if (
+                provider == self._keyring.provider
+                and self._keyring.configured
+                and self._credentials is None
+            ):
+                usable = self._keyring.usable_keys()
+                if not usable:
+                    # Every key is cooling down; fall through to the next model rather than
+                    # hammering a pool we know is spent.
+                    logger.warning(
+                        "llm_keyring.all_keys_cooling",
+                        provider=provider,
+                        pool_size=len(self._keyring),
+                    )
+                    continue
+                attempts.extend((attempt_model, key) for key in usable)
+            else:
+                attempts.append((attempt_model, None))
+        return attempts
+
     def _portkey_metadata(self) -> dict[str, Any]:
         """Build Portkey metadata dict for request tracing."""
         portkey_key = self._llm.portkey_api_key.get_secret_value()
@@ -161,10 +199,11 @@ class LLMClient:
         temp = temperature if temperature is not None else self._llm.temperature
         tokens = max_tokens if max_tokens is not None else self._llm.max_tokens
         model_chain = self._get_model_chain(model)
+        attempts = self._get_attempts(model)
         metadata = self._portkey_metadata()
         last_error: Exception | None = None
 
-        for attempt_model in model_chain:
+        for attempt_model, pooled_key in attempts:
             provider = attempt_model.split("/")[0] if "/" in attempt_model else "openai"
             start = time.perf_counter()
             try:
@@ -184,8 +223,12 @@ class LLMClient:
                     kwargs["aws_region_name"] = self._llm.bedrock_region
                 elif self._credentials is not None:
                     kwargs["api_key"] = self._credentials.api_key
+                elif pooled_key is not None:
+                    kwargs["api_key"] = pooled_key
 
                 response = await litellm.acompletion(**kwargs)
+                if pooled_key is not None:
+                    self._keyring.mark_success(pooled_key)
                 latency_s = time.perf_counter() - start
                 elapsed_ms = latency_s * 1000
 
@@ -234,6 +277,14 @@ class LLMClient:
 
             except litellm.RateLimitError as exc:
                 last_error = exc
+                # Some providers report a spent key as 429 rather than 402, so check the
+                # message before assuming this is plain throttling — parking an exhausted key
+                # for 60s would otherwise make it fail every minute forever.
+                if pooled_key is not None:
+                    if is_quota_exhausted(exc):
+                        self._keyring.mark_exhausted(pooled_key)
+                    else:
+                        self._keyring.mark_rate_limited(pooled_key)
                 self._record_metrics(
                     provider=provider,
                     model=attempt_model,
@@ -262,6 +313,10 @@ class LLMClient:
 
             except litellm.APIError as exc:
                 last_error = exc
+                # DeepSeek signals a spent key with HTTP 402 Insufficient Balance, which
+                # surfaces here rather than as a RateLimitError.
+                if pooled_key is not None and is_quota_exhausted(exc):
+                    self._keyring.mark_exhausted(pooled_key)
                 self._record_metrics(
                     provider=provider,
                     model=attempt_model,
@@ -279,6 +334,10 @@ class LLMClient:
                 # of litellm.APIError — without this they'd escape uncaught, skipping the
                 # fallback chain and leaking a raw provider error to the caller.
                 last_error = exc
+                # Auth errors and bare httpx status errors are not litellm.APIError, but a
+                # 402/quota message here still means the key is spent, not the model.
+                if pooled_key is not None and is_quota_exhausted(exc):
+                    self._keyring.mark_exhausted(pooled_key)
                 self._record_metrics(
                     provider=provider,
                     model=attempt_model,

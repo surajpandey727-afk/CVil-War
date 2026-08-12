@@ -34,6 +34,11 @@ class LLMSettings(BaseSettings):
     gemini_api_key: SecretStr = SecretStr("")
     openrouter_api_key: SecretStr = SecretStr("")
     github_token: SecretStr = SecretStr("")
+    # Comma-separated pool of DeepSeek keys, tried in order. Free-tier keys run out of credit
+    # rather than failing permanently, so the client rotates to the next key on an
+    # "insufficient balance" response instead of degrading to a different provider — see
+    # app/core/llm/keyring.py. A single key works fine here too.
+    deepseek_api_keys: SecretStr = SecretStr("")
     preferred_provider: str = "openai"
     fallback_providers: list[str] = ["groq", "openrouter"]
     default_model: str = "gpt-4o"
