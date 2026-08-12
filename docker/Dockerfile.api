@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY backend/pyproject.toml ./
+# Required by the documented release step:
+#   docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head
+# Without alembic.ini that command cannot locate the migration scripts and fails.
+COPY backend/alembic.ini ./
 COPY backend/app/ ./app/
 # Jinja/WeasyPrint document templates live at the repo root (build context is repo root);
 # the DocumentGenerator resolves them via a relative "templates" path from the CWD (/app).

@@ -11,7 +11,10 @@ AutoApply AI is a full-stack platform that automates and manages the modern job 
 
 ## What It Does
 
-- **Job Discovery** across LinkedIn, Indeed, Glassdoor, and Exa AI semantic search
+- **Job Discovery** across LinkedIn, Indeed, Glassdoor, and Exa AI semantic search —
+  ⚠️ **the three browser-scraped platforms are currently non-functional**: they target a
+  browser-use API that no longer exists, so every search fails and the endpoint returns zero
+  results. Tracked as B14 in [docs/PHASE0_AUDIT.md](docs/PHASE0_AUDIT.md)
 - **ATS Resume Scoring** with multi-factor analysis (skills, keywords, experience, education)
 - **Resume Tailoring** with LLM-powered content optimization and PDF/DOCX generation
 - **Application Tracking** with status lifecycle, approval workflows, and batch processing
@@ -33,11 +36,20 @@ Backend (FastAPI)
   '- Data Layer -- SQLite/PostgreSQL, Redis, FAISS vector indices
 ```
 
-- **Backend:** FastAPI, SQLAlchemy 2.0 async, Pydantic v2, Redis, structlog, Prometheus
-- **Frontend:** React 18, TypeScript, Vite, MUI, TanStack Query, Zustand, Recharts
+- **Backend:** FastAPI, SQLAlchemy 2.0 async, Pydantic v2, Redis (arq queue), structlog, Prometheus
+- **Frontend:** React 18, TypeScript, Vite, TanStack Query, Zustand, hand-rolled CSS design
+  system (`src/styles/theme.css` + `src/components/ui/`)
 - **Automation:** browser-use + Playwright for platform workflows
-- **AI:** LiteLLM + Portkey gateway with OpenAI, Groq, Gemini, OpenRouter support
-- **Data:** SQLite (default) or PostgreSQL, Redis queue/cache, FAISS vector indices
+- **AI:** LiteLLM with OpenAI, Groq, Gemini, OpenRouter and Bedrock support; Portkey is wired
+  as a LiteLLM callback when `LLM__PORTKEY_API_KEY` is set
+- **Data:** SQLite (default) or PostgreSQL, Redis queue/cache, local or S3-compatible object
+  storage (R2/MinIO)
+
+> **Accuracy note.** Earlier revisions of this README and `ARCHITECTURE.md` listed MUI,
+> Recharts, a Portkey gateway layer and FAISS vector indices. None of those are in the
+> codebase — there is no MUI or Recharts dependency, no `portkey` import, and no
+> `core/matching/vector_store.py`. There is currently **no semantic/vector matching of any
+> kind**. See [docs/PHASE0_AUDIT.md](docs/PHASE0_AUDIT.md) for the full verified inventory.
 
 For a full breakdown, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -58,6 +70,23 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ### Local Development
 
+#### Prerequisites and known environment traps
+
+Read these before running the commands — each one is a real failure that has been hit:
+
+- **Keep the checkout on a short path, outside any synced folder.** `C:\dev\autoapply` is a
+  good choice. `python -m venv` fails outright inside a OneDrive-synced directory, and file
+  storage keys (`users/<32-char id>/uploads/<32-char>.pdf`) push deep checkouts past Windows'
+  260-character `MAX_PATH` limit, which breaks résumé upload with a bare `FileNotFoundError`.
+- **spaCy's model is a separate download.** `pip install` does not fetch it. Without it the
+  ATS analysers silently fall back to regex, and the PII gate in the harness **fails closed**
+  and rejects everything (by design — see `core/harness/skills.py`).
+- **PDF rendering needs native libraries.** WeasyPrint requires GTK/Pango/Cairo, which
+  Windows does not ship, so `import weasyprint` fails and PDF generation is Docker-only there.
+  The Docker images install them.
+- **The database schema is owned by Alembic.** The app does not create tables at startup, so
+  `alembic upgrade head` is required or `/health` returns 503.
+
 #### Backend
 
 ```bash
@@ -66,6 +95,8 @@ python -m venv .venv
 .venv\Scripts\activate       # Windows
 # source .venv/bin/activate  # macOS/Linux
 pip install -e ".[dev]"
+python -m spacy download en_core_web_sm
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -79,9 +110,18 @@ npm run dev
 
 #### Worker (separate terminal)
 
+The worker runs under [arq](https://arq-docs.helpmanual.io/); it needs Redis running.
+
 ```bash
 cd backend
-python -m app.workers.application_worker
+arq app.workers.tasks.WorkerSettings
+```
+
+#### Running the checks
+
+```bash
+cd backend && pytest -q && ruff check app/
+cd frontend && npm run lint && npm run build && npx vitest run
 ```
 
 ### Default Services

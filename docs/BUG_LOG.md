@@ -1,5 +1,25 @@
 # AutoApply AI — Bug Log
 
+> ### ⚠️ Correction — 2026-08-12
+>
+> The "✅ Fixed & verified" markers below were **not** verifiable in this snapshot. When the
+> suite was actually run:
+>
+> * **BUG-001**'s regression test (`authBootstrap.test.tsx`) **failed**. The single-flight fix
+>   itself was present and correct in `services/api.ts`; the test could never reach it, because
+>   `clear()` in `beforeEach` also clears the session hint that BUG-005's fix uses to gate the
+>   boot probe. BUG-005 silently disarmed BUG-001's test.
+> * **BUG-002**'s component, `components/auth/PublicOnly.tsx`, **did not exist** — so its test
+>   suite could not even load, and `npm run build` failed outright. The whole frontend was
+>   unbuildable.
+> * **BUG-005**'s claimed test ("skips the probe … no session hint") **was not in the file**.
+>
+> All of the above are now genuinely fixed and verified — see the 2026-08-12 section at the
+> bottom. The lesson for this log: a "fixed" entry is only meaningful if the suite is green at
+> the time of writing. Record the command and its output, not the intent.
+>
+> Full verified state of the repository: [PHASE0_AUDIT.md](PHASE0_AUDIT.md).
+
 Living log of bugs found during testing. The four **P1/P2** items below were found in the
 2026-07-10 live end-to-end pass (Playwright driving the real SPA + Vite proxy + live FastAPI +
 Redis + a fresh Alembic-migrated DB) and have already been **fixed with TDD** (kept here as a
@@ -153,3 +173,88 @@ backend spike**, not on frontend work:
 
 Not ported by design intent: **Style guide** (design-reference only) and **Roadmap** (the design
 itself labels it "unbuilt").
+
+---
+
+## Fixed 2026-08-12 (Phase 0.5 — build + security repair)
+
+Every entry here was verified by running the command shown. Before: backend `653 passed,
+6 failed`; frontend `118 passed, 3 failed, 1 suite unloadable`; `npm run build` **failing**.
+After: backend `661 passed, 0 failed, 2 skipped, 1 xfailed`; frontend `124 passed, 0 failed`;
+`npm run build` **passing**; `ruff check app/` and `npm run lint` clean.
+
+### BUG-010 — ✅ P1 — The frontend did not build
+- **Symptom:** `tsc` and `npm run build` failed with
+  `TS2307: Cannot find module '@/components/auth/PublicOnly'`.
+- **Root cause:** `App.tsx` (4 routes) and `publicOnly.test.tsx` imported a component that was
+  not in the repository. BUG-002 above describes fixing it; the file itself was absent.
+- **Fix:** added `components/auth/PublicOnly.tsx`, honouring the `redirectTo` contract its test
+  already specified. It only branches on `authenticated`, because `AuthProvider` renders a
+  spinner instead of the router until auth settles, so a route guard never sees `loading`.
+
+### BUG-011 — ✅ P2 — Password reset was a dead link end-to-end
+- **Symptom:** the emailed reset link 404'd.
+- **Root cause:** `mailer.build_reset_link` sends users to
+  `{frontend_base_url}/reset-password?token=…`, and `ResetPasswordPage.tsx` existed with tests —
+  but **no route was ever mounted** in `App.tsx`.
+- **Fix:** registered `/reset-password` inside `PublicOnly`.
+
+### BUG-012 — ✅ P1 (security) — PII gate failed open
+- **Symptom:** `pii_clean("Applicant John Smith should click apply")` returned `True` (clean).
+- **Root cause:** `_contains_person_name` caught every exception from `get_nlp()` and returned
+  `False`. Name detection needs spaCy's `en_core_web_sm`, which **only the Dockerfile installs**
+  — so on any pip-installed checkout the gate silently passed everything. DomainSkills are
+  shared across tenants and injected into later agent prompts, so this is a cross-tenant leak
+  path, not a cosmetic issue. The docstring claimed a regex fallback; the regexes match
+  emails/phones/keys/addresses and nothing name-shaped.
+- **Fix:** fail closed (assume PII when the model is unavailable) and log an error naming the
+  install command. Test: `test_gate_fails_closed_when_the_ner_model_is_unavailable`.
+
+### BUG-013 — ✅ P2 — …and rejected its own best input once the model WAS present
+- **Symptom:** found immediately after fixing BUG-012 by installing the model — four previously
+  green tests went red.
+- **Root cause:** spaCy tags **"Easy Apply"** as a `PERSON` entity. In Docker (where the model
+  exists) the gate therefore discarded exactly the guidance the self-evolving harness exists to
+  accumulate, e.g. *"Easy Apply lives at .jobs-apply-button"*. The local suite passed only
+  because no model was installed and the gate was failing open — the two bugs concealed each
+  other.
+- **Fix:** exact-match (case-folded) allow-list of job-board UI phrases in `_NON_NAME_TERMS`,
+  applied to whole entity spans so real names are unaffected. Test:
+  `test_job_board_ui_phrases_are_not_treated_as_names`, which also asserts
+  `"Contact Sarah Bennett to resume"` is still rejected.
+
+### BUG-014 — ✅ P2 — Four upload tests failed on Windows `MAX_PATH`
+- **Symptom:** `FileNotFoundError` raised from inside a thread-pool executor, which looked like
+  a missing-`mkdir` bug in `LocalFileStorage.put` (it does create parents — `local.py:33`).
+- **Root cause:** the storage root defaults to `./data/storage` relative to CWD, so tests wrote
+  into the working tree. Repo root (170 chars) + `users/<32>/uploads/<32>.pdf` = **275 chars**,
+  over Windows' 260-char limit.
+- **Fix:** session-scoped autouse fixture pointing `STORAGE__LOCAL_ROOT` at a temp dir. Uses the
+  **env var**, not the cached `Settings` object, because `test_migrations` clears that
+  `lru_cache` and an in-place mutation is lost on rebuild. Also stops the suite mutating the
+  working tree.
+
+### BUG-015 — 🔵 P1 — Job discovery is completely non-functional (**open**)
+- **Symptom:** `POST /jobs/search` returns `total: 0` for every query.
+- **Root cause:** `core/automation/agent.py` imports `BrowserConfig`, removed in modern
+  browser-use; `pyproject` had no upper bound so pip installs 0.11.13. All three platform
+  plugins raise, and `services/job_search.py` swallows per-platform failures — so total
+  subsystem failure is indistinguishable from "no jobs matched".
+- **Partial fix:** the error message no longer claims the package is missing (it is installed).
+- **Still open:** deliberately not repaired by porting the scrapers, since PHASE0_AUDIT §5.3
+  recommends official job APIs as the primary discovery path. Tracked as B14.
+
+### BUG-016 — ✅ P2 — `docker compose up` started against an empty database
+- **Root cause:** `docker-compose.yml` had no migration step (only the prod compose did), and
+  **no Dockerfile copied `backend/alembic.ini`** — so even the documented production release
+  command `run --rm api alembic upgrade head` could not locate the migration scripts.
+- **Fix:** added a one-shot `migrate` service that `backend` and `worker` gate on via
+  `service_completed_successfully`, and copied `alembic.ini` into the backend and api images.
+- **Not verified end-to-end:** Docker is not installed on this machine.
+
+### BUG-017 — ✅ P2 — `pip install -e ".[dev]"` failed on a clean machine
+- **Root cause:** resolving `langchain-*` made pip backtrack through litellm releases to
+  1.93.0, which ships only an sdist whose metadata build requires a Rust toolchain.
+- **Fix:** pinned `litellm>=1.96,<2`, and removed seven never-imported dependencies
+  (`sentence-transformers`, `faiss-cpu`, `scikit-learn`, `numpy`, `fuzzywuzzy`,
+  `python-Levenshtein`, `python-dateutil`) — `sentence-transformers` alone pulls PyTorch.

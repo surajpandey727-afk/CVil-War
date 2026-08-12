@@ -66,9 +66,19 @@ class BrowserAgent:
         try:
             from browser_use import Agent, Browser, BrowserConfig
         except ImportError as exc:
+            # This path targets the PRE-0.2 browser-use API. `BrowserConfig` was removed in
+            # modern browser-use (the version pyproject resolves to), so this import always
+            # fails and every BrowserAgent-based platform search dies here. The old message
+            # claimed the package was missing, which sent debugging in entirely the wrong
+            # direction — it is installed; the API it expects no longer exists.
+            #
+            # The maintained browser path is core/automation/runtime/ (BrowserSession /
+            # BrowserProfile / browser_use.ChatOpenAI). Porting the platform plugins onto it
+            # is Phase 2 job-discovery work.
             raise BrowserError(
-                "browser-use package not installed. "
-                "Install with: pip install browser-use"
+                "BrowserAgent targets the pre-0.2 browser-use API, which is no longer "
+                "available in the installed version, so platform search cannot run. "
+                f"Import error: {exc}"
             ) from exc
 
         browser_config = BrowserConfig(

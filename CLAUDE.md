@@ -8,9 +8,29 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # Dev mode wi
 
 ## Architecture
 - Backend: FastAPI (Python 3.11) at `backend/app/`
-- Frontend: React + MUI + TypeScript at `frontend/src/`
-- Queue: Redis for async job processing
-- Database: SQLite (default), PostgreSQL optional
+- Frontend: React + TypeScript at `frontend/src/` — **no MUI**; the UI is a hand-rolled
+  design system (`src/styles/theme.css`, `src/components/ui/`). Do not introduce a component
+  library; extend the existing one.
+- Queue: Redis via **arq** (`arq app.workers.tasks.WorkerSettings`)
+- Database: SQLite (default), PostgreSQL optional. Schema is owned by Alembic — the app does
+  **not** create tables at startup.
+
+## Environment traps (verified the hard way — see docs/PHASE0_AUDIT.md)
+- **Never put the checkout in a OneDrive-synced or deep path.** `python -m venv` fails there,
+  and storage keys push paths past Windows' 260-char `MAX_PATH`, breaking résumé upload.
+- **`python -m spacy download en_core_web_sm` is required** and is not installed by pip. Without
+  it, ATS analysers degrade to regex and the harness PII gate fails closed.
+- **WeasyPrint cannot import on Windows** (needs native GTK/Pango). PDF rendering is Docker-only
+  there; tests that touch it skip explicitly.
+- **`litellm` must stay pinned `>=1.96,<2`.** An open lower-bound range makes pip backtrack to a
+  Rust-requiring sdist and the whole install fails on a clean machine.
+- **Job discovery is currently broken** — the LinkedIn/Indeed/Glassdoor plugins go through
+  `core/automation/agent.py`, which targets the pre-0.2 browser-use API. The maintained browser
+  code is `core/automation/runtime/` (apply only).
+
+## Scores are 0–1 in the API
+All ATS/match scores are stored and returned on a **0–1 scale**. Multiply by 100 to display
+(`lib/status.ts::atsPercent`). Getting this wrong was BUG-003.
 
 ## Directory Layout
 - `backend/app/config/` — Settings and constants
@@ -39,10 +59,16 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # Dev mode wi
 
 ## Common Commands
 ```bash
-# Backend
-cd backend && uvicorn app.main:app --reload
+# Backend (first run)
+cd backend
+pip install -e ".[dev]"
+python -m spacy download en_core_web_sm   # required; pip does not fetch it
+alembic upgrade head                      # required; app does not create tables
+uvicorn app.main:app --reload
+
+# Backend checks
 pytest tests/ -v
-ruff check app/
+ruff check app/          # this is the gate; `ruff check tests/` has pre-existing nits
 ruff format app/
 
 # Frontend

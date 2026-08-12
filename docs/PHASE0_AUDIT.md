@@ -32,6 +32,9 @@ But the parts that make it a *career* system are largely absent or non-functiona
 - **Prompt injection is wide open** — untrusted job text is interpolated raw into prompts
   at 8 sites.
 - **The PII gate fails open**, silently, whenever an optional spaCy model is absent.
+- **Job discovery does not work at all.** All three platform scrapers die on an incompatible
+  browser-use import and report "browser-use package not installed" — while it *is* installed.
+  The failure is swallowed, so the API returns "0 jobs" instead of surfacing the breakage.
 - **There is no semantic matching at all** — no FAISS, no pgvector, no embeddings, despite
   all three being documented and two being declared as dependencies.
 - **`docker compose up` (the README quick start) never runs migrations**, so a fresh stack
@@ -284,8 +287,49 @@ Additional parsing defects found by inspection:
 | B9 | Tailored resume stores base text | Tailoring is unmeasurable |
 | B10 | `docker-compose.yml` (the README's quick-start path) has **no `alembic upgrade head` step** | Fresh `docker compose up --build` starts with **no tables**; `/health` returns 503 and the healthcheck never passes. Only `docker-compose.prod.yml` + `deploy/bootstrap.sh` run migrations. |
 | B11 | **No Postgres service in either compose file** | The stack is SQLite-only even in "production". Blocks pgvector, and contradicts "PostgreSQL optional". |
-| B12 | `Dockerfile.backend` runs `pip install ".[dev]"` | Ships pytest/moto/ruff into the production image, and is the same command that fails on a clean resolve (§2.2) — **unverified on Linux, as Docker is not installed here**. |
+| B12 | `Dockerfile.backend` runs `pip install ".[dev]"` | Ships pytest/moto/ruff into the dev/quick-start image. **Correction:** the *production* images (`Dockerfile.api`, `Dockerfile.worker`) already install `".[postgres,aws]"` and correctly exclude dev tooling — an earlier draft of this audit said otherwise. This is dev-image bloat only, not a production leak. |
 | B13 | WeasyPrint unimportable on Windows (§2.3) | Local PDF generation impossible outside Docker |
+| **B14** | **Job discovery is completely non-functional** (§4.3.1) | Every platform search dies on an incompatible browser-use import and the error is swallowed |
+| B15 | **No Dockerfile copies `backend/alembic.ini`** | The documented production release step (`… run --rm api alembic upgrade head`) cannot find the migration scripts and fails |
+
+### 4.3.1 B14 — job discovery does not work at all
+
+`core/automation/agent.py` imports the **pre-0.2** browser-use API:
+
+```python
+from browser_use import Agent, Browser, BrowserConfig
+```
+
+`BrowserConfig` was removed in modern browser-use. `pyproject.toml` declares
+`browser-use>=0.1.40` with no upper bound, so pip installs **0.11.13**, where that import
+raises `ImportError`. The handler then reports:
+
+> browser-use package not installed. Install with: pip install browser-use
+
+which is actively misleading — the package *is* installed; the API it targets is gone.
+
+Verified by running all three registered platforms:
+
+```
+legacy import: ImportError -> cannot import name 'BrowserConfig' from 'browser_use'
+linkedin    -> SearchError: browser-use package not installed. Install with: pip install browser-use
+indeed      -> SearchError: browser-use package not installed. Install with: pip install browser-use
+glassdoor   -> SearchError: browser-use package not installed. Install with: pip install browser-use
+```
+
+`services/job_search.py` catches per-platform failures and continues so healthy platforms
+still return results — but when *every* platform fails, the endpoint returns `total: 0` and
+**looks like "no jobs matched" rather than "the whole subsystem is broken."** This is why
+`tests/e2e/test_full_pipeline.py` asserts `body["total"] == 0` and calls it a "placeholder".
+
+`agent.py` is therefore **not** dead code, as an earlier draft of this audit assumed — it is
+on the live discovery path for all three platforms, and that path is broken. The maintained
+browser code (`core/automation/runtime/`) uses the current API but only serves *applying*,
+not searching.
+
+This does not change the plan: §5.3 already recommends official job APIs as the primary
+discovery route. Porting the scrapers to the new browser-use API would be work spent on the
+approach being moved away from.
 
 ### 4.4 DANGEROUS
 
@@ -312,8 +356,8 @@ workflow · Supabase · pgvector · embeddings of any kind.
 
 | Item | Status |
 |---|---|
-| `core/automation/agent.py` | Legacy. Uses the **old** browser-use API (`Browser`, `BrowserConfig`) + `langchain_openai`. Superseded by `runtime/factory.py`, which uses the **new** API (`BrowserSession`, `BrowserProfile`, `browser_use.ChatOpenAI`). Sole reason the `langchain-*` deps exist. |
-| `sentence-transformers`, `faiss-cpu` | Declared, documented, **never imported**. ~3 GB of install for nothing. |
+| `core/automation/agent.py` | **Not dead — broken.** Uses the old browser-use API (`Browser`, `BrowserConfig`) + `langchain_openai`, and is imported by all three platform plugins, so it is on the live search path (§4.3.1). `runtime/factory.py` uses the current API (`BrowserSession`, `BrowserProfile`, `browser_use.ChatOpenAI`) but only covers *applying*. Keep both until discovery is re-platformed; the `langchain-*` deps exist solely for this file. |
+| `sentence-transformers`, `faiss-cpu`, `scikit-learn`, `numpy`, `fuzzywuzzy`, `python-Levenshtein`, `python-dateutil` | Declared, partly documented, **never imported** (verified by grep across `app/` and `tests/`). `sentence-transformers` pulls PyTorch; together they dominated a 3.7 GB wheel download for code that never runs. |
 | `portkey-ai` | Declared and documented as the gateway; no `portkey` import anywhere. |
 | `ApplyMode` | Defined **twice** — `config/settings.py` and `models/enums.py`. |
 | `workers/application_worker.py` | Referenced as "legacy, kept until Phase 2" in `tasks.py`'s docstring — the file no longer exists. Stale comment. |
@@ -566,6 +610,33 @@ build      → FAILS
 | `JobDrawer.test.tsx` | UI/test drift |
 
 ---
+
+## 7.5 Phase 0.5 outcome (2026-08-12)
+
+The repair pass described in §6 has been executed. Verified state:
+
+| Gate | Before | After |
+|---|---|---|
+| `pytest` | 653 passed, **6 failed** | **661 passed, 0 failed**, 2 skipped, 1 xfailed |
+| `ruff check app/` | ✅ | ✅ |
+| `npm run lint` | ✅ | ✅ |
+| `tsc --noEmit` | **2 errors** | ✅ |
+| `npm run build` | ❌ **FAILING** | ✅ **passing** |
+| `vitest` | 118 passed, **3 failed**, 1 suite unloadable | **124 passed, 0 failed**, 30/30 suites |
+
+Closed: **B1** (build), **B2** (reset-password route), **B3/B4/B5** (stale tests), **B6**
+(clean install), **B10** (compose migrations), **B15** (`alembic.ini` in images), **D6** (PII
+gate fail-open) — plus **BUG-013**, a second PII-gate defect that only became visible once
+the first was fixed and the spaCy model installed: NER tags "Easy Apply" as a `PERSON`, so in
+Docker the gate was discarding the harness's most valuable learned guidance. The two bugs had
+been concealing each other.
+
+Still open by design: **B14** (job discovery) — see §4.3.1; repairing it means porting
+scrapers to an approach §5.3 recommends moving away from. **B7/§7.2** (path length) awaits
+your decision on relocating the checkout. **B13** (WeasyPrint on Windows) is now an explicit
+skip rather than a failure.
+
+Detailed per-bug write-ups with root causes: [BUG_LOG.md](BUG_LOG.md), 2026-08-12 section.
 
 ## 8. Decisions I need from you
 

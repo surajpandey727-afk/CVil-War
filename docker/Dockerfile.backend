@@ -10,6 +10,10 @@ WORKDIR /app
 
 # Copy application code first (needed for non-editable install)
 COPY backend/pyproject.toml backend/setup.cfg* ./
+# alembic.ini is required by the compose `migrate` service (`alembic upgrade head`). Without
+# it the image has the migration scripts under app/db/migrations but no config pointing at
+# them, so the migration fails and the stack starts against an empty database.
+COPY backend/alembic.ini ./
 COPY backend/app/ ./app/
 
 # Install Python dependencies (non-editable)

@@ -1,4 +1,21 @@
 services:
+  # One-shot schema migration. The app does NOT create tables at startup — app/main.py
+  # states the schema is owned by Alembic — so without this a fresh `docker compose up`
+  # booted against an empty database, /health returned 503, and the backend healthcheck
+  # never passed. backend and worker both gate on this completing successfully.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    command: alembic upgrade head
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    networks:
+      - autoapply
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -15,6 +32,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s
@@ -40,6 +59,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - autoapply
     restart: unless-stopped
