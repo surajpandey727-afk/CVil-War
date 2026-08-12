@@ -23,7 +23,7 @@ function renderOnboarding() {
 describe('OnboardingPage', () => {
   it('starts on the welcome step', () => {
     renderOnboarding();
-    expect(screen.getByText(/welcome to autoapply/i)).toBeInTheDocument();
+    expect(screen.getByText(/welcome to cvil-war/i)).toBeInTheDocument();
   });
 
   it('advances to the résumé step on continue', async () => {

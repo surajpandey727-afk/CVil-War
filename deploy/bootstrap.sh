@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Provision a fresh Hetzner / Oracle ARM box (Ubuntu 24.04) for AutoApply.
-# Usage (as root):  REPO_URL=https://github.com/you/AutoApply.git bash bootstrap.sh
+# Provision a fresh Hetzner / Oracle ARM box (Ubuntu 24.04) for CVil-War.
+# Usage (as root):  REPO_URL=https://github.com/you/CVil-War.git bash bootstrap.sh
 set -euo pipefail
 
 REPO_URL="${REPO_URL:?set REPO_URL to your git remote}"
-APP_DIR="${APP_DIR:-/root/autoapply}"
+APP_DIR="${APP_DIR:-/root/cvil-war}"
 
 echo "==> Installing Docker + compose plugin"
 apt-get update

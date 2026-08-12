@@ -1,4 +1,4 @@
-# AutoApply AI — System Architecture v2.0
+# CVil-War — System Architecture v2.0
 
 ## Table of Contents
 1. [High-Level Architecture](#1-high-level-architecture)
@@ -82,7 +82,7 @@
 ## 2. Project Structure
 
 ```
-AutoApply-AI-Smart-Job-Application-Assistant/
+CVil-War-AI-Smart-Job-Application-Assistant/
 │
 ├── backend/                          # FastAPI backend
 │   ├── app/
@@ -263,7 +263,7 @@ AutoApply-AI-Smart-Job-Application-Assistant/
 │   └── TOOLS.md
 │
 ├── .env.example                      # Environment variable template
-├── CLAUDE.md                         # Project conventions for AI
+├── AGENTS.md                         # Project conventions for AI
 ├── ARCHITECTURE.md                   # This file
 └── README.md
 ```
@@ -806,7 +806,7 @@ volumes:
 
 ```env
 # Database
-DATABASE_URL=sqlite+aiosqlite:///data/db/autoapply.db
+DATABASE_URL=sqlite+aiosqlite:///data/db/cvilwar.db
 REDIS_URL=redis://localhost:6379/0
 
 # LLM Providers
@@ -837,13 +837,13 @@ LOG_LEVEL=INFO
 - Log levels: DEBUG, INFO, WARNING, ERROR
 
 ### 10.2 Metrics (Prometheus)
-- `autoapply_applications_total{status, platform}` — counter
-- `autoapply_ats_score{template}` — histogram
-- `autoapply_llm_latency_seconds{provider, model}` — histogram
-- `autoapply_llm_tokens_total{provider, model, direction}` — counter
-- `autoapply_llm_cost_usd{provider, model}` — counter
-- `autoapply_browser_actions_total{platform, action}` — counter
-- `autoapply_queue_depth{queue}` — gauge
+- `cvilwar_applications_total{status, platform}` — counter
+- `cvilwar_ats_score{template}` — histogram
+- `cvilwar_llm_latency_seconds{provider, model}` — histogram
+- `cvilwar_llm_tokens_total{provider, model, direction}` — counter
+- `cvilwar_llm_cost_usd{provider, model}` — counter
+- `cvilwar_browser_actions_total{platform, action}` — counter
+- `cvilwar_queue_depth{queue}` — gauge
 
 ### 10.3 LLM Tracing (Portkey built-in)
 - Per-call token usage and cost

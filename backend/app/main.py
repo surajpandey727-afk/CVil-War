@@ -14,7 +14,7 @@ from app.api.v1.router import v1_router
 from app.api.websocket.endpoint import router as ws_router
 from app.config.constants import API_V1_PREFIX, APP_TITLE, APP_VERSION
 from app.config.settings import Environment, get_settings
-from app.core.exceptions import AutoApplyError, RecordNotFoundError
+from app.core.exceptions import CVilWarError, RecordNotFoundError
 from app.db import tenant as _tenant_filter  # noqa: F401  # registers do_orm_execute
 from app.db.arq import close_arq_pool, init_arq_pool
 from app.db.redis import close_redis_pool, init_redis_pool
@@ -131,10 +131,10 @@ def create_app() -> FastAPI:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Exception handlers
-    @app.exception_handler(AutoApplyError)
-    async def autoapply_error_handler(
+    @app.exception_handler(CVilWarError)
+    async def cvilwar_error_handler(
         request: Request,
-        exc: AutoApplyError,
+        exc: CVilWarError,
     ) -> JSONResponse:
         """Convert domain exceptions to JSON error responses."""
         status_code = 500

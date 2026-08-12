@@ -103,8 +103,8 @@ class EmailSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EMAIL__")
 
     provider: str = "log"  # "log" (dev/CI) | "smtp"
-    from_address: str = "no-reply@autoapply.ai"
-    from_name: str = "AutoApply AI"
+    from_address: str = "no-reply@cvil-war.app"
+    from_name: str = "CVil-War"
     # Frontend origin used to build the reset link the user clicks.
     frontend_base_url: str = "http://localhost:5173"
     reset_token_expire_minutes: int = 30
@@ -158,7 +158,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///data/db/autoapply.db"
+    database_url: str = "sqlite+aiosqlite:///data/db/cvilwar.db"
     redis_url: str = "redis://localhost:6379/0"
 
     # Application behavior

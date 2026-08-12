@@ -1,8 +1,14 @@
 # Phase 0 — Repository Audit
 
 **Date:** 2026-08-12
-**Scope:** Full inspection of `AutoApply-AI-Agentic-Browser-Automation-for-Job-Search-main`
-before any significant code change, per the Career-OS brief §56.
+**Scope:** Full inspection of the repository before any significant code change, per the
+Career-OS brief §56.
+
+> **Naming note.** This audit was carried out while the project was still called
+> "AutoApply AI". It was renamed to **CVil-War** on 2026-08-12; product names in this
+> document have been updated, but the on-disk checkout directory is still
+> `AutoApply-AI-Agentic-Browser-Automation-for-Job-Search-main` and the development
+> virtualenv is still `~/.venvs/autoapply`. Both are noted where they matter.
 
 Every claim below is backed by something I **ran** or **read**, not by the existing
 documentation. Where the documentation and the code disagree, the code wins and the
@@ -51,7 +57,7 @@ Verdict against the brief's §53 rule (reuse / extend / repair / replace):
 | ATS scorer, document renderers, LLM client, platform registry | **Extend** |
 | Resume parsing, match scoring, job discovery, tailoring pipeline | **Repair / rebuild on top** |
 | Legacy `automation/agent.py` + langchain deps | **Replace** (superseded by `runtime/`) |
-| Documentation (README, ARCHITECTURE, CLAUDE.md, BUG_LOG) | **Rewrite** — materially inaccurate |
+| Documentation (README, ARCHITECTURE, AGENTS.md, BUG_LOG) | **Rewrite** — materially inaccurate |
 
 ---
 
@@ -76,7 +82,7 @@ Verdict against the brief's §53 rule (reuse / extend / repair / replace):
 **The project location is itself a problem.** The repo root is 170 characters deep inside
 `OneDrive - Phi Property Acquisitions Limited\…`, which (a) breaks `python -m venv`, (b)
 breaks resume upload via Windows `MAX_PATH` (§7.2), and (c) makes every file operation slow
-because OneDrive syncs it. **Recommendation: move the project to `C:\dev\autoapply`.**
+because OneDrive syncs it. **Recommendation: move the project to `C:\dev\cvil-war`.**
 
 ### 2.1 The repository is not under version control
 
@@ -361,7 +367,7 @@ workflow · Supabase · pgvector · embeddings of any kind.
 | `portkey-ai` | Declared and documented as the gateway; no `portkey` import anywhere. |
 | `ApplyMode` | Defined **twice** — `config/settings.py` and `models/enums.py`. |
 | `workers/application_worker.py` | Referenced as "legacy, kept until Phase 2" in `tasks.py`'s docstring — the file no longer exists. Stale comment. |
-| `autoapply-ai-job-search-interface/` | A stub directory (2 files) — an abandoned second frontend. |
+| `cvil-war-ai-job-search-interface/` | A stub directory (2 files) — an abandoned second frontend. |
 
 ### 4.7 DOCUMENTATION IS MATERIALLY INACCURATE
 
@@ -375,7 +381,7 @@ workflow · Supabase · pgvector · embeddings of any kind.
 | `docs/API.md`, `docs/INTEGRATION_PLAN.md`, `docs/TOOLS.md` | None exist. Only `BUG_LOG.md`. |
 | `BUG_LOG.md`: BUG-001, BUG-002 "✅ Fixed & verified" | Their tests **fail**; BUG-002's component is **absent**. |
 
-`CLAUDE.md` says "Database: SQLite (default), PostgreSQL optional" — accurate. It also says
+`AGENTS.md` says "Database: SQLite (default), PostgreSQL optional" — accurate. It also says
 "Max 300 lines per file"; `services/resume.py` is 701 and `services/job_search.py` is 466.
 
 ---
@@ -455,11 +461,11 @@ without code + DB + API + UI + tests + error handling + security + docs (§64).
    system-health warning instead of swallowing it.
 7. Fix **B10** — add a migration step to `docker-compose.yml`; **B12** — install only
    runtime extras in the production image.
-8. Move the project to `C:\dev\autoapply` (fixes **B7** and §7.2 together), or enable Win32
+8. Move the project to `C:\dev\cvil-war` (fixes **B7** and §7.2 together), or enable Win32
    long paths. Document `python -m spacy download en_core_web_sm` for local development.
-9. Delete the abandoned `autoapply-ai-job-search-interface/` stub and legacy `agent.py`
+9. Delete the abandoned `cvil-war-ai-job-search-interface/` stub and legacy `agent.py`
    (dead against browser-use 0.11.13, which is what actually installs).
-10. Rewrite README / ARCHITECTURE / CLAUDE.md / BUG_LOG to match reality.
+10. Rewrite README / ARCHITECTURE / AGENTS.md / BUG_LOG to match reality.
 
 **Gate:** `npm run build` ✅ · `npx vitest run` ✅ · `pytest` ✅ · `ruff check` ✅
 
@@ -543,7 +549,7 @@ I initially suspected `LocalFileStorage.put` was not creating parent directories
 (`local.py:33`). The actual cause:
 
 ```
-...\AutoApply-AI-...-main\backend\data\storage\users\<32-char-uid>\uploads\<32-char>.pdf
+...\CVil-War-AI-...-main\backend\data\storage\users\<32-char-uid>\uploads\<32-char>.pdf
 = 275 characters
 ```
 
@@ -555,7 +561,7 @@ repository root alone is already **170 characters** because it sits inside
 
 **This is not a defect in the application** — but it does mean **resume upload cannot work
 at the project's current location on this machine.** Fix by either enabling Win32 long paths,
-or moving the repo to a short root such as `C:\dev\autoapply`. I recommend the move: it also
+or moving the repo to a short root such as `C:\dev\cvil-war`. I recommend the move: it also
 removes OneDrive from the path, which independently broke `python -m venv` (§2, B7) and makes
 every file operation slower.
 
@@ -650,7 +656,7 @@ Detailed per-bug write-ups with root causes: [BUG_LOG.md](BUG_LOG.md), 2026-08-1
 | 6 | `git init` here? | **Yes** — proceeding, it is reversible and protects everything else. |
 | 7 | Official job APIs over scraping? | Official APIs primary, scraping for apply only. |
 | 8 | UK work authorisation / sponsorship needed? | Unset; every sponsorship question forces a human checkpoint. |
-| 9 | May I move the project to `C:\dev\autoapply`? | **Yes** unless you object — it fixes the venv break and the upload break at once, and takes it out of OneDrive sync. |
+| 9 | May I move the project to `C:\dev\cvil-war`? | **Yes** unless you object — it fixes the venv break and the upload break at once, and takes it out of OneDrive sync. |
 
 Items 1 and 2 are genuine blockers for the canonical profile, because inventing either
 would be precisely the fabrication the brief prohibits. Everything else proceeds.

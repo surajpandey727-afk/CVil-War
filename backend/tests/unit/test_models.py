@@ -134,7 +134,7 @@ class TestLLMUsageModel:
             cost_usd=0.00345,
             latency_ms=1200,
             purpose="resume_tailor",
-            trace_id="autoapply-abc123",
+            trace_id="cvil-war-abc123",
         )
         db_session.add(usage)
         await db_session.commit()

@@ -1,14 +1,14 @@
-"""Custom exception hierarchy for AutoApply AI.
+"""Custom exception hierarchy for CVil-War.
 
-All domain exceptions inherit from AutoApplyError.
+All domain exceptions inherit from CVilWarError.
 API routes catch these at the boundary and convert to HTTP responses.
 """
 
 
-class AutoApplyError(Exception):
-    """Root exception for all AutoApply domain errors."""
+class CVilWarError(Exception):
+    """Root exception for all CVil-War domain errors."""
 
-    def __init__(self, message: str = "", code: str = "AUTOAPPLY_ERROR") -> None:
+    def __init__(self, message: str = "", code: str = "CVILWAR_ERROR") -> None:
         self.message = message
         self.code = code
         super().__init__(message)
@@ -17,7 +17,7 @@ class AutoApplyError(Exception):
 # --- Database Errors ---
 
 
-class DatabaseError(AutoApplyError):
+class DatabaseError(CVilWarError):
     """Base database error."""
 
     def __init__(self, message: str = "Database error") -> None:
@@ -62,7 +62,7 @@ class RecordNotFoundError(DatabaseError):
 # --- LLM Errors ---
 
 
-class LLMError(AutoApplyError):
+class LLMError(CVilWarError):
     """Base LLM error."""
 
     def __init__(self, message: str = "LLM error") -> None:
@@ -100,7 +100,7 @@ class LLMTimeoutError(LLMError):
 # --- Browser Automation Errors ---
 
 
-class BrowserError(AutoApplyError):
+class BrowserError(CVilWarError):
     """Base browser automation error."""
 
     def __init__(self, message: str = "Browser automation error") -> None:
@@ -136,7 +136,7 @@ class FormFillError(BrowserError):
 # --- Document Errors ---
 
 
-class DocumentError(AutoApplyError):
+class DocumentError(CVilWarError):
     """Base document processing error."""
 
     def __init__(self, message: str = "Document processing error") -> None:
@@ -172,7 +172,7 @@ class TemplateError(DocumentError):
 # --- ATS Errors ---
 
 
-class ATSError(AutoApplyError):
+class ATSError(CVilWarError):
     """ATS scoring or optimization error."""
 
     def __init__(self, message: str = "ATS processing error") -> None:
@@ -182,7 +182,7 @@ class ATSError(AutoApplyError):
 # --- Job Platform Errors ---
 
 
-class JobPlatformError(AutoApplyError):
+class JobPlatformError(CVilWarError):
     """Base job platform error."""
 
     def __init__(self, platform: str = "", message: str = "") -> None:
@@ -218,21 +218,21 @@ class ApplicationSubmissionError(JobPlatformError):
 # --- Auth / Rate-limit Errors ---
 
 
-class AuthError(AutoApplyError):
+class AuthError(CVilWarError):
     """Authentication or authorization failure (maps to HTTP 401)."""
 
     def __init__(self, message: str = "Not authenticated") -> None:
         super().__init__(message, code="AUTH_ERROR")
 
 
-class RateLimitError(AutoApplyError):
+class RateLimitError(CVilWarError):
     """Too many requests (maps to HTTP 429)."""
 
     def __init__(self, message: str = "Rate limit exceeded") -> None:
         super().__init__(message, code="RATE_LIMIT")
 
 
-class AuthorizationError(AutoApplyError):
+class AuthorizationError(CVilWarError):
     """Authenticated but lacking the required privileges (maps to HTTP 403)."""
 
     def __init__(self, message: str = "Forbidden") -> None:

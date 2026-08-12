@@ -1,1 +1,1 @@
-"""AutoApply AI Backend."""
+"""CVil-War Backend."""

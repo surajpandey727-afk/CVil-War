@@ -18,7 +18,7 @@ from app.config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
 
-_RESET_SUBJECT = "Reset your AutoApply AI password"
+_RESET_SUBJECT = "Reset your CVil-War password"
 
 
 def build_reset_link(raw_token: str) -> str:
@@ -30,13 +30,13 @@ def build_reset_link(raw_token: str) -> str:
 def _reset_bodies(reset_link: str) -> tuple[str, str]:
     """Return (text, html) bodies for the reset email."""
     text = (
-        "We received a request to reset your AutoApply AI password.\n\n"
+        "We received a request to reset your CVil-War password.\n\n"
         f"Reset it here: {reset_link}\n\n"
         "This link expires shortly and can be used once. "
         "If you didn't request this, ignore this email."
     )
     html = (
-        "<p>We received a request to reset your AutoApply AI password.</p>"
+        "<p>We received a request to reset your CVil-War password.</p>"
         f'<p><a href="{reset_link}">Reset your password</a></p>'
         "<p>This link expires shortly and can be used once. "
         "If you didn't request this, you can safely ignore this email.</p>"

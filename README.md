@@ -1,4 +1,4 @@
-# AutoApply AI | Smart Job Application Assistant
+# CVil-War | AI Career Operating System
 
 <p align="center">
   <img src="https://img.shields.io/badge/backend-FastAPI-0f766e" alt="FastAPI">
@@ -7,7 +7,11 @@
   <img src="https://img.shields.io/badge/status-v2.0-f59e0b" alt="v2.0">
 </p>
 
-AutoApply AI is a full-stack platform that automates and manages the modern job application workflow: discover opportunities, tailor resumes, track applications, review analytics, and orchestrate browser-based automation from a single workspace.
+<p align="center"><strong>Created and owned by Suraj Pandey</strong></p>
+
+CVil-War is a full-stack platform that automates and manages the modern job application workflow: discover opportunities, tailor resumes, track applications, review analytics, and orchestrate browser-based automation from a single workspace.
+
+The name is the point — your CV, fighting for every role.
 
 ## What It Does
 
@@ -74,7 +78,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 Read these before running the commands — each one is a real failure that has been hit:
 
-- **Keep the checkout on a short path, outside any synced folder.** `C:\dev\autoapply` is a
+- **Keep the checkout on a short path, outside any synced folder.** `C:\dev\cvil-war` is a
   good choice. `python -m venv` fails outright inside a OneDrive-synced directory, and file
   storage keys (`users/<32-char id>/uploads/<32-char>.pdf`) push deep checkouts past Windows'
   260-character `MAX_PATH` limit, which breaks résumé upload with a bare `FileNotFoundError`.
@@ -141,7 +145,7 @@ Copy `.env.example` to `.env` and set at least one LLM provider key:
 
 ```env
 # Database
-DATABASE_URL=sqlite+aiosqlite:///data/db/autoapply.db
+DATABASE_URL=sqlite+aiosqlite:///data/db/cvilwar.db
 REDIS_URL=redis://localhost:6379/0
 
 # LLM (set at least one)

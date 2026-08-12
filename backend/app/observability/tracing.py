@@ -15,7 +15,7 @@ current_trace_id: ContextVar[str] = ContextVar("trace_id", default="")
 
 def generate_trace_id() -> str:
     """Generate a unique trace ID for an application session."""
-    return f"autoapply-{uuid.uuid4().hex[:12]}"
+    return f"cvil-war-{uuid.uuid4().hex[:12]}"
 
 
 def set_trace_id(trace_id: str | None = None) -> str:

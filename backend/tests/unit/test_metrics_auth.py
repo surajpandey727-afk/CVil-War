@@ -35,7 +35,7 @@ class TestMetricsRoute:
     async def test_metrics_open_in_test_env(self, anon_client):
         r = await anon_client.get("/metrics")
         assert r.status_code == 200
-        assert "autoapply" in r.text or "python_info" in r.text  # prometheus exposition
+        assert "cvil-war" in r.text or "python_info" in r.text  # prometheus exposition
 
 
 def _prod_cfg(secret="x" * 40, cors=None, provider="s3", url_sign="real-secret"):

@@ -22,7 +22,7 @@ export function AuthShell({ title, subtitle, error, submitLabel, submitting, onS
           <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'grid', placeItems: 'center', color: 'var(--accent)', boxShadow: 'inset 0 0 14px var(--accent-glow)' }}>
             <Icon name="cpu" size={18} sw={1.9} />
           </div>
-          <div style={{ font: '800 17px/1 var(--font)', letterSpacing: '-.02em' }}>AutoApply<span style={{ color: 'var(--accent)' }}> AI</span></div>
+          <div style={{ font: '800 17px/1 var(--font)', letterSpacing: '-.02em' }}>CVil<span style={{ color: 'var(--accent)' }}>-War</span></div>
         </div>
 
         <form onSubmit={onSubmit} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-xl)', boxShadow: 'var(--shadow-2)', padding: 26 }}>

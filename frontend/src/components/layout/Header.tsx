@@ -19,7 +19,7 @@ export default function Header() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const { data: stats } = useDashboardStats();
-  const current = CRUMB[pathname] ?? 'AutoApply AI';
+  const current = CRUMB[pathname] ?? 'CVil-War';
   const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform ?? '');
 
   return (

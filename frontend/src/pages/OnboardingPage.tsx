@@ -41,7 +41,7 @@ export default function OnboardingPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'grid', placeItems: 'center', color: 'var(--accent)' }}><Icon name="cpu" size={17} sw={1.9} /></div>
-            <div style={{ font: '800 15px/1 var(--font)', letterSpacing: '-.02em' }}>AutoApply<span style={{ color: 'var(--accent)' }}> AI</span></div>
+            <div style={{ font: '800 15px/1 var(--font)', letterSpacing: '-.02em' }}>CVil<span style={{ color: 'var(--accent)' }}>-War</span></div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {Array.from({ length: STEP_COUNT }).map((_, i) => (
@@ -54,7 +54,7 @@ export default function OnboardingPage() {
           <div style={{ flex: '1 1 auto' }}>
             {step === 0 && (
               <>
-                <h1 style={{ margin: '0 0 8px', font: '800 24px/1.2 var(--font)', letterSpacing: '-.02em' }}>Welcome to AutoApply AI</h1>
+                <h1 style={{ margin: '0 0 8px', font: '800 24px/1.2 var(--font)', letterSpacing: '-.02em' }}>Welcome to CVil-War</h1>
                 <p style={{ margin: '0 0 20px', font: '500 13.5px/1.5 var(--font)', color: 'var(--text-3)' }}>Your job-search copilot searches, tailors, and applies — with you in control. Three quick steps to set it up.</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <Feature icon="file" title="Add your résumé" sub="The agent tailors it per role and scores every match." />

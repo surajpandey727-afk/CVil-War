@@ -31,7 +31,7 @@ export const useUiStore = create<UiState>()(
       setSidebar: (v) => set({ sidebarCollapsed: v }),
       setPaletteOpen: (v) => set({ paletteOpen: v }),
     }),
-    { name: 'autoapply-ui', partialize: (s) => ({ theme: s.theme, density: s.density, sidebarCollapsed: s.sidebarCollapsed }) },
+    { name: 'cvil-war-ui', partialize: (s) => ({ theme: s.theme, density: s.density, sidebarCollapsed: s.sidebarCollapsed }) },
   ),
 );
 

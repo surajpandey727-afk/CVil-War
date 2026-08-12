@@ -6,7 +6,7 @@ from app.core.exceptions import (
     ApplicationSubmissionError,
     ATSError,
     AuthenticationError,
-    AutoApplyError,
+    CVilWarError,
     BrowserError,
     DatabaseConnectionError,
     DatabaseError,
@@ -33,15 +33,15 @@ from app.core.exceptions import (
 # ---------------------------------------------------------------------------
 
 
-class TestAutoApplyError:
+class TestCVilWarError:
     def test_default_code(self):
-        e = AutoApplyError("oops")
-        assert e.code == "AUTOAPPLY_ERROR"
+        e = CVilWarError("oops")
+        assert e.code == "CVILWAR_ERROR"
         assert e.message == "oops"
         assert str(e) == "oops"
 
     def test_custom_code(self):
-        e = AutoApplyError("msg", code="CUSTOM")
+        e = CVilWarError("msg", code="CUSTOM")
         assert e.code == "CUSTOM"
 
 
@@ -210,22 +210,22 @@ class TestATSAndPlatformErrors:
 
 
 class TestInheritance:
-    def test_database_errors_are_autoapply_errors(self):
-        assert issubclass(DatabaseError, AutoApplyError)
+    def test_database_errors_are_cvilwar_errors(self):
+        assert issubclass(DatabaseError, CVilWarError)
         assert issubclass(RecordNotFoundError, DatabaseError)
 
-    def test_llm_errors_are_autoapply_errors(self):
-        assert issubclass(LLMError, AutoApplyError)
+    def test_llm_errors_are_cvilwar_errors(self):
+        assert issubclass(LLMError, CVilWarError)
         assert issubclass(LLMProviderError, LLMError)
 
-    def test_browser_errors_are_autoapply_errors(self):
-        assert issubclass(BrowserError, AutoApplyError)
+    def test_browser_errors_are_cvilwar_errors(self):
+        assert issubclass(BrowserError, CVilWarError)
         assert issubclass(NavigationError, BrowserError)
 
-    def test_document_errors_are_autoapply_errors(self):
-        assert issubclass(DocumentError, AutoApplyError)
+    def test_document_errors_are_cvilwar_errors(self):
+        assert issubclass(DocumentError, CVilWarError)
         assert issubclass(ParseError, DocumentError)
 
-    def test_platform_errors_are_autoapply_errors(self):
-        assert issubclass(JobPlatformError, AutoApplyError)
+    def test_platform_errors_are_cvilwar_errors(self):
+        assert issubclass(JobPlatformError, CVilWarError)
         assert issubclass(AuthenticationError, JobPlatformError)

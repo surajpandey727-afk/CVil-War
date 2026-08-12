@@ -13,7 +13,7 @@ from app.observability.tracing import (
 class TestTraceIdManagement:
     def test_generate_trace_id_format(self):
         tid = generate_trace_id()
-        assert tid.startswith("autoapply-")
+        assert tid.startswith("cvil-war-")
         assert len(tid) > 20
 
     def test_set_and_get_trace_id(self):
@@ -23,7 +23,7 @@ class TestTraceIdManagement:
 
     def test_set_trace_id_auto_generates(self):
         tid = set_trace_id()
-        assert tid.startswith("autoapply-")
+        assert tid.startswith("cvil-war-")
         assert get_trace_id() == tid
 
 

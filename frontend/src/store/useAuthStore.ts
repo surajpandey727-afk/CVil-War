@@ -10,7 +10,7 @@ export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
  * visitor (for whom the probe just 401s and logs console noise — BUG-005). It gates the probe only;
  * it is never trusted as proof of auth.
  */
-export const SESSION_HINT_KEY = 'aa_session_hint';
+export const SESSION_HINT_KEY = 'cw_session_hint';
 
 function writeSessionHint(present: boolean): void {
   try {

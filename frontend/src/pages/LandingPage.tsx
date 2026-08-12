@@ -26,7 +26,7 @@ export default function LandingPage() {
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 1120, margin: '0 auto', padding: '20px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'grid', placeItems: 'center', color: 'var(--accent)' }}><Icon name="cpu" size={18} sw={1.9} /></div>
-          <div style={{ font: '800 16px/1 var(--font)', letterSpacing: '-.02em' }}>AutoApply<span style={{ color: 'var(--accent)' }}> AI</span></div>
+          <div style={{ font: '800 16px/1 var(--font)', letterSpacing: '-.02em' }}>CVil<span style={{ color: 'var(--accent)' }}>-War</span></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Link to="/login" style={{ font: '700 13px/1 var(--font)', color: 'var(--text-2)', textDecoration: 'none' }}>Sign in</Link>
@@ -43,7 +43,7 @@ export default function LandingPage() {
           Your job search,<br /><span style={{ color: 'var(--accent)' }}>on autopilot.</span>
         </h1>
         <p style={{ margin: '20px auto 0', maxWidth: 560, font: '500 16px/1.5 var(--font)', color: 'var(--text-3)' }}>
-          AutoApply AI searches across platforms, tailors your résumé to each role, and submits applications — with you approving every step, or none at all.
+          CVil-War searches across platforms, tailors your résumé to each role, and submits applications — with you approving every step, or none at all.
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 30, flexWrap: 'wrap' }}>
           <Link to="/register" style={linkBtn(true)}><Icon name="search" size={16} sw={2} /> Get started free</Link>
@@ -65,7 +65,10 @@ export default function LandingPage() {
       </section>
 
       <footer style={{ borderTop: '1px solid var(--border)', padding: '22px 24px', textAlign: 'center', font: '500 12px/1.4 var(--font)', color: 'var(--text-4)' }}>
-        AutoApply AI · Bring your own key · You stay in control.
+        <div>CVil-War · Bring your own key · You stay in control.</div>
+        <div style={{ marginTop: 6 }}>
+          Created by <span style={{ color: 'var(--text-2)', fontWeight: 700 }}>Suraj Pandey</span>
+        </div>
       </footer>
     </div>
   );

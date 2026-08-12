@@ -1,8 +1,10 @@
 [project]
-name = "autoapply-backend"
+name = "cvil-war-backend"
 version = "2.0.0"
-description = "AutoApply AI — Smart Job Application Assistant Backend"
+description = "CVil-War — AI Career Operating System (backend)"
 requires-python = ">=3.11"
+authors = [{ name = "Suraj Pandey" }]
+maintainers = [{ name = "Suraj Pandey" }]
 dependencies = [
     # Web framework
     "fastapi>=0.111.0",

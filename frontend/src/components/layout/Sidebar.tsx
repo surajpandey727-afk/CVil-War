@@ -80,10 +80,10 @@ export default function Sidebar() {
         {expanded && (
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div style={{ font: '800 15px/1 var(--font)', letterSpacing: '-.02em' }}>
-              AutoApply<span style={{ color: 'var(--accent)' }}> AI</span>
+              CVil<span style={{ color: 'var(--accent)' }}>-War</span>
             </div>
             <div style={{ font: '600 9px/1 var(--mono)', letterSpacing: '.16em', color: 'var(--text-4)', marginTop: 4 }}>
-              JOB-SEARCH COPILOT
+              BY SURAJ PANDEY
             </div>
           </div>
         )}

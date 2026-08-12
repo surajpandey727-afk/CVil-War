@@ -1,7 +1,9 @@
 {
-  "name": "autoapply-frontend",
+  "name": "cvil-war-frontend",
   "private": true,
   "version": "2.0.0",
+  "description": "CVil-War — AI Career Operating System (frontend)",
+  "author": "Suraj Pandey",
   "type": "module",
   "scripts": {
     "dev": "vite",

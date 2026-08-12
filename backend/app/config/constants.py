@@ -5,10 +5,10 @@ API_V1_PREFIX = "/api/v1"
 
 # Application version
 APP_VERSION = "2.0.0"
-APP_TITLE = "AutoApply AI"
+APP_TITLE = "CVil-War"
 
 # Queue names (Redis)
-QUEUE_APPLY = "autoapply:queue:apply"
+QUEUE_APPLY = "cvilwar:queue:apply"
 
 # NOTE: status/purpose enums now live in app.models.enums (single source of truth).
 

@@ -13,7 +13,7 @@ services:
     volumes:
       - ./data:/app/data
     networks:
-      - autoapply
+      - cvil-war
     restart: "no"
 
   backend:
@@ -41,7 +41,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - autoapply
+      - cvil-war
     restart: unless-stopped
 
   worker:
@@ -62,7 +62,7 @@ services:
       migrate:
         condition: service_completed_successfully
     networks:
-      - autoapply
+      - cvil-war
     restart: unless-stopped
 
   frontend:
@@ -79,7 +79,7 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - autoapply
+      - cvil-war
     restart: unless-stopped
 
   redis:
@@ -94,12 +94,12 @@ services:
       timeout: 5s
       retries: 3
     networks:
-      - autoapply
+      - cvil-war
     restart: unless-stopped
 
 volumes:
   redis_data:
 
 networks:
-  autoapply:
+  cvil-war:
     driver: bridge

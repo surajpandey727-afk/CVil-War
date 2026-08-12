@@ -1,4 +1,6 @@
-# AutoApply AI — Project Conventions
+# CVil-War — Project Conventions
+
+Owner/creator: **Suraj Pandey**.
 
 ## Quick Start
 ```bash

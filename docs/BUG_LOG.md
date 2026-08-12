@@ -1,4 +1,4 @@
-# AutoApply AI — Bug Log
+# CVil-War — Bug Log
 
 > ### ⚠️ Correction — 2026-08-12
 >
@@ -82,7 +82,7 @@ Legend: ✅ Fixed & verified · 🔵 Open (deferred) · Sev: P1 critical · P2 m
 - **Fix:** `DashboardPage` greeting now renders `role`/`roles` based on `applications_applied === 1`.
   Test: `__tests__/pages/DashboardPage.test.tsx` (greeting pluralization).
 
-### BUG-007 — ✅ P4 — `/admin` header breadcrumb shows "AutoApply AI"
+### BUG-007 — ✅ P4 — `/admin` header breadcrumb shows "CVil-War"
 - **Fix:** added `'/admin': 'System health'` to the `CRUMB` map in `components/layout/Header.tsx`.
   Test: `__tests__/components/Header.test.tsx`.
 
@@ -93,7 +93,7 @@ Legend: ✅ Fixed & verified · 🔵 Open (deferred) · Sev: P1 critical · P2 m
 
 ---
 
-## Design-parity gaps vs `AutoApply AI.dc.html` (2026-07-13 audit)
+## Design-parity gaps vs `CVil-War.dc.html` (2026-07-13 audit)
 
 Audited the frontend against all 24 sections of the design. The 12 product screens + command
 palette + intervention modal + toasts + update-status dialog are all built. Newly added this pass

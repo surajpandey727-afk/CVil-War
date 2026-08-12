@@ -31,7 +31,7 @@ env/
 # Data (runtime generated)
 # NOTE: these patterns are deliberately UNANCHORED (no leading path segment) so they
 # also catch backend/data/... — the previous `data/db/*.db` form was anchored to the
-# repo root and silently let `backend/data/db/autoapply.db` (real user data) be staged.
+# repo root and silently let `backend/data/db/cvilwar.db` (real user data) be staged.
 **/data/db/*.db
 **/data/db/*.db-journal
 **/data/db/*.db-wal
