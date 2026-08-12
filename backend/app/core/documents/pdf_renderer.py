@@ -86,6 +86,24 @@ class PDFRenderer:
             css_string,
         )
 
+    @staticmethod
+    def _build_env(template_dir: Path) -> Any:
+        """Build the Jinja2 environment used to render a resume template.
+
+        autoescape on: resume fields are user text; without it, values containing <, >, & are
+        parsed as HTML by WeasyPrint and silently dropped. All resume templates interpolate
+        plain text (no ``|safe``), so escaping is correct.
+
+        Kept separate from :meth:`_render_sync` so the escaping guarantee can be asserted without
+        importing WeasyPrint, whose native GTK/Pango libraries are unavailable on Windows.
+        """
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+        return Environment(
+            loader=FileSystemLoader(str(template_dir)),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
+
     def _render_sync(
         self,
         template_name: str,
@@ -93,7 +111,6 @@ class PDFRenderer:
         output_path: Path,
     ) -> Path:
         """Synchronous rendering pipeline: Jinja2 -> HTML -> WeasyPrint -> PDF."""
-        from jinja2 import Environment, FileSystemLoader, select_autoescape
         from weasyprint import CSS, HTML  # type: ignore[import-untyped]
 
         template_dir = self._templates_dir / "resume" / template_name
@@ -110,13 +127,7 @@ class PDFRenderer:
                 f"template.html not found in {template_dir}",
             )
 
-        # autoescape on: resume fields are user text; without it, values containing <, >, & are
-        # parsed as HTML by WeasyPrint and silently dropped. All resume templates interpolate
-        # plain text (no |safe), so escaping is correct.
-        env = Environment(
-            loader=FileSystemLoader(str(template_dir)),
-            autoescape=select_autoescape(["html", "xml"]),
-        )
+        env = self._build_env(template_dir)
         template = env.get_template("template.html")
         html_content = template.render(**context)
 

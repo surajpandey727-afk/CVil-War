@@ -30,9 +30,21 @@ describe('JobDrawer', () => {
     expect(screen.getByText(/Add GraphQL experience/)).toBeInTheDocument();
   });
 
-  it('disables "Generate tailored résumé" when there is no base résumé', () => {
-    render(<JobDrawer job={job()} analysis={analysis} analyzing={false} baseResumeId={null} generating={false} onClose={noop} onGenerate={noop} />);
-    expect(screen.getByRole('button', { name: /generate tailored résumé/i })).toBeDisabled();
+  it('disables "Generate tailored résumé" when there is no base résumé', async () => {
+    const onGenerate = vi.fn();
+    render(<JobDrawer job={job()} analysis={analysis} analyzing={false} baseResumeId={null} generating={false} onClose={noop} onGenerate={onGenerate} />);
+    const btn = screen.getByRole('button', { name: /generate tailored résumé/i });
+
+    // The button uses aria-disabled + a click guard rather than the `disabled` attribute, so
+    // it stays focusable and its aria-describedby hint ("Upload a résumé first") is reachable
+    // by screen readers — a natively disabled button is skipped by keyboard navigation and the
+    // reason for it being unavailable never gets announced.
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAccessibleDescription(/upload a résumé first/i);
+
+    // aria-disabled is advisory, so the guard must actually block activation.
+    await userEvent.click(btn);
+    expect(onGenerate).not.toHaveBeenCalled();
   });
 
   it('fires onGenerate when a base résumé exists', async () => {

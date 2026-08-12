@@ -196,7 +196,40 @@ class TestReviewTransientRetry:
 # --- L2: resume PDF renderer escapes HTML metacharacters ----------------------------------
 
 
+def _weasyprint_importable() -> bool:
+    """WeasyPrint needs native GTK/Pango/Cairo libraries that Windows does not ship.
+
+    The Docker image installs them, so this is True in CI/production; on a Windows dev box the
+    import raises and any test that patches ``weasyprint.*`` cannot run at all.
+    """
+    try:
+        import weasyprint  # noqa: F401, PLC0415
+    except Exception:
+        return False
+    return True
+
+
 class TestResumeAutoescape:
+    def test_jinja_environment_has_autoescape_enabled(self) -> None:
+        """Autoescape is the actual security property, asserted without touching WeasyPrint.
+
+        The end-to-end render test below can only run where GTK is present. This one runs
+        everywhere, so the guarantee is never silently untested on a dev machine.
+        """
+        from app.core.documents.pdf_renderer import PDFRenderer
+
+        env = PDFRenderer._build_env(_REPO_ROOT / "templates" / "resume" / "modern")
+        rendered = env.get_template("template.html").render(
+            name="A<b>C", summary="latency <5ms & up"
+        )
+        assert "&lt;5ms" in rendered and "&amp;" in rendered
+        assert "<5ms" not in rendered
+        assert "A<b>C" not in rendered
+
+    @pytest.mark.skipif(
+        not _weasyprint_importable(),
+        reason="WeasyPrint needs native GTK/Pango libs (present in Docker, absent on Windows)",
+    )
     def test_fields_are_html_escaped(self, tmp_path) -> None:
         from app.core.documents.pdf_renderer import PDFRenderer
 
@@ -329,6 +362,41 @@ class TestPiiNameGate:
         from app.core.harness.skills import pii_clean
 
         assert pii_clean("Easy Apply lives at .jobs-apply-button; paginate via ?start=") is True
+
+    def test_job_board_ui_phrases_are_not_treated_as_names(self) -> None:
+        """spaCy tags "Easy Apply" as a PERSON — the gate must not reject it.
+
+        This only bites where the NER model is actually installed (Docker/production), so with no
+        model locally the gate passed everything and hid it. "Easy Apply lives at
+        .jobs-apply-button" is the archetypal skill the harness exists to learn; rejecting it
+        silently disables the whole self-improving loop for LinkedIn.
+        """
+        from app.core.harness.skills import pii_clean
+
+        assert pii_clean("Easy Apply lives at .jobs-apply-button") is True
+        assert pii_clean("Click Sign In, then My Jobs to resume") is True
+        # ...while a real name in the same shape is still caught.
+        assert pii_clean("Contact Sarah Bennett to resume") is False
+
+    def test_gate_fails_closed_when_the_ner_model_is_unavailable(self, monkeypatch) -> None:
+        """A missing spaCy model must reject content, not wave it through.
+
+        DomainSkills are shared across tenants and are injected into later agent prompts, so a
+        gate that silently passes everything when an optional model is absent leaks candidate
+        names between users. ``en_core_web_sm`` is only installed by the Dockerfile, so "absent"
+        is the default for a plain `pip install`-ed checkout — this must not be the quiet path.
+        """
+        import app.core.ats.nlp as nlp_mod
+        from app.core.harness import skills
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("[E050] Can't find model 'en_core_web_sm'")
+
+        monkeypatch.setattr(nlp_mod, "get_nlp", _boom)
+
+        # Content with no regex-detectable PII at all: the verdict rests solely on the name
+        # check, so this isolates the fail-closed behaviour.
+        assert skills.pii_clean("Easy Apply lives at .jobs-apply-button") is False
 
 
 # --- L8: loop detection ignores same-URL modal progress ----------------------------------

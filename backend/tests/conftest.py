@@ -24,6 +24,45 @@ TEST_DATABASE_URL = "sqlite+aiosqlite://"
 TEST_USER_ID = "testuser0000000000000000000000aa"
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_storage_root(tmp_path_factory) -> AsyncGenerator[None, None]:
+    """Point file storage at a short-lived temp root instead of the repo working tree.
+
+    ``StorageSettings.local_root`` defaults to ``./data/storage``, resolved against the CWD — so
+    without this the suite writes real objects into ``backend/data/storage/`` and leaves them
+    there. Two concrete problems it caused:
+
+    * On Windows the storage key is long (``users/<32-char uid>/uploads/<32-char>.pdf``); added to
+      a deep checkout path it exceeded the 260-character ``MAX_PATH`` limit and every upload test
+      failed with ``FileNotFoundError`` from inside the thread-pool executor — a failure that looks
+      like a storage bug but is purely a path-length artefact of where the repo happens to live.
+    * Test runs mutated a gitignored-but-real directory in the working tree.
+
+    This sets the ``STORAGE__LOCAL_ROOT`` env var rather than mutating the cached ``Settings``
+    object, because both ``get_settings`` and ``get_storage`` are ``lru_cache``d and other tests
+    clear those caches (``test_migrations`` clears settings; ``test_storage`` clears the factory).
+    An in-place mutation is lost the moment a fresh ``Settings()`` is built from the environment;
+    the env var survives every rebuild.
+    """
+    import os
+
+    from app.config.settings import get_settings
+    from app.core.storage.factory import get_storage
+
+    root = tmp_path_factory.mktemp("aa-storage")
+    previous = os.environ.get("STORAGE__LOCAL_ROOT")
+    os.environ["STORAGE__LOCAL_ROOT"] = str(root)
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+    yield
+    if previous is None:
+        os.environ.pop("STORAGE__LOCAL_ROOT", None)
+    else:
+        os.environ["STORAGE__LOCAL_ROOT"] = previous
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+
+
 @pytest.fixture
 async def async_engine():
     """Create an in-memory async SQLite engine for testing."""

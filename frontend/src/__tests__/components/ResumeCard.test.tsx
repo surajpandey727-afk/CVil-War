@@ -30,10 +30,13 @@ describe('ResumeCard', () => {
     await userEvent.click(screen.getByRole('button', { name: /select résumé/i }));
     expect(onSelect).toHaveBeenCalledOnce();
 
-    await userEvent.click(screen.getByRole('button', { name: /^optimize$/i }));
+    // The icon-only action buttons carry per-résumé accessible names ("Optimize résumé
+    // <name>") rather than a bare "Optimize" — a résumé grid renders many cards, so a
+    // duplicated bare label would leave screen-reader users unable to tell them apart.
+    await userEvent.click(screen.getByRole('button', { name: /^optimize résumé/i }));
     expect(onOptimize).toHaveBeenCalledOnce();
 
-    await userEvent.click(screen.getByRole('button', { name: /^download$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^download résumé/i }));
     expect(onDownload).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledOnce(); // inner buttons don't bubble to select
   });

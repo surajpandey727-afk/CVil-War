@@ -36,20 +36,66 @@ _PII_PATTERNS = [
 ]
 
 
+# Job-board UI/product phrases that spaCy's NER mislabels as PERSON. These are two capitalised
+# words in a sentence position where a name would sit, so the model guesses "person" — LinkedIn's
+# "Easy Apply" is tagged PERSON with high confidence.
+#
+# Without this list the gate rejects exactly the guidance the harness exists to accumulate
+# ("Easy Apply lives at .jobs-apply-button"). That failure only shows up where the model is
+# actually installed — i.e. in Docker/production, not on a bare `pip install` checkout — which is
+# why it went unnoticed: the local test run had no model, so the gate passed everything instead.
+#
+# Matching is exact (case-folded) on the whole entity span, so a real name is never let through
+# by accident; only these precise phrases are exempt.
+_NON_NAME_TERMS = frozenset(
+    {
+        "easy apply", "quick apply", "apply now", "one-click apply", "simple apply",
+        "sign in", "log in", "sign up", "join now", "get started",
+        "my jobs", "saved jobs", "job alert", "job alerts", "my profile", "my items",
+        "cover letter", "resume builder", "work experience", "job title", "job details",
+        "upload resume", "add resume", "submit application", "review application",
+        "next step", "your application", "application sent", "similar jobs",
+    }
+)
+
+
+def _is_person_entity(ent: Any) -> bool:
+    """True if a spaCy entity is a genuine multi-token personal name."""
+    if ent.label_ != "PERSON":
+        return False
+    text = ent.text.strip()
+    if len(text.split()) < 2:  # single tokens are usually tech terms, not names
+        return False
+    return text.casefold() not in _NON_NAME_TERMS
+
+
 def _contains_person_name(content: str) -> bool:
-    """True if spaCy NER finds a full personal name (>=2 tokens).
+    """True if a full personal name (>=2 tokens) is present — or cannot be ruled out.
 
     DomainSkills are shared across tenants, so a distilled run summary that leaked a candidate's
-    name must not be stored. Requires >=2 tokens so single-word tech terms don't false-positive;
-    falls back to the regex gate only if the model is unavailable.
+    name must not be stored. Requires >=2 tokens so single-word tech terms don't false-positive.
+
+    **Fails closed.** Name detection needs spaCy's ``en_core_web_sm``; the regex patterns in
+    ``_PII_PATTERNS`` match emails/phones/keys/addresses but nothing name-shaped, so there is no
+    meaningful fallback. If the model is unavailable this returns ``True`` ("assume a name is
+    present"), which makes ``pii_clean`` reject the content. Previously it returned ``False``,
+    so a missing optional model silently disabled the gate and let candidate names be persisted
+    and replayed into later prompts across tenants.
+
+    Install the model with: ``python -m spacy download en_core_web_sm``.
     """
     try:
         from app.core.ats.nlp import get_nlp
 
         doc = get_nlp()(content)
-    except Exception:
-        return False
-    return any(ent.label_ == "PERSON" and len(ent.text.split()) >= 2 for ent in doc.ents)
+    except Exception as exc:
+        logger.error(
+            "pii_gate.model_unavailable_failing_closed",
+            error=str(exc),
+            hint="python -m spacy download en_core_web_sm",
+        )
+        return True
+    return any(_is_person_entity(ent) for ent in doc.ents)
 
 
 def pii_clean(content: str) -> bool:
