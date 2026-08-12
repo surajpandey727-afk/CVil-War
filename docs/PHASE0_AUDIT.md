@@ -25,13 +25,20 @@ should be **kept**.
 But the parts that make it a *career* system are largely absent or non-functional:
 
 - **The frontend does not build.** A component imported by `App.tsx` does not exist.
-- **Resume parsing produces nothing on any of the five real CVs supplied.**
+- **Resume parsing produces nothing on any of the five real CVs supplied.** Verified by
+  running the code: a generated resume would contain your name, your email, and nothing else.
 - **There is no evidence model, no claim validation, and no consistency engine** — the
   anti-fabrication rule exists only as English text inside a prompt.
 - **Prompt injection is wide open** — untrusted job text is interpolated raw into prompts
   at 8 sites.
+- **The PII gate fails open**, silently, whenever an optional spaCy model is absent.
 - **There is no semantic matching at all** — no FAISS, no pgvector, no embeddings, despite
   all three being documented and two being declared as dependencies.
+- **`docker compose up` (the README quick start) never runs migrations**, so a fresh stack
+  boots with no tables.
+
+The backend test suite is the standout asset: **653 tests pass** and `ruff check` is clean.
+Whatever is built next should be built on top of that, not instead of it.
 
 Verdict against the brief's §53 rule (reuse / extend / repair / replace):
 
@@ -58,8 +65,15 @@ Verdict against the brief's §53 rule (reuse / extend / repair / replace):
 | `python -m venv ~/.venvs/autoapply` | ✅ Succeeds outside OneDrive |
 | `pip install -e ".[dev,postgres]"` | ❌ **Fails from clean** — resolver backtracks to a `litellm` sdist requiring a Rust toolchain |
 | `pip install ... -c "litellm==1.96.2"` | ✅ Succeeds with the pin |
-| `pytest tests/` | See §7 |
+| `pytest tests/` | ⚠️ **653 passed, 6 failed, 1 skipped, 1 xfailed** (§7) |
+| `ruff check app/` | ✅ All checks passed |
+| `ruff format --check app/` | ⚠️ 32 files would be reformatted (ruff version drift) |
 | `docker compose up` | ⛔ **Not runnable** — Docker is not installed on this machine |
+
+**The project location is itself a problem.** The repo root is 170 characters deep inside
+`OneDrive - Phi Property Acquisitions Limited\…`, which (a) breaks `python -m venv`, (b)
+breaks resume upload via Windows `MAX_PATH` (§7.2), and (c) makes every file operation slow
+because OneDrive syncs it. **Recommendation: move the project to `C:\dev\autoapply`.**
 
 ### 2.1 The repository is not under version control
 
@@ -79,7 +93,19 @@ Rust/Cargo. On a machine without Rust it downloads a toolchain and then dies.
 
 The `langchain-*` pins exist **only** for the legacy `automation/agent.py` path (§5.3).
 
-### 2.3 Two heavyweight dependencies are declared but never imported
+### 2.3 WeasyPrint cannot load on Windows
+
+`import weasyprint` fails on this machine:
+
+> WeasyPrint could not import some external libraries.
+
+WeasyPrint needs native GTK/Pango/Cairo libraries, which Windows does not ship. **PDF
+rendering therefore cannot work in local Windows development at all** — only inside the
+Docker image (which installs them) — yet the README presents local `uvicorn` development as
+a first-class path with no mention of this. Either GTK must be documented as a prerequisite,
+or the PDF renderer needs a pure-Python fallback for local work.
+
+### 2.4 Two heavyweight dependencies are declared but never imported
 
 `sentence-transformers` and `faiss-cpu` appear in `pyproject.toml` and are described at
 length in `ARCHITECTURE.md`, but **`grep` finds zero imports of either anywhere in `app/`**.
@@ -137,9 +163,59 @@ lines**. They are one document wearing two hats, not two positioned CVs.
 | `EXTRA-CURRICULAR EXPERIENCE` | ❌ |
 | `CERTIFICATIONS & INTERESTS` | ❌ |
 
-**Zero sections match on any of the five CVs.** Downstream, `skills`, `experience`,
-`education` and `certifications` all come back empty, so a "tailored" resume renders
-essentially blank. This is verified empirically in §7.3.
+**Zero sections match on any of the five CVs.**
+
+### 3.2.1 Verified by running the real code
+
+I ran the repository's actual `DocumentParser` and `_build_resume_data_from_text` against
+all five CVs. This is not inference — these are the numbers the code produced:
+
+**Stage A — `DocumentParser.parse()` (the upload path):**
+
+| CV | chars | sections | skills | email | phone | linkedin |
+|---|---:|---:|---:|:--:|:--:|:--:|
+| AIPM.docx | 5443 | **0** | 102 | ✅ | ❌ | ❌ |
+| AIPM_Updated.docx | 5415 | **0** | 115 | ✅ | ❌ | ❌ |
+| MLOps.docx | 5423 | **0** | 115 | ✅ | ❌ | ❌ |
+| ML.docx | 5434 | **0** | 105 | ✅ | ❌ | ❌ |
+| ML_Engineering_Manager.docx | 5476 | 1 | 106 | ✅ | ❌ | ❌ |
+
+**Stage C — what the resume template actually receives:**
+
+| CV | name | summary | skills | experience | education | certs |
+|---|:--:|---:|---:|---:|---:|---:|
+| AIPM.docx | ✅ | 0 | **0** | **0** | **0** | **0** |
+| AIPM_Updated.docx | ✅ | 0 | **0** | **0** | **0** | **0** |
+| MLOps.docx | ✅ | 0 | **0** | **0** | **0** | **0** |
+| ML.docx | ✅ | 0 | **0** | **0** | **0** | **0** |
+| ML_Engineering_Manager.docx | ✅ | 4799 | **0** | **0** | **0** | **0** |
+
+**Conclusion: generating a tailored resume from any of your five CVs today produces a
+document containing your name, your email address, and nothing else.**
+
+Three compounding defects produce this:
+
+1. **Section detection fails** (0 sections on 4 of 5 CVs). The fifth matches only because it
+   has a literal `Summary` heading — and then dumps 4,799 characters into that one field as
+   an undifferentiated blob.
+2. **The 102–115 skills the parser *does* find are discarded.** `DocumentParser` extracts
+   them correctly via `SKILL_VARIATIONS` regex, but `_build_resume_data_from_text` re-derives
+   skills from the (empty) `skills` section instead of using them. The good data exists and is
+   thrown away.
+3. **Phone and LinkedIn are never extracted** from any CV — US-only phone regex, and
+   hyperlinked anchor text the regex cannot see.
+
+**Truncation loss measured:**
+
+| CV | full chars | stored | **lost** |
+|---|---:|---:|---:|
+| AIPM.docx | 5443 | 5000 | **443** |
+| AIPM_Updated.docx | 5415 | 5000 | **415** |
+| MLOps.docx | 5423 | 5000 | **423** |
+| ML.docx | 5434 | 5000 | **434** |
+| ML_Engineering_Manager.docx | 5476 | 5000 | **476** |
+
+Every CV loses its tail — which is where your **certifications** section sits.
 
 Additional parsing defects found by inspection:
 
@@ -206,6 +282,10 @@ Additional parsing defects found by inspection:
 | B7 | `python -m venv` fails inside the OneDrive path | Documented setup does not work |
 | B8 | Resume text truncated to 5,000 chars | Silent data loss |
 | B9 | Tailored resume stores base text | Tailoring is unmeasurable |
+| B10 | `docker-compose.yml` (the README's quick-start path) has **no `alembic upgrade head` step** | Fresh `docker compose up --build` starts with **no tables**; `/health` returns 503 and the healthcheck never passes. Only `docker-compose.prod.yml` + `deploy/bootstrap.sh` run migrations. |
+| B11 | **No Postgres service in either compose file** | The stack is SQLite-only even in "production". Blocks pgvector, and contradicts "PostgreSQL optional". |
+| B12 | `Dockerfile.backend` runs `pip install ".[dev]"` | Ships pytest/moto/ruff into the production image, and is the same command that fails on a clean resolve (§2.2) — **unverified on Linux, as Docker is not installed here**. |
+| B13 | WeasyPrint unimportable on Windows (§2.3) | Local PDF generation impossible outside Docker |
 
 ### 4.4 DANGEROUS
 
@@ -216,6 +296,7 @@ Additional parsing defects found by inspection:
 | **D3** | **Unvalidated file upload.** `upload_resume` reads the whole file into memory with no size cap (DoS), performs no MIME or magic-byte check, and derives `content_type` purely from the user-supplied extension. Brief §52 unimplemented. |
 | **D4** | **Service-role Supabase key and DB password were pasted into chat in plaintext.** The `sb_secret_…` key bypasses RLS entirely. Both must be rotated. |
 | **D5** | Browser automation drives LinkedIn / Indeed / Glassdoor by scraping, which violates all three platforms' terms and risks your personal accounts. |
+| **D6** | **The PII gate fails open** (§7.3). `pii_clean()` returns "clean" whenever spaCy's model is missing — which is the default outside Docker. Personal names can be persisted into distilled skills and replayed into later prompts. Must fail closed. |
 
 ### 4.5 MISSING (the actual Career-OS)
 
@@ -326,9 +407,15 @@ without code + DB + API + UI + tests + error handling + security + docs (§64).
 4. Fix **B3/B4/B5** — the three failing frontend tests.
 5. Fix **B6** — pin `litellm`, drop the unused `langchain-*`, `sentence-transformers`,
    `faiss-cpu`, `portkey-ai` deps; verify a clean install works.
-6. Fix **B7** — document the venv-outside-OneDrive requirement.
-7. Delete the abandoned `autoapply-ai-job-search-interface/` stub and legacy `agent.py`.
-8. Rewrite README / ARCHITECTURE / CLAUDE.md / BUG_LOG to match reality.
+6. Fix **D6** — make `pii_clean` fail **closed**, and surface a missing spaCy model as a
+   system-health warning instead of swallowing it.
+7. Fix **B10** — add a migration step to `docker-compose.yml`; **B12** — install only
+   runtime extras in the production image.
+8. Move the project to `C:\dev\autoapply` (fixes **B7** and §7.2 together), or enable Win32
+   long paths. Document `python -m spacy download en_core_web_sm` for local development.
+9. Delete the abandoned `autoapply-ai-job-search-interface/` stub and legacy `agent.py`
+   (dead against browser-use 0.11.13, which is what actually installs).
+10. Rewrite README / ARCHITECTURE / CLAUDE.md / BUG_LOG to match reality.
 
 **Gate:** `npm run build` ✅ · `npx vitest run` ✅ · `pytest` ✅ · `ruff check` ✅
 
@@ -382,9 +469,101 @@ Interview intelligence. Probability only once data supports it.
 
 ---
 
-## 7. Backend test suite
+## 7. Test results
 
-*(populated once the dependency install completes — see §2.2 for why it is slow)*
+### 7.1 Backend
+
+```
+653 passed, 6 failed, 1 skipped, 1 xfailed  (44.82s)
+ruff check app/   → All checks passed
+ruff format --check app/ → 32 files would be reformatted (ruff version drift, cosmetic)
+```
+
+**653 passing tests is a genuinely strong safety net** and the main reason this codebase is
+worth extending rather than replacing.
+
+The 6 failures break down into **4 environmental** and **1 real defect** (one test hits both):
+
+| Test | Cause | Real defect? |
+|---|---|---|
+| `test_resumes_api::test_upload_resume_returns_201` | Windows `MAX_PATH` (§7.2) | ❌ environment |
+| `test_resume_service::test_upload_resume_creates_record` | Windows `MAX_PATH` | ❌ environment |
+| `test_resume_service::test_upload_docx_sets_correct_format` | Windows `MAX_PATH` | ❌ environment |
+| `test_resume_service::test_upload_with_no_filename` | Windows `MAX_PATH` | ❌ environment |
+| `test_mvp_remediation::TestResumeAutoescape` | WeasyPrint cannot import (§2.3) | ❌ environment |
+| `test_mvp_remediation::TestPiiNameGate::test_full_name_rejected` | **PII gate fails open** | ✅ **YES** |
+
+### 7.2 The four upload failures are a path-length problem, not a code bug
+
+I initially suspected `LocalFileStorage.put` was not creating parent directories. It does
+(`local.py:33`). The actual cause:
+
+```
+...\AutoApply-AI-...-main\backend\data\storage\users\<32-char-uid>\uploads\<32-char>.pdf
+= 275 characters
+```
+
+Windows `MAX_PATH` is **260**, and `LongPathsEnabled` is **not set** on this machine. The
+repository root alone is already **170 characters** because it sits inside
+`OneDrive - Phi Property Acquisitions Limited\Desktop\Website\Personal\AI_Jobs_Application\`.
+
+`mkdir` succeeds (shorter path); the subsequent file `open` fails.
+
+**This is not a defect in the application** — but it does mean **resume upload cannot work
+at the project's current location on this machine.** Fix by either enabling Win32 long paths,
+or moving the repo to a short root such as `C:\dev\autoapply`. I recommend the move: it also
+removes OneDrive from the path, which independently broke `python -m venv` (§2, B7) and makes
+every file operation slower.
+
+### 7.3 REAL DEFECT — the PII gate fails open
+
+`app/core/harness/skills.py`:
+
+```python
+def _contains_person_name(content: str) -> bool:
+    try:
+        doc = get_nlp()(content)
+    except Exception:
+        return False          # ← "no person name found"
+    return any(ent.label_ == "PERSON" ... )
+
+def pii_clean(content: str) -> bool:
+    ...
+    return not _contains_person_name(content)
+```
+
+`get_nlp()` loads spaCy's `en_core_web_sm`. When that model is **absent — which is the
+default, because only the Dockerfile installs it and the README never mentions it** — the
+exception path returns `False`, meaning "no person name", so `pii_clean` returns `True`
+("clean") and the content is stored.
+
+Observed: `pii_clean("Applicant John Smith should click apply")` returns `True`.
+
+**Why this matters:** `pii_clean` is the gate on `record_skill`, and distilled skills are fed
+back into later LLM prompts (`skills.py`: *"for prompt injection"*). A gate that silently
+passes everything whenever an optional model is missing means personal names scraped from
+application pages can be persisted and replayed into future prompts.
+
+A security gate must **fail closed**. The fix is one line — `return True` on the exception
+path (assume PII present when it cannot be checked) — plus surfacing the missing model as a
+system-health warning rather than swallowing it.
+
+### 7.4 Frontend
+
+```
+Test Files  4 failed | 26 passed (30)
+     Tests  3 failed | 118 passed (121)
+lint       → passed, 0 warnings
+tsc        → 2 errors
+build      → FAILS
+```
+
+| Failure | Cause |
+|---|---|
+| `publicOnly.test.tsx` (whole suite) | `PublicOnly.tsx` does not exist (**B1**) |
+| `authBootstrap.test.tsx` | Regression BUG-001 claims to have fixed |
+| `ResumeCard.test.tsx` | No "Optimize" button in the rendered card |
+| `JobDrawer.test.tsx` | UI/test drift |
 
 ---
 
@@ -400,6 +579,7 @@ Interview intelligence. Probability only once data supports it.
 | 6 | `git init` here? | **Yes** — proceeding, it is reversible and protects everything else. |
 | 7 | Official job APIs over scraping? | Official APIs primary, scraping for apply only. |
 | 8 | UK work authorisation / sponsorship needed? | Unset; every sponsorship question forces a human checkpoint. |
+| 9 | May I move the project to `C:\dev\autoapply`? | **Yes** unless you object — it fixes the venv break and the upload break at once, and takes it out of OneDrive sync. |
 
 Items 1 and 2 are genuine blockers for the canonical profile, because inventing either
 would be precisely the fabrication the brief prohibits. Everything else proceeds.
