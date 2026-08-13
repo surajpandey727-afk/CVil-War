@@ -511,6 +511,56 @@ export const handlers = [
     });
   }),
 
+  // The AI control plane. Shaped like the real gateway's /v1/models response, trimmed —
+  // tests that care about a specific state override these.
+  http.get('/api/v1/settings/ai/catalogue', () => {
+    return HttpResponse.json({
+      reachable: true,
+      error: null,
+      base_url: 'http://localhost:20128/v1',
+      provider_count: 2,
+      model_count: 3,
+      default_model: 'openai/Full-Send',
+      default_model_available: true,
+      providers: [
+        {
+          id: 'combo',
+          model_count: 2,
+          models: [
+            { id: 'Full-Send', provider: 'combo', capabilities: ['tool_calling', 'reasoning'], context_length: 128000, max_input_tokens: null, max_output_tokens: null, is_default: true },
+            { id: 'combo/fast', provider: 'combo', capabilities: [], context_length: null, max_input_tokens: null, max_output_tokens: null, is_default: false },
+          ],
+        },
+        {
+          id: 'groq',
+          model_count: 1,
+          models: [
+            { id: 'groq/llama-3.3-70b', provider: 'groq', capabilities: ['tool_calling'], context_length: 8192, max_input_tokens: null, max_output_tokens: null, is_default: false },
+          ],
+        },
+      ],
+    });
+  }),
+
+  http.get('/api/v1/settings/ai/usage', ({ request }) => {
+    const period = new URL(request.url).searchParams.get('period') ?? '7d';
+    return HttpResponse.json({
+      period,
+      recorded: true,
+      requests: 12,
+      errors: 1,
+      prompt_tokens: 820_000,
+      completion_tokens: 420_000,
+      total_tokens: 1_240_000,
+      cost_usd: 0,
+      by_provider: [{ key: 'combo', total_tokens: 1_240_000, cost_usd: 0, requests: 12 }],
+      by_model: [{ key: 'Full-Send', total_tokens: 1_240_000, cost_usd: 0, requests: 12 }],
+      by_purpose: [{ key: 'job_analysis', total_tokens: 1_240_000, cost_usd: 0, requests: 12 }],
+      top_model: 'Full-Send',
+      top_purpose: 'job_analysis',
+    });
+  }),
+
   http.get('/api/v1/settings/llm-providers', () => {
     return HttpResponse.json([
       { provider: 'openai', status: 'active', model: 'gpt-4' },

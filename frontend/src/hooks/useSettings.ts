@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as settingsService from '@/services/settingsService';
+import type { AIUsagePeriod } from '@/types/aiSettings';
 import type { AutomationSettings, SettingsUpdate } from '@/types/settings';
 
 const SETTINGS_KEY = ['settings'] as const;
@@ -47,5 +48,21 @@ export function usePolicyCatalogue() {
 export function usePolicyPreview() {
   return useMutation({
     mutationFn: (candidate: AutomationSettings) => settingsService.previewPolicy(candidate),
+  });
+}
+
+/** Providers/models the gateway offers. `refresh` re-queries instead of using the cache. */
+export function useAICatalogue(refresh = false) {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'ai-catalogue'],
+    queryFn: () => settingsService.getAICatalogue(refresh),
+  });
+}
+
+/** Recorded LLM usage for one period. */
+export function useAIUsage(period: AIUsagePeriod) {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'ai-usage', period],
+    queryFn: () => settingsService.getAIUsage(period),
   });
 }

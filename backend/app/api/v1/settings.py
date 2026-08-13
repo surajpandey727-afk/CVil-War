@@ -1,7 +1,7 @@
 """User settings API routes with per-user database persistence."""
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from app.models.application import Application
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
 from app.models.user_settings import UserSettings
+from app.schemas.ai_settings import AICatalogue, AIUsageReport
 from app.schemas.settings import (
     LLMProviderStatus,
     PolicyCatalogue,
@@ -24,6 +25,7 @@ from app.schemas.settings import (
     SettingsResponse,
     SettingsUpdate,
 )
+from app.services.ai_settings import build_catalogue, build_usage
 from app.services.policy import build_context, load_policy
 
 logger = structlog.get_logger(__name__)
@@ -189,29 +191,72 @@ async def preview_automation_policy(
 
 
 @router.get(
+    "/ai/catalogue",
+    response_model=AICatalogue,
+    summary="Providers and models the configured gateway can actually route to",
+)
+async def get_ai_catalogue(
+    refresh: bool = Query(
+        False, description="Bypass the cache and re-query the gateway now."
+    ),
+) -> AICatalogue:
+    """Discover providers, models, capabilities and context limits from the LLM gateway.
+
+    Queried live rather than declared. The list this replaced was five hard-coded providers
+    with invented model names (``gpt-4o``, ``gemini-pro``) that the configured gateway does
+    not offer, each reported as "configured" purely because an API key string was non-empty.
+    """
+    return await build_catalogue(force=refresh)
+
+
+@router.get(
+    "/ai/usage",
+    response_model=AIUsageReport,
+    summary="Recorded LLM token usage and cost",
+)
+async def get_ai_usage(
+    user: CurrentUser,
+    period: str = Query("7d", description="today | 7d | 30d | all"),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> AIUsageReport:
+    """Token and cost totals summed from the calls this account actually made.
+
+    Every figure is a SUM over ``llm_usage`` rows written at call time — nothing is estimated
+    or extrapolated. A period with no calls reports ``recorded: false`` rather than zeroes,
+    which would read as "measured, and it was nothing".
+    """
+    return await build_usage(db, period)
+
+
+@router.get(
     "/llm-providers",
     response_model=list[LLMProviderStatus],
-    summary="List LLM provider statuses",
+    summary="List LLM provider statuses (legacy; prefer /ai/catalogue)",
+    deprecated=True,
 )
 async def list_llm_providers() -> list[LLMProviderStatus]:
-    """List configured LLM providers and their real configuration status."""
-    settings = get_app_settings()
-    llm = settings.llm
+    """Provider statuses, now derived from the gateway rather than a hard-coded list.
 
-    providers_config = [
-        ("openai", llm.openai_api_key, "gpt-4o"),
-        ("groq", llm.groq_api_key, "llama-3.1-70b-versatile"),
-        ("gemini", llm.gemini_api_key, "gemini-pro"),
-        ("openrouter", llm.openrouter_api_key, llm.default_model),
-        ("github", llm.github_token, "gpt-4o"),
-    ]
-
+    Kept so existing clients keep working, but it can only ever be a lossy view of
+    ``/ai/catalogue``: this shape has one model per provider and the gateway routinely offers
+    hundreds. New callers should use the catalogue.
+    """
+    catalogue = await build_catalogue()
+    llm = get_app_settings().llm
+    if not catalogue.reachable:
+        return []
     return [
         LLMProviderStatus(
-            provider=name,
-            configured=bool(key.get_secret_value()),
-            model=model,
-            is_primary=llm.preferred_provider == name,
+            provider=provider.id,
+            # "Configured" now means the gateway lists routable models for it, not that a
+            # key string was non-empty somewhere in the environment.
+            configured=provider.model_count > 0,
+            model=next(
+                (m.id for m in provider.models if m.is_default),
+                provider.models[0].id if provider.models else "",
+            ),
+            is_primary=any(m.is_default for m in provider.models)
+            or llm.preferred_provider == provider.id,
         )
-        for name, key, model in providers_config
+        for provider in catalogue.providers
     ]

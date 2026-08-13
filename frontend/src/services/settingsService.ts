@@ -1,4 +1,5 @@
 import api from './api';
+import type { AICatalogue, AIUsagePeriod, AIUsageReport } from '@/types/aiSettings';
 import type {
   AutomationSettings,
   LLMProviderStatus,
@@ -40,5 +41,24 @@ export async function getPolicyCatalogue(): Promise<PolicyCatalogue> {
 /** Dry-run an unsaved policy against everything currently queued. Persists nothing. */
 export async function previewPolicy(candidate: AutomationSettings): Promise<PolicyPreview> {
   const { data } = await api.post<PolicyPreview>('/settings/automation-policy/preview', candidate);
+  return data;
+}
+
+/**
+ * Providers and models the configured gateway can actually route to.
+ *
+ * Discovered live. The list this replaced was five hard-coded providers with model names the
+ * gateway does not offer; the real answer for this deployment is 648 models across 16.
+ */
+export async function getAICatalogue(refresh = false): Promise<AICatalogue> {
+  const { data } = await api.get<AICatalogue>('/settings/ai/catalogue', {
+    params: refresh ? { refresh: true } : undefined,
+  });
+  return data;
+}
+
+/** Recorded token usage and cost, summed from calls this account actually made. */
+export async function getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport> {
+  const { data } = await api.get<AIUsageReport>('/settings/ai/usage', { params: { period } });
   return data;
 }

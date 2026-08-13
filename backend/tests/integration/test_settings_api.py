@@ -62,20 +62,52 @@ class TestUpdateSettings:
 class TestListLLMProviders:
     """Tests for GET /api/v1/settings/llm-providers."""
 
-    async def test_list_providers_returns_defaults(self, client):
-        response = await client.get(f"{API_PREFIX}/llm-providers")
+    async def test_providers_are_derived_from_the_gateway_not_a_fixed_list(self, client):
+        """This used to assert exactly five providers named openai/groq/gemini/openrouter/
+        github with hard-coded model names. That list was the defect: the configured gateway
+        offers none of those model ids, and "configured" only ever meant "an API key string
+        was non-empty". The endpoint now reports whatever the gateway actually routes."""
+        from unittest.mock import AsyncMock, MagicMock, patch
 
-        assert response.status_code == 200
-        body = response.json()
-        assert isinstance(body, list)
-        assert len(body) == 5
+        from app.core.llm.discovery import reset_cache
 
-        providers = {item["provider"] for item in body}
-        assert {"openai", "groq", "gemini", "openrouter", "github"} <= providers
+        reset_cache()
+        response = MagicMock()
+        response.json.return_value = {
+            "data": [{"id": "Full-Send", "owned_by": "combo"},
+                     {"id": "oc/sonnet", "owned_by": "opencode"}]
+        }
+        response.raise_for_status = MagicMock()
+        http = MagicMock()
+        http.get = AsyncMock(return_value=response)
+        http.__aenter__ = AsyncMock(return_value=http)
+        http.__aexit__ = AsyncMock(return_value=False)
 
-        for item in body:
-            assert "configured" in item
-            assert "model" in item
+        try:
+            with patch("httpx.AsyncClient", return_value=http):
+                body = (await client.get(f"{API_PREFIX}/llm-providers")).json()
+        finally:
+            reset_cache()
+
+        assert {item["provider"] for item in body} == {"combo", "opencode"}
+        assert all(item["model"] for item in body), "each names a real routable model"
+
+    async def test_an_unreachable_gateway_reports_no_providers_rather_than_five_fake_ones(
+        self, client
+    ):
+        import httpx
+        from unittest.mock import patch
+
+        from app.core.llm.discovery import reset_cache
+
+        reset_cache()
+        try:
+            with patch("httpx.AsyncClient", side_effect=httpx.ConnectError("refused")):
+                body = (await client.get(f"{API_PREFIX}/llm-providers")).json()
+        finally:
+            reset_cache()
+
+        assert body == []
 
 
 class TestAutomationPolicyCatalogue:
@@ -188,3 +220,151 @@ class TestAutomationPolicyPreview:
             f"{API_PREFIX}/automation-policy/preview", json={"min_ats_score": 5}
         )
         assert response.status_code == 422
+
+
+class TestAIUsageIsRealTelemetry:
+    """`llm_usage` has carried provider, model, tokens, cost and purpose all along — the
+    settings screen simply never asked. Every figure here is a SUM over rows the application
+    wrote when it made the call; nothing is estimated."""
+
+    @staticmethod
+    def _usage(db, **overrides):  # type: ignore[no-untyped-def]
+        from datetime import UTC, datetime, timedelta
+        from uuid import uuid4
+
+        from app.models.enums import LLMPurpose
+        from app.models.llm_usage import LLMUsage
+
+        data = {
+            "id": uuid4().hex,
+            "user_id": TEST_USER_ID,
+            "provider": "combo",
+            "model": "Full-Send",
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "cost_usd": 0.0,
+            "latency_ms": 900,
+            "purpose": LLMPurpose.JOB_ANALYSIS,
+        }
+        row = LLMUsage(**{**data, **overrides})
+        age_days = overrides.pop("_age_days", 0)
+        if age_days:
+            row.created_at = (datetime.now(UTC) - timedelta(days=age_days)).replace(tzinfo=None)
+        db.add(row)
+        return row
+
+    async def test_totals_sum_the_recorded_calls(self, client, db_session, current_user):
+        self._usage(db_session, prompt_tokens=100, completion_tokens=50, total_tokens=150)
+        self._usage(db_session, prompt_tokens=200, completion_tokens=25, total_tokens=225)
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/ai/usage?period=all")).json()
+
+        assert body["recorded"] is True
+        assert body["prompt_tokens"] == 300
+        assert body["completion_tokens"] == 75
+        assert body["total_tokens"] == 375
+        assert body["requests"] == 2
+
+    async def test_a_period_with_no_calls_says_so_rather_than_showing_zeroes(
+        self, client, current_user
+    ):
+        """A row of confident zeroes reads as "measured, and it was nothing"."""
+        body = (await client.get(f"{API_PREFIX}/ai/usage?period=today")).json()
+
+        assert body["recorded"] is False
+        assert body["total_tokens"] == 0
+
+    async def test_the_breakdown_names_the_top_model_and_purpose(
+        self, client, db_session, current_user
+    ):
+        from app.models.enums import LLMPurpose
+
+        self._usage(db_session, model="Full-Send", total_tokens=1000)
+        self._usage(db_session, model="groq/llama", total_tokens=10,
+                    purpose=LLMPurpose.COVER_LETTER)
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/ai/usage?period=all")).json()
+
+        assert body["top_model"] == "Full-Send"
+        assert body["top_purpose"] == "job_analysis"
+        assert [b["key"] for b in body["by_model"]] == ["Full-Send", "groq/llama"]
+
+    async def test_errors_are_counted_separately_from_requests(
+        self, client, db_session, current_user
+    ):
+        self._usage(db_session)
+        self._usage(db_session, error="rate limited")
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/ai/usage?period=all")).json()
+        assert body["requests"] == 2
+        assert body["errors"] == 1
+
+    async def test_an_unknown_period_falls_back_rather_than_erroring(
+        self, client, current_user
+    ):
+        body = (await client.get(f"{API_PREFIX}/ai/usage?period=nonsense")).json()
+        assert body["period"] == "7d"
+
+    async def test_usage_needs_authentication(self, anon_client):
+        assert (await anon_client.get(f"{API_PREFIX}/ai/usage")).status_code in (401, 403)
+
+
+class TestAICatalogueIsDiscovered:
+    """The list this replaced was five hard-coded providers with model names the configured
+    gateway does not offer."""
+
+    async def test_the_catalogue_reports_what_the_gateway_returns(
+        self, client, current_user
+    ):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.core.llm.discovery import reset_cache
+
+        reset_cache()
+        response = MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"id": "Full-Send", "owned_by": "combo",
+                 "capabilities": {"tool_calling": True}, "context_length": 128000},
+                {"id": "groq/llama-3.3-70b", "owned_by": "groq"},
+            ]
+        }
+        response.raise_for_status = MagicMock()
+        http = MagicMock()
+        http.get = AsyncMock(return_value=response)
+        http.__aenter__ = AsyncMock(return_value=http)
+        http.__aexit__ = AsyncMock(return_value=False)
+
+        try:
+            with patch("httpx.AsyncClient", return_value=http):
+                body = (await client.get(f"{API_PREFIX}/ai/catalogue?refresh=true")).json()
+        finally:
+            reset_cache()
+
+        assert body["reachable"] is True
+        assert body["model_count"] == 2
+        assert {p["id"] for p in body["providers"]} == {"combo", "groq"}
+        combo = next(p for p in body["providers"] if p["id"] == "combo")
+        assert combo["models"][0]["capabilities"] == ["tool_calling"]
+        assert combo["models"][0]["context_length"] == 128000
+
+    async def test_an_unreachable_gateway_reports_the_reason(self, client, current_user):
+        import httpx
+        from unittest.mock import patch
+
+        from app.core.llm.discovery import reset_cache
+
+        reset_cache()
+        try:
+            with patch("httpx.AsyncClient", side_effect=httpx.ConnectError("refused")):
+                body = (await client.get(f"{API_PREFIX}/ai/catalogue?refresh=true")).json()
+        finally:
+            reset_cache()
+
+        assert body["reachable"] is False
+        assert body["model_count"] == 0
+        assert "refused" in body["error"]

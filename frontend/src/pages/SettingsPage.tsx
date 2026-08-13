@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 
 import Icon from '@/components/ui/Icon';
-import { useSettings, useUpdateSettings, useLLMProviders } from '@/hooks/useSettings';
+import AISettingsPanel from '@/components/settings/AISettingsPanel';
+import { useSettings, useUpdateSettings } from '@/hooks/useSettings';
+import { useSources } from '@/hooks/useSources';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types/settings';
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)', padding: 18,
 };
-const PLATFORMS = ['linkedin', 'indeed', 'glassdoor', 'exa'];
 const controlStyle: React.CSSProperties = {
   height: 36, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)',
   border: '1px solid var(--border)', color: 'var(--text)', font: '500 12.5px/1 var(--font)', outline: 'none',
@@ -17,7 +18,10 @@ const controlStyle: React.CSSProperties = {
 export default function SettingsPage() {
   const notify = useAppStore((s) => s.showNotification);
   const { data, isError, refetch } = useSettings();
-  const { data: providers } = useLLMProviders();
+  // Platforms come from the source registry the rest of the product already uses, not a
+  // list maintained here. This page hard-coded four while /sources served fifty-five, so
+  // Settings and Sources disagreed about what the product supports.
+  const { data: sourceData, isLoading: sourcesLoading } = useSources();
   const update = useUpdateSettings();
   const [draft, setDraft] = useState<Settings | null>(null);
 
@@ -43,6 +47,9 @@ export default function SettingsPage() {
   if (!draft) {
     return <div style={{ ...card, height: 120, background: 'linear-gradient(90deg,var(--surface-2),var(--hover),var(--surface-2))', backgroundSize: '200% 100%', animation: 'aaShimmer 1.3s linear infinite' }} />;
   }
+
+  const liveSources = sourceData?.live_keys ?? [];
+  const totalSources = sourceData?.total ?? 0;
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft({ ...draft, [key]: value });
   const togglePlatform = (p: string) => {
@@ -87,47 +94,50 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Platforms */}
+      {/* Platforms — from the registry, so Settings and Sources cannot disagree. */}
       <section style={{ ...card, marginBottom: 14 }}>
         <SectionTitle icon="briefcase" title="Platforms" sub="Where the agent searches for roles." />
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          {PLATFORMS.map((p) => {
-            const on = draft.platforms_enabled.includes(p);
-            return (
-              <button key={p} aria-pressed={on} onClick={() => togglePlatform(p)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 13px', borderRadius: 999, cursor: 'pointer', font: '600 12px/1 var(--font)', textTransform: 'capitalize', border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-3)' }}>
-                {on && <Icon name="check" size={12} sw={2.4} />} {p}
-              </button>
-            );
-          })}
-        </div>
+        {sourcesLoading ? (
+          <p style={{ margin: '14px 0 0', font: '500 12.5px/1.4 var(--font)', color: 'var(--text-3)' }}>
+            Loading the source registry…
+          </p>
+        ) : liveSources.length === 0 ? (
+          <div style={{ marginTop: 14 }}>
+            <p style={{ margin: '0 0 10px', font: '500 12.5px/1.5 var(--font)', color: 'var(--text-3)' }}>
+              No job sources have a working adapter right now, so the agent has nowhere to
+              search. Sources shows which are blocked and why.
+            </p>
+            <a href="/sources" style={{ font: '700 12px/1 var(--font)', color: 'var(--accent)' }}>
+              Open Sources →
+            </a>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {liveSources.map((key) => {
+                const on = draft.platforms_enabled.includes(key);
+                return (
+                  <button key={key} aria-pressed={on} onClick={() => togglePlatform(key)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 13px', borderRadius: 999, cursor: 'pointer', font: '600 12px/1 var(--font)', border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-3)' }}>
+                    {on && <Icon name="check" size={12} sw={2.4} />} {key}
+                  </button>
+                );
+              })}
+            </div>
+            <p style={{ margin: '10px 0 0', font: '500 11.5px/1.4 var(--font)', color: 'var(--text-4)' }}>
+              {liveSources.length} of {totalSources} catalogued sources have a working adapter.{' '}
+              <a href="/sources" style={{ color: 'var(--accent)' }}>Sources</a> shows the rest and why they are unavailable.
+            </p>
+          </>
+        )}
       </section>
 
-      {/* AI providers */}
-      <section style={card}>
-        <SectionTitle icon="key" title="AI providers" sub="Bring your own key. The agent uses your preferred provider first." />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
-          {(providers ?? []).length === 0 ? (
-            <p style={{ margin: 0, font: '500 12.5px/1.4 var(--font)', color: 'var(--text-3)' }}>No providers configured yet.</p>
-          ) : (
-            (providers ?? []).map((p) => (
-              <div key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <span style={{ display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 8, background: p.configured ? 'var(--applied-soft)' : 'var(--surface-3)', color: p.configured ? 'var(--applied)' : 'var(--text-4)' }}><Icon name={p.configured ? 'check' : 'key'} size={15} /></span>
-                <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-                  <span style={{ display: 'block', font: '700 12.5px/1.2 var(--font)', textTransform: 'capitalize' }}>{p.provider}</span>
-                  <span style={{ display: 'block', font: '500 11px/1.2 var(--mono)', color: 'var(--text-3)', marginTop: 2 }}>{p.model}</span>
-                </span>
-                {p.is_primary && <span style={{ height: 20, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 5, background: 'var(--accent-soft)', color: 'var(--accent)', font: '700 9.5px/1 var(--mono)', letterSpacing: '.05em' }}>PRIMARY</span>}
-                <span style={{ font: '600 10.5px/1 var(--mono)', color: p.configured ? 'var(--applied)' : 'var(--text-4)' }}>{p.configured ? 'CONFIGURED' : 'NOT SET'}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+      {/* AI providers and usage — discovered from the gateway, summed from real calls. */}
+      <AISettingsPanel />
     </div>
   );
 }
 
-function SectionTitle({ icon, title, sub }: { icon: 'cpu' | 'briefcase' | 'key'; title: string; sub: string }) {
+function SectionTitle({ icon, title, sub }: { icon: 'cpu' | 'briefcase'; title: string; sub: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
       <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 9, background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon name={icon} size={16} /></span>
