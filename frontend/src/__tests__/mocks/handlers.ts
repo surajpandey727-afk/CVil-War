@@ -316,4 +316,14 @@ export const handlers = [
       { provider: 'anthropic', status: 'active', model: 'claude-3' },
     ]);
   }),
+
+  // Static assets, not API calls. The setup runs MSW with onUnhandledRequest:'error' — a
+  // deliberate guard that catches a component quietly calling an endpoint nobody mocked. The
+  // logo <img> would otherwise trip it on every page that renders the sidebar or auth shell,
+  // so it is answered here rather than by loosening the guard for real requests too.
+  http.get(/\/(logo|favicon)-\d+\.png$/, () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(0), {
+      headers: { 'Content-Type': 'image/png' },
+    }),
+  ),
 ];

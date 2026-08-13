@@ -41,8 +41,43 @@ def test_keyless_api_sources_are_live() -> None:
 
 
 def test_usable_keys_drops_everything_that_cannot_answer() -> None:
-    requested = ["remotive", "linkedin", "reed", "careers:monzo", "not-a-source"]
-    assert usable_keys(requested) == ["remotive"]
+    """Only keys with a working adapter survive.
+
+    ``careers:monzo`` moved from unusable to usable when the Greenhouse adapter was added, so
+    it now belongs on the kept side. ``careers:starling`` replaces it as the unimplemented
+    employer: probing Greenhouse, Lever, Ashby and SmartRecruiters found no public board, so
+    it is catalogued but cannot answer.
+    """
+    requested = [
+        "remotive",        # keyless aggregator, live
+        "careers:monzo",   # Greenhouse board, live
+        "linkedin",        # registered but degraded
+        "reed",            # catalogued, no adapter
+        "careers:starling",  # catalogued, no public ATS board
+        "tracjobs",        # blocked upstream (403 to automation)
+        "not-a-source",    # unknown key
+    ]
+    assert usable_keys(requested) == ["remotive", "careers:monzo"]
+
+
+def test_employer_boards_with_a_real_adapter_are_live() -> None:
+    """The catalogue derives `implemented` from the registry, so adding an adapter is enough.
+
+    Previously a hand-maintained flag meant every employer board stayed NOT_IMPLEMENTED even
+    after its adapter shipped.
+    """
+    for key in ("careers:anthropic", "careers:palantir", "careers:monzo"):
+        assert health_for(BY_KEY[key]) is SourceHealth.LIVE
+
+
+def test_blocked_sources_are_unavailable_not_merely_unimplemented() -> None:
+    """TRAC returns 403 to automation; that is a permanent block, not a missing feature.
+
+    Conflating the two would imply it is on the roadmap when it is deliberately out of scope.
+    """
+    spec = BY_KEY["tracjobs"]
+    assert health_for(spec) is SourceHealth.UNAVAILABLE
+    assert spec.blocked_reason and "403" in spec.blocked_reason
 
 
 def test_career_pages_are_all_in_the_careers_tier() -> None:

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 
+import Logo from '@/components/ui/Logo';
 import Icon, { type IconName } from '@/components/ui/Icon';
 import api from '@/services/api';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -125,7 +126,7 @@ export default function Sidebar() {
             color: 'var(--accent)', boxShadow: 'inset 0 0 14px var(--accent-glow)', flex: '0 0 auto',
           }}
         >
-          <Icon name="cpu" size={17} sw={1.9} />
+          <Logo size={29} />
         </div>
         {expanded && (
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>

@@ -59,6 +59,8 @@ class SourceHealth(StrEnum):
     LIVE = "live"
     DEGRADED = "degraded"
     AUTH_REQUIRED = "auth_required"
+    RATE_LIMITED = "rate_limited"
+    UNAVAILABLE = "unavailable"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -76,6 +78,9 @@ class SourceSpec:
     api_key_field: str | None = None
     #: Set when the adapter exists but is known not to work.
     known_broken: str | None = None
+    #: Set when there is no permitted automated route at all — the site blocks automation and
+    #: the brief forbids evading it. Distinct from "not built yet": this one will not be built.
+    blocked_reason: str | None = None
     note: str = ""
     aliases: tuple[str, ...] = field(default_factory=tuple)
 
@@ -119,7 +124,22 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         "civilservice", "Civil Service Jobs", "civilservicejobs.service.gov.uk", SourceTier.TIER3
     ),
     SourceSpec("findajob", "Find a job — GOV.UK", "gov.uk", SourceTier.TIER3),
-    SourceSpec("nhsjobs", "NHS Jobs", "jobs.nhs.uk", SourceTier.TIER3),
+    SourceSpec(
+        "nhsjobs", "NHS Jobs", "jobs.nhs.uk", SourceTier.TIER3,
+        note="No candidate search API. NHSBSA's API is for employers publishing their own "
+             "vacancies and needs eligibility approval. NHS roles are reachable via Reed/"
+             "Adzuna syndication; apply on jobs.nhs.uk.",
+    ),
+    SourceSpec(
+        "tracjobs", "TRAC (NHS recruitment)", "apps.trac.jobs", SourceTier.TIER3,
+        blocked_reason=(
+            "Returns HTTP 403 to every automated client and serves a 'Site unavailable' "
+            "page in place of robots.txt — an explicit anti-automation control. Verified "
+            "2026-08-13. Working around it would mean evading a security control, which is "
+            "out of scope. Discovery must come from a syndicating source; the application "
+            "itself is completed by hand on the TRAC portal."
+        ),
+    ),
     SourceSpec("ddat", "Digital & Data Jobs", "ddat.gov.uk", SourceTier.TIER3),
 
     SourceSpec("otta", "Otta / Welcome to the Jungle", "otta.com", SourceTier.TIER4),
@@ -188,9 +208,26 @@ def _has_api_key(field_name: str) -> bool:
     return False
 
 
+def _registered_keys() -> frozenset[str]:
+    """Keys with a real adapter, read from the registry rather than a hand-kept flag.
+
+    ``SourceSpec.implemented`` was maintained by hand and drifted the moment an adapter was
+    added — the twelve employer ATS boards were all still marked unimplemented. Asking the
+    registry makes the catalogue self-correcting.
+    """
+    try:
+        from app.core.job_discovery.sources import IMPLEMENTED_KEYS
+
+        return IMPLEMENTED_KEYS
+    except Exception:  # pragma: no cover - import cycle / partial init
+        return frozenset()
+
+
 def health_for(spec: SourceSpec) -> SourceHealth:
     """Derive a source's current health. Never raises."""
-    if not spec.implemented:
+    if spec.blocked_reason:
+        return SourceHealth.UNAVAILABLE
+    if not (spec.implemented or spec.key in _registered_keys()):
         return SourceHealth.NOT_IMPLEMENTED
     if spec.known_broken:
         return SourceHealth.DEGRADED

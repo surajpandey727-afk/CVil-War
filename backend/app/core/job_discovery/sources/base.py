@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from abc import abstractmethod
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -31,6 +32,28 @@ import structlog
 from app.core.automation.platforms.base import JobListing, JobPlatform
 
 logger = structlog.get_logger(__name__)
+
+
+class CostType(StrEnum):
+    """What running this adapter costs.
+
+    The deployment runs under a hard zero-spend constraint, so this is enforced rather than
+    documented: ``ZERO_COST_MODE`` (default on) refuses to instantiate anything that is not
+    :attr:`FREE`. An adapter that could bill must therefore opt in twice — by declaring
+    ``OPTIONAL_PAID`` and by the operator disabling zero-cost mode.
+    """
+
+    #: No charge under any usage pattern (public endpoint, no key, or a free-forever tier).
+    FREE = "free"
+    #: Works only with a credential that may meter or bill. Disabled under ZERO_COST_MODE.
+    OPTIONAL_PAID = "optional_paid"
+    #: Catalogued for honesty, but no adapter can run it (blocked, or no permitted route).
+    UNAVAILABLE = "unavailable"
+
+
+class SourceUnavailableError(RuntimeError):
+    """Raised when an adapter cannot run — wrong mode, missing credential, blocked upstream."""
+
 
 REQUEST_TIMEOUT_S = 25.0
 USER_AGENT = "CVil-War/2.0 (job search aggregator; +https://github.com/)"
@@ -112,9 +135,71 @@ class ApiJobSource(JobPlatform):
     #: Public identifier, also the ``platform`` value stored on every Job row.
     source_name: str = "api"
 
+    #: What this adapter costs to run. Enforced by ``ZERO_COST_MODE`` — see :class:`CostType`.
+    cost_type: CostType = CostType.FREE
+    #: Estimated per-run spend in the account currency. Must stay 0 for a FREE adapter.
+    estimated_cost: float = 0.0
+    #: Settings attribute holding this adapter's credential, when it needs one.
+    api_key_field: str | None = None
+
+    def __init__(self) -> None:
+        """Refuse to construct a billable adapter while zero-cost mode is on.
+
+        Enforced at construction, not at call time, so a paid source cannot be reached by any
+        route — a scheduled refresh, a retry, or a hand-built request all fail the same way.
+        The brief's requirement is that the system can *never* unexpectedly generate a bill;
+        a check on the search path alone would leave the other entry points open.
+        """
+        from app.config.settings import get_settings
+
+        if get_settings().zero_cost_mode and self.cost_type is not CostType.FREE:
+            raise SourceUnavailableError(
+                f"{self.source_name}: cost_type={self.cost_type.value} is disabled while "
+                "ZERO_COST_MODE is on. Set ZERO_COST_MODE=false to allow billable sources."
+            )
+
     @property
     def name(self) -> str:
         return self.source_name
+
+    # -- Capability + health contract --------------------------------------------------
+
+    def capabilities(self) -> dict[str, bool]:
+        """What this adapter can do. Callers branch on this rather than on the class.
+
+        Defaults describe a read-only discovery source: it can search and hand back an
+        application URL, but cannot submit on the user's behalf.
+        """
+        return {
+            "search": True,
+            "get_job": False,
+            "application_url": True,
+            "can_apply": False,
+            "needs_credential": self.api_key_field is not None,
+        }
+
+    def get_application_url(self, listing: JobListing) -> str:
+        """Where a human completes this application. Defaults to the posting itself."""
+        return listing.url
+
+    async def health_check(self) -> tuple[str, str]:
+        """Probe the upstream endpoint. Returns ``(state, detail)``; never raises.
+
+        States match ``source_registry.SourceHealth``. This is a *live* probe, distinct from
+        the registry's static derivation — the registry knows an adapter exists, this knows
+        whether it answered just now.
+        """
+        from app.config.settings import get_settings
+
+        if get_settings().zero_cost_mode and self.cost_type is not CostType.FREE:
+            return "unavailable", "disabled by ZERO_COST_MODE"
+        try:
+            listings = await self.search(query="", location="", filters={"limit": 1})
+        except SourceUnavailableError as exc:
+            return "unavailable", str(exc)
+        except Exception as exc:  # health must never propagate
+            return "degraded", str(exc)[:160]
+        return ("live", f"{len(listings)} returned") if listings else ("degraded", "no results")
 
     # -- JobPlatform surface that does not apply to a read-only API ------------------
 
@@ -184,6 +269,20 @@ class ApiJobSource(JobPlatform):
                 follow_redirects=True,
             ) as client:
                 records = await self._fetch(client, query, location, limit)
+        except httpx.HTTPStatusError as exc:
+            # 429/403 are throttling or a block, not a bug. Distinguished from a generic
+            # failure so the operator can tell "we hit the free ceiling" from "this broke",
+            # and so one throttled source never ends a multi-source run.
+            status = exc.response.status_code
+            state = "rate_limited" if status in (429, 503) else "degraded"
+            logger.warning(
+                "job_source.http_error",
+                source=self.source_name,
+                status=status,
+                state=state,
+                query=query,
+            )
+            return []
         except Exception as exc:
             logger.warning(
                 "job_source.fetch_failed",

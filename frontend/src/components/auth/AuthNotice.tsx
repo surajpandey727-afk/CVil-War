@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import Logo from '@/components/ui/Logo';
 import Icon, { type IconName } from '@/components/ui/Icon';
 
 interface AuthNoticeProps {
@@ -16,7 +17,7 @@ export function AuthNotice({ icon, title, body, footer }: AuthNoticeProps) {
       <div style={{ width: '100%', maxWidth: 400 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 22 }}>
           <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'grid', placeItems: 'center', color: 'var(--accent)', boxShadow: 'inset 0 0 14px var(--accent-glow)' }}>
-            <Icon name="cpu" size={18} sw={1.9} />
+            <Logo size={30} />
           </div>
           <div style={{ font: '800 17px/1 var(--font)', letterSpacing: '-.02em' }}>CVil<span style={{ color: 'var(--accent)' }}>-War</span></div>
         </div>

@@ -170,6 +170,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Hard spend guard. While true, any job source declaring a cost_type other than FREE
+    # refuses to construct, so no code path — search, scheduled refresh, retry — can reach a
+    # billable provider. Default ON: the safe state must be the one you get by doing nothing.
+    zero_cost_mode: bool = True
+
     # Database
     database_url: str = "sqlite+aiosqlite:///data/db/cvilwar.db"
     redis_url: str = "redis://localhost:6379/0"

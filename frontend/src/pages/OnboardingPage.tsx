@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import Logo from '@/components/ui/Logo';
 import Icon, { type IconName } from '@/components/ui/Icon';
 import { useUploadResume } from '@/hooks/useResumes';
 import { useUpdateSettings } from '@/hooks/useSettings';
@@ -40,7 +41,7 @@ export default function OnboardingPage() {
         {/* Brand + progress */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'grid', placeItems: 'center', color: 'var(--accent)' }}><Icon name="cpu" size={17} sw={1.9} /></div>
+            <Logo size={31} />
             <div style={{ font: '800 15px/1 var(--font)', letterSpacing: '-.02em' }}>CVil<span style={{ color: 'var(--accent)' }}>-War</span></div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>

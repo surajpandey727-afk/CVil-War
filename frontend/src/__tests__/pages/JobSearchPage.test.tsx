@@ -34,9 +34,17 @@ function renderJobs() {
 }
 
 describe('JobSearchPage', () => {
-  // The discovery store is persisted, so state written by one test would otherwise leak into
-  // the next through localStorage.
+  // The discovery store is persisted, so state written by one test leaks into the next.
+  //
+  // Resetting via setState alone is NOT enough and was intermittently failing roughly one run
+  // in three: zustand's persist middleware rehydrates from localStorage asynchronously, so a
+  // rehydrate scheduled before the reset could land *after* it and restore the previous
+  // test's state. The "switch a source off" test persists remotive:off, so whichever test ran
+  // next would occasionally render zero rows and fail looking for a job title.
+  //
+  // Clearing the storage first removes what rehydration would restore, making the reset final.
   beforeEach(() => {
+    localStorage.removeItem('cvil-war-discovery');
     useDiscoveryStore.setState({
       activeTitles: DEFAULT_ACTIVE_TITLES,
       activeFamilies: [],
