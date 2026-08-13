@@ -226,6 +226,16 @@ class LLMClient:
                 elif pooled_key is not None:
                     kwargs["api_key"] = pooled_key
 
+                # Route through an OpenAI-compatible gateway when configured. Applied after
+                # the key branches so a BYO-key user's own key still travels with the request,
+                # and skipped for Bedrock, which authenticates via the AWS credential chain.
+                if self._llm.api_base and not attempt_model.startswith("bedrock/"):
+                    kwargs["api_base"] = self._llm.api_base
+                    kwargs.setdefault(
+                        "api_key",
+                        self._llm.api_base_key.get_secret_value() or "local-gateway",
+                    )
+
                 response = await litellm.acompletion(**kwargs)
                 if pooled_key is not None:
                     self._keyring.mark_success(pooled_key)

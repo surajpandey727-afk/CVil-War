@@ -39,6 +39,14 @@ class LLMSettings(BaseSettings):
     # "insufficient balance" response instead of degrading to a different provider — see
     # app/core/llm/keyring.py. A single key works fine here too.
     deepseek_api_keys: SecretStr = SecretStr("")
+    # Base URL of an OpenAI-compatible gateway (OmniRoute, LiteLLM proxy, Ollama, vLLM,
+    # LM Studio...). When set, every non-Bedrock request routes here instead of straight to a
+    # provider, so model selection, fallback and billing become the gateway's job rather than
+    # ours. Pair with a ``default_model`` the gateway understands, e.g. ``openai/Full-Send``.
+    api_base: str = ""
+    # Gateways that authenticate by other means (or not at all) still expect a non-empty
+    # bearer token from OpenAI clients; this is the placeholder sent when no key is set.
+    api_base_key: SecretStr = SecretStr("local-gateway")
     preferred_provider: str = "openai"
     fallback_providers: list[str] = ["groq", "openrouter"]
     default_model: str = "gpt-4o"

@@ -14,19 +14,42 @@ const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)',
 };
 
-const PLATFORMS: { key: string; label: string; color: string }[] = [
-  { key: 'linkedin', label: 'LinkedIn', color: 'var(--approved)' },
-  { key: 'indeed', label: 'Indeed', color: 'var(--interview)' },
-  { key: 'glassdoor', label: 'Glassdoor', color: 'var(--applied)' },
-  { key: 'exa', label: 'Exa', color: 'var(--accent)' },
+/**
+ * Selectable job sources.
+ *
+ * `working: false` marks sources that are registered but cannot currently return results —
+ * LinkedIn/Indeed/Glassdoor go through a browser-automation path that targets a removed
+ * browser-use API, and Exa needs an API key. They stay listed (and are disabled + labelled)
+ * rather than being hidden, because silently dropping them is what made the old UI show a
+ * neutral "No matching roles" for what was actually a dead subsystem.
+ */
+const PLATFORMS: {
+  key: string;
+  label: string;
+  color: string;
+  working: boolean;
+  note?: string;
+}[] = [
+  { key: 'remotive', label: 'Remotive', color: 'var(--accent)', working: true },
+  { key: 'jobicy', label: 'Jobicy', color: 'var(--secondary)', working: true },
+  { key: 'arbeitnow', label: 'Arbeitnow', color: 'var(--interview)', working: true },
+  { key: 'remoteok', label: 'RemoteOK', color: 'var(--offer)', working: true },
+  { key: 'linkedin', label: 'LinkedIn', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
+  { key: 'indeed', label: 'Indeed', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
+  { key: 'glassdoor', label: 'Glassdoor', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
+  { key: 'exa', label: 'Exa', color: 'var(--text-4)', working: false, note: 'Needs API key' },
 ];
+
+const WORKING_PLATFORMS = PLATFORMS.filter((p) => p.working).map((p) => p.key);
 
 export default function JobSearchPage() {
   const navigate = useNavigate();
   const notify = useAppStore((s) => s.showNotification);
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
-  const [platforms, setPlatforms] = useState<Set<string>>(new Set(PLATFORMS.map((p) => p.key)));
+  // Only the sources that can actually return results are selected by default; including the
+  // offline ones just adds guaranteed-failing round-trips to every search.
+  const [platforms, setPlatforms] = useState<Set<string>>(new Set(WORKING_PLATFORMS));
   const { data, isLoading, isError } = useJobs(1, 30);
   const { data: resumeData } = useResumes();
   const search = useSearchJobs();
@@ -144,10 +167,17 @@ export default function JobSearchPage() {
             <button
               key={p.key}
               aria-pressed={on}
-              onClick={() => togglePlatform(p.key)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 999, cursor: 'pointer', font: '600 12px/1 var(--font)', border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-3)' }}
+              aria-disabled={!p.working}
+              title={p.note}
+              onClick={() => p.working && togglePlatform(p.key)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 999, cursor: p.working ? 'pointer' : 'not-allowed', font: '600 12px/1 var(--font)', border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-3)', opacity: p.working ? 1 : 0.45 }}
             >
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? p.color : 'var(--text-4)' }} /> {p.label}
+              {!p.working && (
+                <span style={{ font: '600 9px/1 var(--mono)', color: 'var(--text-4)', letterSpacing: '.04em' }}>
+                  OFFLINE
+                </span>
+              )}
             </button>
           );
         })}

@@ -91,13 +91,31 @@ describe('JobSearchPage', () => {
     expect(screen.queryByText(/no jobs yet/i)).not.toBeInTheDocument();
   });
 
-  it('toggles a platform chip off', async () => {
+  it('toggles a working source chip off', async () => {
     server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job()))));
     renderJobs();
     await screen.findByText('Senior Product Manager');
-    const chip = screen.getByRole('button', { name: /linkedin/i });
+    const chip = screen.getByRole('button', { name: /remotive/i });
     expect(chip).toHaveAttribute('aria-pressed', 'true');
     await userEvent.click(chip);
     expect(chip).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('shows offline sources as disabled and unselected, not hidden', async () => {
+    // LinkedIn/Indeed/Glassdoor route through a browser-automation path that targets a
+    // removed browser-use API, so selecting them only adds guaranteed-failing round-trips.
+    // They stay visible and labelled OFFLINE — hiding them is what let a dead subsystem
+    // masquerade as a neutral "no matching roles" result.
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job()))));
+    renderJobs();
+    await screen.findByText('Senior Product Manager');
+
+    const linkedin = screen.getByRole('button', { name: /linkedin/i });
+    expect(linkedin).toHaveAttribute('aria-pressed', 'false');
+    expect(linkedin).toHaveAttribute('aria-disabled', 'true');
+
+    // aria-disabled is advisory, so the click guard must actually hold.
+    await userEvent.click(linkedin);
+    expect(linkedin).toHaveAttribute('aria-pressed', 'false');
   });
 });
