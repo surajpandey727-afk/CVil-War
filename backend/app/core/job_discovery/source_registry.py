@@ -60,8 +60,41 @@ class SourceHealth(StrEnum):
     DEGRADED = "degraded"
     AUTH_REQUIRED = "auth_required"
     RATE_LIMITED = "rate_limited"
+    #: Server-side automation is blocked, but the portal is reachable by a user-authorised
+    #: browser session. This is NOT "unavailable" — it is a different rung of the ladder.
+    INTERACTIVE_AVAILABLE = "interactive_available"
     UNAVAILABLE = "unavailable"
     NOT_IMPLEMENTED = "not_implemented"
+
+
+class AccessMechanism(StrEnum):
+    """How a portal can be reached, best capability first.
+
+    A portal is resolved per-mechanism, not as a single verdict. Treating one rejected HTTP
+    request as "portal unavailable" is the specific error this exists to prevent: a site can
+    block server-side automation outright and still be perfectly usable through the ordinary
+    browser session the candidate is already entitled to use.
+    """
+
+    API = "api"                                    # official, documented
+    PUBLIC_ENDPOINT = "public_endpoint"            # keyless JSON/ATS board
+    FEED = "feed"                                  # RSS/Atom
+    PUBLIC_WEBSITE = "public_website"              # server-rendered, automation permitted
+    AUTHENTICATED_BROWSER = "authenticated_browser"  # user-authorised persistent session
+    INTERACTIVE_BROWSER = "interactive_browser"    # user drives, system assists
+    APPLICATION_URL = "application_url"            # hand off a deep link
+    STATUS_SYNC = "status_sync"                    # read application state only
+    HUMAN = "human"                                # entirely manual
+
+
+class MechanismState(StrEnum):
+    """Whether one mechanism is usable for one portal right now."""
+
+    AVAILABLE = "available"
+    BLOCKED = "blocked"            # upstream refuses automation (403/anti-bot)
+    AUTH_REQUIRED = "auth_required"
+    UNKNOWN = "unknown"            # never probed — not the same as unavailable
+    UNSUPPORTED = "unsupported"    # the portal has no such mechanism
 
 
 @dataclass(frozen=True)
@@ -78,11 +111,32 @@ class SourceSpec:
     api_key_field: str | None = None
     #: Set when the adapter exists but is known not to work.
     known_broken: str | None = None
-    #: Set when there is no permitted automated route at all — the site blocks automation and
-    #: the brief forbids evading it. Distinct from "not built yet": this one will not be built.
+    #: Why server-side automation is refused, when it is. This blocks the API/public-endpoint
+    #: rungs of the ladder — it does NOT condemn the portal, which may still be fully usable
+    #: through an authorised browser session.
     blocked_reason: str | None = None
+    #: Per-mechanism availability. Anything unlisted is UNKNOWN — never probed, which is not
+    #: the same as unavailable and must not be reported as such.
+    mechanisms: dict[AccessMechanism, MechanismState] = field(default_factory=dict)
     note: str = ""
     aliases: tuple[str, ...] = field(default_factory=tuple)
+
+    def mechanism(self, kind: AccessMechanism) -> MechanismState:
+        """State of one mechanism, defaulting to UNKNOWN rather than assuming failure."""
+        return self.mechanisms.get(kind, MechanismState.UNKNOWN)
+
+    def best_mechanism(self) -> AccessMechanism | None:
+        """Highest-capability mechanism currently available, or None.
+
+        Order is the resolution ladder: prefer an official API, fall back through public
+        endpoints and feeds, then a user-authorised browser, then an interactive workflow,
+        and finally handing over a link. Escalation happens because the rung above is
+        genuinely unavailable — never because one request was rejected.
+        """
+        for kind in AccessMechanism:
+            if self.mechanism(kind) is MechanismState.AVAILABLE:
+                return kind
+        return None
 
 
 _BROKEN_SCRAPER = "Browser scraper offline — targets a removed browser-use API (B14)"
@@ -133,12 +187,24 @@ CATALOGUE: tuple[SourceSpec, ...] = (
     SourceSpec(
         "tracjobs", "TRAC (NHS recruitment)", "apps.trac.jobs", SourceTier.TIER3,
         blocked_reason=(
-            "Returns HTTP 403 to every automated client and serves a 'Site unavailable' "
-            "page in place of robots.txt — an explicit anti-automation control. Verified "
-            "2026-08-13. Working around it would mean evading a security control, which is "
-            "out of scope. Discovery must come from a syndicating source; the application "
-            "itself is completed by hand on the TRAC portal."
+            "Server-side automation refused: HTTP 403 to non-browser clients, with a "
+            "'Site unavailable' page served in place of robots.txt (verified 2026-08-13)."
         ),
+        mechanisms={
+            # Blocked at the server rungs...
+            AccessMechanism.API: MechanismState.UNSUPPORTED,
+            AccessMechanism.PUBLIC_ENDPOINT: MechanismState.BLOCKED,
+            AccessMechanism.PUBLIC_WEBSITE: MechanismState.BLOCKED,
+            # ...but a candidate may sign in normally, so the browser rungs stand. TRAC is a
+            # candidate-facing NHS portal: an authorised session is ordinary permitted use,
+            # not an evasion. Marking the whole portal "unavailable" off the back of the 403
+            # confused one mechanism with the site.
+            AccessMechanism.AUTHENTICATED_BROWSER: MechanismState.AUTH_REQUIRED,
+            AccessMechanism.INTERACTIVE_BROWSER: MechanismState.AVAILABLE,
+            AccessMechanism.APPLICATION_URL: MechanismState.AVAILABLE,
+            AccessMechanism.STATUS_SYNC: MechanismState.UNKNOWN,
+        },
+        note="Apply through an authorised browser session; server-side discovery is refused.",
     ),
     SourceSpec("ddat", "Digital & Data Jobs", "ddat.gov.uk", SourceTier.TIER3),
 
@@ -224,12 +290,27 @@ def _registered_keys() -> frozenset[str]:
 
 
 def health_for(spec: SourceSpec) -> SourceHealth:
-    """Derive a source's current health. Never raises."""
+    """Derive a source's current health from the best mechanism still open to it.
+
+    A rejected HTTP request disqualifies *that mechanism*, not the portal. A site can refuse
+    server-side automation and remain entirely usable through the browser session the
+    candidate is already entitled to — reporting it UNAVAILABLE hides real, reachable jobs.
+    """
+    best = spec.best_mechanism()
     if spec.blocked_reason:
+        # Server rungs are refused. Fall to whatever legitimate rung remains.
+        if best in (AccessMechanism.INTERACTIVE_BROWSER, AccessMechanism.APPLICATION_URL):
+            return SourceHealth.INTERACTIVE_AVAILABLE
+        if spec.mechanism(AccessMechanism.AUTHENTICATED_BROWSER) is MechanismState.AUTH_REQUIRED:
+            return SourceHealth.AUTH_REQUIRED
         return SourceHealth.UNAVAILABLE
     if not (spec.implemented or spec.key in _registered_keys()):
         return SourceHealth.NOT_IMPLEMENTED
     if spec.known_broken:
+        # A dead scraper does not condemn the portal either: if the operator can sign in,
+        # the interactive rung is still open.
+        if best is AccessMechanism.INTERACTIVE_BROWSER:
+            return SourceHealth.INTERACTIVE_AVAILABLE
         return SourceHealth.DEGRADED
     if spec.api_key_field:
         try:

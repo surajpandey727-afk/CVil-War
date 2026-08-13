@@ -82,46 +82,118 @@ def strip_html(raw: str) -> str:
     return "\n".join(line.strip() for line in text.split("\n") if line.strip())
 
 
-def matches_query(query: str, *fields: str) -> bool:
-    """True if every term in ``query`` appears as a whole word in the joined fields.
+#: Words that carry no discriminating signal in a job title. Requiring them would reject
+#: obvious matches ("Senior Product Manager" for the query "AI Product Manager").
+_STOPWORDS = frozenset(
+    {"a", "an", "and", "the", "of", "for", "to", "in", "at", "or", "with", "senior", "junior",
+     "staff", "principal", "lead", "head", "chief", "assistant", "associate", "i", "ii", "iii"}
+)
 
-    Several of these boards expose no server-side search (Arbeitnow returns a fixed page), so
-    filtering happens here.
+#: Minimum share of meaningful query terms a title must carry.
+#:
+#: 0.6 rather than 0.5, chosen against real results:
+#:   * 3-term "AI Product Manager" needs 2 -> "Senior Product Manager" (0.67) is kept, which
+#:     0.5 also did.
+#:   * 2-term "Product Manager" needs both -> "Compliance Advisory Manager" (0.5) is now
+#:     rejected, where 0.5 let every job with "Manager" anywhere in the title through.
+_MATCH_THRESHOLD = 0.6
 
-    Two properties matter, both learned from wrong results:
 
-    * **AND, not OR** — "product manager" must not match every job containing "product".
-    * **Whole words, not substrings** — a plain ``in`` test made the query "ai" match
-      "M*ai*ntenance Technician" and "Gr*a*ph*i*c Designer" via its tags. Short, common
-      acronyms are exactly the queries this system cares about (AI, ML, BA, PM), so
-      substring matching is unusable here.
+def relevance(query: str, title: str, tags: str = "") -> float:
+    """Score 0-1 for how well a listing title answers a query.
+
+    Replaces an all-terms-must-match test that was badly wrong in practice: searching
+    "AI Product Manager" returned nothing, because almost no title contains all three of
+    "ai", "product" and "manager" — "Senior Product Manager" was rejected for lacking "ai".
+    A job search that discards the single most obvious match is worse than useless.
+
+    Scoring:
+
+    * Terms are matched as **whole words**, never substrings. A plain ``in`` test made the
+      query "ai" match "M*ai*ntenance Technician"; short acronyms (AI, ML, BA, PM) are exactly
+      what this product searches for, so substring matching is unusable.
+    * The **title** carries the signal; tags are a weaker secondary. Descriptions are excluded
+      entirely — a long description mentions almost every common word somewhere, which is how
+      "product manager" once returned an "Inside Sales Contractor".
+    * Filler words ("senior", "the") are dropped so they neither help nor hurt.
     """
-    terms = [t for t in re.split(r"\W+", query.lower()) if t]
+    terms = [t for t in re.split(r"\W+", query.lower()) if t and t not in _STOPWORDS]
     if not terms:
+        return 1.0
+    title_words = set(re.split(r"\W+", (title or "").lower()))
+    tag_words = set(re.split(r"\W+", (tags or "").lower()))
+
+    hits = 0.0
+    for term in terms:
+        if term in title_words:
+            hits += 1.0
+        elif term in tag_words:
+            hits += 0.5  # a tag is corroborating evidence, not the role name
+    return min(hits / len(terms), 1.0)
+
+
+def matches_query(query: str, *fields: str) -> bool:
+    """True if a listing is relevant enough to show. See :func:`relevance` for the scoring."""
+    if not query.strip():
         return True
-    haystack = " ".join(f or "" for f in fields).lower()
-    words = set(re.split(r"\W+", haystack))
-    return all(term in words for term in terms)
+    title = fields[0] if fields else ""
+    tags = " ".join(fields[1:]) if len(fields) > 1 else ""
+    return relevance(query, title, tags) >= _MATCH_THRESHOLD
+
+
+#: Regions that contain each other for job-search purposes. Typing "London, UK" should not
+#: discard a UK-wide or Europe-remote role — those are all commutable or workable, and
+#: excluding them is what made a London search return almost nothing.
+_REGION_ALIASES: dict[str, frozenset[str]] = {
+    "london": frozenset({"london", "uk", "united kingdom", "gb", "england", "britain",
+                         "europe", "emea", "greater london"}),
+    "uk": frozenset({"uk", "united kingdom", "gb", "england", "scotland", "wales", "london",
+                     "britain", "europe", "emea"}),
+    "united kingdom": frozenset({"uk", "united kingdom", "gb", "england", "london", "europe",
+                                 "emea"}),
+    "europe": frozenset({"europe", "emea", "uk", "united kingdom", "london", "germany",
+                         "netherlands", "france", "spain", "ireland", "poland"}),
+}
+
+#: A listing whose location says one of these is open to anyone.
+_ANYWHERE = ("worldwide", "anywhere", "global", "remote", "multiple", "various")
 
 
 def matches_location(location: str, candidate_location: str, *, remote: bool) -> bool:
     """True if a listing plausibly satisfies the requested location.
 
-    Remote roles match any location by construction — that is the point of remote. Otherwise
-    this is a containment check in both directions so "London" matches "London, UK" and
-    "Greater London" matches "London".
+    Deliberately generous, because a false negative silently hides a real job while a false
+    positive is one row the operator can ignore. Three rules:
+
+    * A **remote** role matches any request — that is what remote means.
+    * A listing with **no stated location**, or one saying "worldwide"/"anywhere", matches.
+      Several sources (Arbeitnow, some ATS boards) simply omit the field, and excluding them
+      dropped whole sources from every located search.
+    * Otherwise the request and the listing must **share a region token**, using the alias
+      table so "London, UK" matches "London", "United Kingdom" and "Europe".
     """
-    wanted = location.strip().lower()
-    if not wanted or wanted in {"remote", "anywhere", "worldwide"}:
+    wanted_raw = location.strip().lower()
+    if not wanted_raw or any(a in wanted_raw for a in _ANYWHERE):
         return True
     if remote:
         return True
-    found = (candidate_location or "").lower()
+
+    found = (candidate_location or "").strip().lower()
     if not found:
-        return False
-    if any(token in found for token in ("worldwide", "anywhere", "global")):
+        return True  # unknown, not "elsewhere" — see the docstring
+    if any(a in found for a in _ANYWHERE):
         return True
-    return wanted in found or found in wanted
+
+    # Expand "london, uk" -> {london, uk} plus every alias of each part.
+    wanted_tokens: set[str] = set()
+    for part in re.split(r"[,/|]| and ", wanted_raw):
+        part = part.strip()
+        if not part:
+            continue
+        wanted_tokens.add(part)
+        wanted_tokens |= _REGION_ALIASES.get(part, frozenset())
+
+    return any(token and token in found for token in wanted_tokens)
 
 
 class ApiJobSource(JobPlatform):

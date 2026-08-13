@@ -7,6 +7,8 @@ import pytest
 from app.core.job_discovery.source_registry import (
     ALL_SOURCES,
     BY_KEY,
+    AccessMechanism,
+    MechanismState,
     SourceHealth,
     SourceTier,
     health_for,
@@ -70,14 +72,33 @@ def test_employer_boards_with_a_real_adapter_are_live() -> None:
         assert health_for(BY_KEY[key]) is SourceHealth.LIVE
 
 
-def test_blocked_sources_are_unavailable_not_merely_unimplemented() -> None:
-    """TRAC returns 403 to automation; that is a permanent block, not a missing feature.
+def test_a_server_block_does_not_condemn_the_whole_portal() -> None:
+    """TRAC refuses server-side automation but a candidate can still sign in normally.
 
-    Conflating the two would imply it is on the roadmap when it is deliberately out of scope.
+    Reporting the portal UNAVAILABLE off the back of one 403 conflated a single mechanism
+    with the site, and hid real reachable jobs. The resolution ladder must fall to the
+    browser rung instead.
     """
     spec = BY_KEY["tracjobs"]
-    assert health_for(spec) is SourceHealth.UNAVAILABLE
     assert spec.blocked_reason and "403" in spec.blocked_reason
+    assert spec.mechanism(AccessMechanism.PUBLIC_ENDPOINT) is MechanismState.BLOCKED
+    assert spec.mechanism(AccessMechanism.INTERACTIVE_BROWSER) is MechanismState.AVAILABLE
+    assert health_for(spec) is SourceHealth.INTERACTIVE_AVAILABLE
+
+
+def test_best_mechanism_prefers_the_highest_rung_available() -> None:
+    """Escalation must be driven by genuine unavailability, not by a rejected request."""
+    spec = BY_KEY["tracjobs"]
+    # API and public endpoints are out, so the browser rung wins — not HUMAN.
+    assert spec.best_mechanism() is AccessMechanism.INTERACTIVE_BROWSER
+
+
+def test_an_unprobed_mechanism_is_unknown_not_unavailable() -> None:
+    """"Never checked" and "checked and refused" are different facts."""
+    assert BY_KEY["tracjobs"].mechanism(AccessMechanism.STATUS_SYNC) is MechanismState.UNKNOWN
+    assert BY_KEY["remotive"].mechanism(AccessMechanism.INTERACTIVE_BROWSER) is (
+        MechanismState.UNKNOWN
+    )
 
 
 def test_career_pages_are_all_in_the_careers_tier() -> None:
