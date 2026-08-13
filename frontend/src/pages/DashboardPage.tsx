@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 
+import ActionQueue from '@/components/dashboard/ActionQueue';
 import Icon, { type IconName } from '@/components/ui/Icon';
 import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useApplications, useApproveApplication } from '@/hooks/useApplications';
@@ -80,6 +81,13 @@ export default function DashboardPage() {
             New search
           </button>
         </div>
+      </div>
+
+      {/* What needs the user, above everything else.
+          The KPI strip below reports what has happened; this reports what to do about it,
+          which is the only part that is time-sensitive — so it goes first. */}
+      <div style={{ marginBottom: 18 }}>
+        <ActionQueue limit={6} />
       </div>
 
       {/* Live now — an in-flight application (agent applying right now) */}

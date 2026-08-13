@@ -326,4 +326,21 @@ export const handlers = [
       headers: { 'Content-Type': 'image/png' },
     }),
   ),
+
+  // The dashboard now renders the action queue, so every test that mounts DashboardPage
+  // hits these. Without default handlers MSW's onUnhandledRequest:'error' throws
+  // asynchronously *after* the test completes: the assertions still pass, but vitest records
+  // an unhandled error and exits non-zero — a green suite that fails CI. Individual tests
+  // still override these with server.use().
+  http.get('/api/v1/command-centre/queue', () =>
+    HttpResponse.json({ items: [], total: 0, by_priority: {} }),
+  ),
+
+  http.get('/api/v1/command-centre/summary', () =>
+    HttpResponse.json({
+      total_applications: 0, needs_attention: 0, high_priority: 0,
+      by_status: {}, by_health: {}, upcoming_interviews: 0,
+      pending_assessments: 0, top_actions: [],
+    }),
+  ),
 ];
