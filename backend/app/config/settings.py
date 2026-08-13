@@ -199,6 +199,12 @@ class Settings(BaseSettings):
 
     # Job discovery
     exa_api_key: SecretStr = SecretStr("")
+    # Adzuna and Reed both have free tiers with no card on file, so neither can bill by
+    # surprise — they are CostType.FREE adapters that simply need a key. Unset keys make the
+    # source report AUTH_REQUIRED rather than failing the run.
+    adzuna_app_id: SecretStr = SecretStr("")
+    adzuna_app_key: SecretStr = SecretStr("")
+    reed_api_key: SecretStr = SecretStr("")
 
     # Server
     host: str = "0.0.0.0"

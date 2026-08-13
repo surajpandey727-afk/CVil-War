@@ -306,18 +306,35 @@ class ApiJobSource(JobPlatform):
     def _to_listing(self, record: dict[str, Any]) -> JobListing | None:
         """Normalise one raw record, or None to skip it."""
 
+    #: True when the upstream API already applied the keyword search server-side.
+    server_side_search: bool = False
+    #: True when the upstream API already applied a geographic radius server-side.
+    server_side_location: bool = False
+
     def _post_filter(self, listing: JobListing, query: str, location: str) -> bool:
         """Relevance + location filter applied after normalisation.
 
-        The query is matched against **title and tags only, never the description**. Matching
-        the description looked reasonable and was badly wrong in practice: searching "product
-        manager" returned an "Inside Sales Contractor" and a "Merchandising Execution
-        Associate", because long job descriptions mention both "product" and "manager"
-        somewhere. Title+tags is the signal; the description is noise.
+        **Only filters what the upstream API did not.** Re-filtering a server-side result is
+        actively destructive, and both failure modes were observed on real data:
+
+        * Geography — Adzuna returns everything within N miles of London, including
+          Hertfordshire and Surrey. Re-checking those place names against a London alias list
+          discarded most of them, so a *broad* browse returned 12 rows out of 50, and a 30-mile
+          radius returned FEWER results than a 5-mile one. The API did the geo maths properly;
+          string-matching place names cannot improve on it.
+        * Keywords — a real search engine does stemming and synonyms. Overlaying a stricter
+          local word match throws away matches it deliberately made.
+
+        The local filters remain essential for boards with no server-side search at all
+        (Arbeitnow returns one fixed page), which is why this is per-source rather than global.
         """
-        return matches_query(
+        if not self.server_side_search and not matches_query(
             query, listing.title, " ".join(listing.skills_required)
-        ) and matches_location(location, listing.location, remote=listing.remote)
+        ):
+            return False
+        return self.server_side_location or matches_location(
+            location, listing.location, remote=listing.remote
+        )
 
     # -- Public entry point -----------------------------------------------------------
 

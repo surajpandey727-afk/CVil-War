@@ -33,8 +33,9 @@ from app.core.job_discovery.sources.boards import (
     RemoteOkSource,
     RemotiveSource,
 )
+from app.core.job_discovery.sources.uk_boards import UK_SOURCES, AdzunaSource, ReedSource
 
-for _source in ALL_SOURCES:
+for _source in (*ALL_SOURCES, *UK_SOURCES):
     platform_registry.register(_source.source_name, _source)
 
 #: ``careers:<slug> -> adapter class``, built once at import.
@@ -44,7 +45,7 @@ for _key, _cls in CAREER_SOURCES.items():
 
 #: Every source key this package can actually serve.
 IMPLEMENTED_KEYS: frozenset[str] = frozenset(
-    [s.source_name for s in ALL_SOURCES] + list(CAREER_SOURCES)
+    [s.source_name for s in (*ALL_SOURCES, *UK_SOURCES)] + list(CAREER_SOURCES)
 )
 
 __all__ = [
@@ -52,6 +53,8 @@ __all__ = [
     "CAREER_SOURCES",
     "COMPANY_BOARDS",
     "IMPLEMENTED_KEYS",
+    "UK_SOURCES",
+    "AdzunaSource",
     "ApiJobSource",
     "ArbeitnowSource",
     "AshbySource",
@@ -60,6 +63,7 @@ __all__ = [
     "GreenhouseSource",
     "JobicySource",
     "LeverSource",
+    "ReedSource",
     "RemoteOkSource",
     "RemotiveSource",
     "SmartRecruitersSource",

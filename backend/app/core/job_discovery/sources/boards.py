@@ -54,6 +54,8 @@ class RemotiveSource(ApiJobSource):
     """https://remotive.com — curated remote roles, server-side keyword search."""
 
     source_name = "remotive"
+    # Remotive applies `search` upstream; these are remote roles so location is moot.
+    server_side_search = True
     _ENDPOINT = "https://remotive.com/api/remote-jobs"
 
     async def _fetch(

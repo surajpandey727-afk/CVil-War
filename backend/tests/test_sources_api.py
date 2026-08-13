@@ -22,7 +22,12 @@ def test_every_key_is_unique() -> None:
 
 
 def test_unimplemented_sources_report_not_implemented() -> None:
-    spec = BY_KEY["reed"]
+    """A catalogued source with no adapter must say so rather than look merely unconfigured.
+
+    This used to assert on ``reed``, which stopped being true the moment its adapter shipped —
+    the point of the test is the derivation, so it now uses an employer with no public board.
+    """
+    spec = BY_KEY["careers:starling"]
     assert spec.implemented is False
     assert health_for(spec) is SourceHealth.NOT_IMPLEMENTED
 
@@ -54,12 +59,24 @@ def test_usable_keys_drops_everything_that_cannot_answer() -> None:
         "remotive",        # keyless aggregator, live
         "careers:monzo",   # Greenhouse board, live
         "linkedin",        # registered but degraded
-        "reed",            # catalogued, no adapter
         "careers:starling",  # catalogued, no public ATS board
         "tracjobs",        # blocked upstream (403 to automation)
         "not-a-source",    # unknown key
     ]
     assert usable_keys(requested) == ["remotive", "careers:monzo"]
+
+
+def test_keyed_uk_aggregators_are_live_once_configured() -> None:
+    """Adzuna and Reed need a key but cannot bill, so a configured key makes them LIVE.
+
+    They were catalogued as unimplemented until their adapters shipped; the registry now
+    derives this, so the flag cannot drift out of date again.
+    """
+    for key in ("adzuna", "reed"):
+        assert health_for(BY_KEY[key]) in (
+            SourceHealth.LIVE,
+            SourceHealth.AUTH_REQUIRED,  # no key configured in CI
+        )
 
 
 def test_employer_boards_with_a_real_adapter_are_live() -> None:
