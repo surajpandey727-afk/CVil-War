@@ -13,6 +13,14 @@ class DashboardStats(BaseModel):
     applications_interview: int = 0
     applications_rejected: int = 0
     applications_offer: int = 0
+    applications_failed: int = 0
+    #: Agent activity right now, so the dashboard can answer "what is it doing".
+    applications_queued: int = 0
+    applications_applying: int = 0
+    #: Submissions that actually went out in the last 24 hours / 7 days. Counted on
+    #: ``applied_at``, not ``created_at``: a queued application is not an application sent.
+    submitted_today: int = 0
+    submitted_this_week: int = 0
     avg_ats_score: float = 0.0
     total_llm_cost_usd: float = 0.0
 

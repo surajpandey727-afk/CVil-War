@@ -3,6 +3,7 @@
 Provides aggregated statistics for the dashboard UI.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -62,6 +63,30 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
     interview = (await db.execute(_count_status(ApplicationStatus.INTERVIEW))).scalar() or 0
     rejected = (await db.execute(_count_status(ApplicationStatus.REJECTED))).scalar() or 0
     offer = (await db.execute(_count_status(ApplicationStatus.OFFER))).scalar() or 0
+    failed = (await db.execute(_count_status(ApplicationStatus.FAILED))).scalar() or 0
+    queued = (await db.execute(_count_status(ApplicationStatus.QUEUED))).scalar() or 0
+    applying = (await db.execute(_count_status(ApplicationStatus.APPLYING))).scalar() or 0
+
+    # Counted on applied_at rather than created_at: "applications today" means submissions
+    # that went out, not rows that were queued and may still be waiting on a policy hold.
+    # The columns are naive UTC, so the cutoffs are too.
+    now = datetime.now(UTC).replace(tzinfo=None)
+    submitted_today = (
+        await db.execute(
+            select(func.count(Application.id)).where(
+                Application.applied_at.isnot(None),
+                Application.applied_at >= now - timedelta(days=1),
+            )
+        )
+    ).scalar() or 0
+    submitted_week = (
+        await db.execute(
+            select(func.count(Application.id)).where(
+                Application.applied_at.isnot(None),
+                Application.applied_at >= now - timedelta(days=7),
+            )
+        )
+    ).scalar() or 0
 
     avg_ats_result = await db.execute(
         select(func.avg(Application.ats_score)).where(Application.ats_score.isnot(None)),
@@ -81,6 +106,11 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
         applications_interview=interview,
         applications_rejected=rejected,
         applications_offer=offer,
+        applications_failed=failed,
+        applications_queued=queued,
+        applications_applying=applying,
+        submitted_today=submitted_today,
+        submitted_this_week=submitted_week,
         avg_ats_score=round(float(avg_ats), 3),
         total_llm_cost_usd=round(float(total_llm_cost), 4),
     )

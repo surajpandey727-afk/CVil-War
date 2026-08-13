@@ -11,7 +11,9 @@ from app.models.enums import (
     ApplicationHealth,
     ApplicationStatus,
     ApplyMode,
+    ConfirmationState,
     NextAction,
+    SubmissionMethod,
 )
 
 
@@ -102,6 +104,29 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     application_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     #: Employer's own reference, when one is issued — used to reconcile external status.
     external_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # -- Submission evidence --------------------------------------------------------------
+    #
+    # Status alone cannot answer "did this actually reach anybody". A placeholder run with
+    # ``BROWSER__LIVE_APPLY`` off left a row identical to a real confirmed submission, so
+    # ``Applied`` meant "the pipeline ran" rather than "an employer received something".
+    # These three columns make the difference explicit and auditable.
+
+    submission_method: Mapped[SubmissionMethod] = mapped_column(
+        pg_enum(SubmissionMethod, "submission_method"),
+        nullable=False,
+        default=SubmissionMethod.NONE,
+        server_default=SubmissionMethod.NONE.value,
+    )
+    confirmation_state: Mapped[ConfirmationState] = mapped_column(
+        pg_enum(ConfirmationState, "confirmation_state"),
+        nullable=False,
+        default=ConfirmationState.PENDING,
+        server_default=ConfirmationState.PENDING.value,
+    )
+    #: What the agent actually reported, verbatim. Shown to the operator rather than
+    #: summarised, because a paraphrase of a confirmation is not evidence of one.
+    confirmation_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # -- Resume-from-position (Job OS §7/§8) ---------------------------------------------
     #: Where a paused application stopped, e.g. {"stage": "application_form",

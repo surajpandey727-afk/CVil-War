@@ -12,9 +12,15 @@ export async function listJobs(
   page = 1,
   pageSize = 20,
   status?: string,
+  filters: { location?: string; query?: string } = {},
 ): Promise<JobListResponse> {
   const params: Record<string, string | number> = { page, page_size: pageSize };
   if (status) params['status'] = status;
+  // Location and title go to the server. Filtering them in the browser meant `total`
+  // counted every stored job and page 2 of a London search was not London — the filter
+  // existed only in the rendered list.
+  if (filters.location?.trim()) params['location'] = filters.location.trim();
+  if (filters.query?.trim()) params['q'] = filters.query.trim();
   const { data } = await api.get<JobListResponse>('/jobs/', { params });
   return data;
 }

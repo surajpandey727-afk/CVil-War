@@ -1,8 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
+import EvidencePanel from '@/components/applications/EvidencePanel';
 import RunTimeline from '@/components/applications/RunTimeline';
-import { useApplication, useUpdateApplicationStatus } from '@/hooks/useApplications';
+import { useApplication, useApplicationEvidence, useUpdateApplicationStatus } from '@/hooks/useApplications';
 import { useAppStore } from '@/store/useAppStore';
 import { buildAppTimeline } from '@/lib/timeline';
 import { statusMeta, atsColor, atsPercent, relativeTime } from '@/lib/status';
@@ -17,6 +18,9 @@ export default function AppDetailPage() {
   const navigate = useNavigate();
   const notify = useAppStore((s) => s.showNotification);
   const { data: app, isLoading, isError } = useApplication(id);
+  const {
+    data: evidence, isLoading: evidenceLoading, isError: evidenceError,
+  } = useApplicationEvidence(id);
   const updateStatus = useUpdateApplicationStatus();
 
   const setStatus = (status: string, msg: string) =>
@@ -27,7 +31,7 @@ export default function AppDetailPage() {
     );
 
   return (
-    <div style={{ animation: 'aaUp .4s var(--ease) both', maxWidth: 860 }}>
+    <div style={{ animation: 'aaUp .4s var(--ease) both', maxWidth: 1180 }}>
       <button
         onClick={() => navigate('/applications')}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 10px 0 8px', marginBottom: 16, borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid transparent', color: 'var(--text-3)', font: '600 12.5px/1 var(--font)', cursor: 'pointer' }}
@@ -81,73 +85,40 @@ export default function AppDetailPage() {
                   {ACTIVE.has(app.status) && (
                     <ActionButton icon="x" label="Withdraw" danger disabled={updateStatus.isPending} onClick={() => setStatus('withdrawn', 'Application withdrawn')} />
                   )}
-                  <ActionButton icon="briefcase" label="View job" onClick={() => navigate('/jobs')} />
+                  {/* "View job" used to bounce to the jobs list, which is not the job. The
+                      evidence panel's "Open job" opens the actual stored URL, so the
+                      misleading duplicate is gone rather than sitting next to the real one. */}
                 </div>
               </div>
 
-              {/* What actually went to the employer. The application already stored the
-                  résumé reference; showing only a status meant the one question a submitted
-                  application exists to answer — "which CV did they get?" — had no answer
-                  anywhere in the UI. */}
-              <div style={{ ...card, padding: 20, marginBottom: 16 }}>
-                <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 4 }}>
-                  Documents sent
-                </div>
-                <p style={{ margin: '0 0 14px', font: '500 12px/1.45 var(--font)', color: 'var(--text-3)' }}>
-                  {app.applied_at
-                    ? 'Exactly what the employer received with this application.'
-                    : 'What will go out when this application is submitted.'}
-                </p>
+              {/* Timeline on the left, evidence on the right. The right-hand column was
+                  empty space; it is now where "Applied — prove it" is answered. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,360px)', gap: 16, alignItems: 'start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+                  <div style={{ ...card, padding: 20 }}>
+                    <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 16 }}>Run timeline</div>
+                    <RunTimeline steps={steps} />
+                  </div>
 
-                {app.resume_id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                    <span style={{ flex: '0 0 auto', width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-                      <Icon name="file" size={16} />
-                    </span>
-                    <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                      <div style={{ font: '700 12.5px/1.3 var(--font)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {app.resume_name ?? 'CV no longer available'}
-                      </div>
-                      <div style={{ font: '500 11.5px/1.4 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>
-                        {app.resume_type ? `${app.resume_type} CV` : 'CV'}
-                        {app.resume_ats_score != null && ` · ${atsPercent(app.resume_ats_score)}% ATS`}
-                        {/* Archived is not an error. It is why the name is still here at
-                            all — a used CV is kept rather than deleted. */}
-                        {app.resume_archived && ' · archived, kept for this record'}
-                      </div>
+                  {app.notes && (
+                    <div style={{ ...card, padding: 18 }}>
+                      <div style={{ font: '700 13px/1 var(--font)', marginBottom: 8 }}>Notes</div>
+                      <p style={{ margin: 0, font: '500 12.5px/1.5 var(--font)', color: 'var(--text-2)' }}>{app.notes}</p>
                     </div>
-                    <button
-                      onClick={() => navigate('/resumes')}
-                      style={{ flex: '0 0 auto', height: 30, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '600 11.5px/1 var(--font)', cursor: 'pointer' }}
-                    >
-                      Open
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ font: '500 12.5px/1.5 var(--font)', color: 'var(--text-3)' }}>
-                    No CV was attached to this application.
-                  </div>
-                )}
+                  )}
+                </div>
 
-                <div style={{ font: '500 12px/1.45 var(--font)', color: 'var(--text-3)', marginTop: 10 }}>
-                  {app.has_cover_letter
-                    ? 'A tailored cover letter was generated and sent with it.'
-                    : 'No cover letter — this application went out with the CV alone.'}
+                <div style={{ minWidth: 0 }}>
+                  <EvidencePanel
+                    evidence={evidence}
+                    isLoading={evidenceLoading}
+                    isError={evidenceError}
+                    retrying={updateStatus.isPending}
+                    onRetry={() => setStatus('queued', 'Re-queued — the agent will retry')}
+                    onOpenResume={() => navigate('/resumes')}
+                  />
                 </div>
               </div>
-
-              {/* Timeline */}
-              <div style={{ ...card, padding: 20 }}>
-                <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 16 }}>Run timeline</div>
-                <RunTimeline steps={steps} />
-              </div>
-
-              {app.notes && (
-                <div style={{ ...card, padding: 18, marginTop: 16 }}>
-                  <div style={{ font: '700 13px/1 var(--font)', marginBottom: 8 }}>Notes</div>
-                  <p style={{ margin: 0, font: '500 12.5px/1.5 var(--font)', color: 'var(--text-2)' }}>{app.notes}</p>
-                </div>
-              )}
             </>
           );
         })()

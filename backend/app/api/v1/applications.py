@@ -21,9 +21,11 @@ from app.schemas.application import (
     ApplicationStatusUpdate,
     CoverLetterResponse,
 )
+from app.schemas.evidence import ApplicationEvidence
 from app.services import application as app_service
 from app.services import cover_letter as cover_letter_service
 from app.services import dispatch
+from app.services.evidence import build_evidence
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -102,6 +104,26 @@ async def get_application(
     """Get one of the current user's applications by ID. Returns 404 if not found."""
     app = await app_service.get_application(db, app_id)
     return app_service.application_to_response(app)
+
+
+@router.get(
+    "/{app_id}/evidence",
+    response_model=ApplicationEvidence,
+    summary="Everything needed to prove what happened to this application",
+)
+async def get_application_evidence(
+    app_id: str,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ApplicationEvidence:
+    """Job, submission, documents, account, run log and failure detail for one application.
+
+    Assembled from records the system already writes; sections that were never captured come
+    back with ``recorded: false`` so the UI reports "Not recorded" rather than rendering a
+    convincing blank. No credential is read on this path — the account section carries a
+    masked label and a connection state, nothing more.
+    """
+    app = await app_service.get_application(db, app_id)
+    return await build_evidence(db, app)
 
 
 @router.put(

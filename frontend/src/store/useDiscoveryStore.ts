@@ -43,9 +43,18 @@ interface DiscoveryState {
   selectedJobIds: string[];
   location: string;
   query: string;
+  /**
+   * The location/title the *listed results* are filtered by, as opposed to what is currently
+   * typed in the boxes. Kept separate so the server is not re-queried on every keystroke and
+   * so the visible list always corresponds to a search the operator actually ran.
+   */
+  appliedLocation: string;
+  appliedQuery: string;
 
   setQuery: (v: string) => void;
   setLocation: (v: string) => void;
+  /** Promote the typed location/title to the filter the list is fetched with. */
+  commitSearch: () => void;
   toggleTitle: (title: string) => void;
   setTitles: (titles: string[]) => void;
   toggleFamily: (family: RoleFamily) => void;
@@ -79,9 +88,12 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       selectedJobIds: [],
       location: 'London, UK',
       query: '',
+      appliedLocation: 'London, UK',
+      appliedQuery: '',
 
       setQuery: (v) => set({ query: v }),
       setLocation: (v) => set({ location: v }),
+      commitSearch: () => set((s) => ({ appliedLocation: s.location, appliedQuery: s.query })),
       toggleTitle: (title) => set((s) => ({ activeTitles: toggle(s.activeTitles, title) })),
       setTitles: (titles) => set({ activeTitles: titles }),
       toggleFamily: (family) => set((s) => ({ activeFamilies: toggle(s.activeFamilies, family) })),
@@ -102,6 +114,8 @@ export const useDiscoveryStore = create<DiscoveryState>()(
         filters: s.filters,
         location: s.location,
         query: s.query,
+        appliedLocation: s.appliedLocation,
+        appliedQuery: s.appliedQuery,
       }),
     },
   ),

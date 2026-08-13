@@ -46,8 +46,14 @@ export default function DashboardPage() {
   const kpis: { label: string; value: string; icon: IconName; color: string }[] = [
     { label: 'Applications', value: fmt(stats?.total_applications), icon: 'inbox', color: 'var(--text-2)' },
     { label: 'Applied', value: fmt(stats?.applications_applied), icon: 'check', color: 'var(--applied)' },
+    // Sent today and this week, counted on the submission timestamp rather than on rows
+    // created — a queued application is not an application sent, and conflating them
+    // flatters the number that matters most.
+    { label: 'Sent today', value: fmt(stats?.submitted_today), icon: 'clock', color: 'var(--text-2)' },
+    { label: 'Sent this week', value: fmt(stats?.submitted_this_week), icon: 'clock', color: 'var(--text-2)' },
     { label: 'Interviews', value: fmt(stats?.applications_interview), icon: 'activity', color: 'var(--interview)' },
     { label: 'Offers', value: fmt(stats?.applications_offer), icon: 'target', color: 'var(--offer)' },
+    { label: 'Failed', value: fmt(stats?.applications_failed), icon: 'alert', color: 'var(--failed)' },
     { label: 'Avg ATS', value: stats ? String(atsPercent(stats.avg_ats_score)) : '—', icon: 'gauge', color: 'var(--accent)' },
     { label: 'LLM cost', value: stats ? `$${(stats.total_llm_cost_usd ?? 0).toFixed(2)}` : '—', icon: 'dollar', color: 'var(--accent)' },
   ];

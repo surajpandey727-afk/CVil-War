@@ -205,3 +205,42 @@ class DocumentType(StrEnum):
     WORK_SAMPLE = "work_sample"
     REFERENCE = "reference"
     OTHER = "other"
+
+
+class SubmissionMethod(StrEnum):
+    """How an application was actually delivered.
+
+    Recorded because "Applied" alone cannot distinguish a browser that really filled in a
+    form from a placeholder run with ``BROWSER__LIVE_APPLY`` off. Both used to leave an
+    identical row, so the operator had no way to tell a real submission from a rehearsal.
+    """
+
+    #: A browser session drove the portal's own form.
+    AUTOMATED = "automated"
+    #: The operator submitted it themselves and recorded the outcome.
+    MANUAL = "manual"
+    #: Sent to an address the posting published.
+    EMAIL = "email"
+    #: The placeholder path — the pipeline ran but nothing was sent anywhere.
+    SIMULATED = "simulated"
+    #: Nothing has been submitted yet.
+    NONE = "none"
+
+
+class ConfirmationState(StrEnum):
+    """Whether the submission was actually acknowledged by the far end.
+
+    The distinction the product depends on: ``Applied`` should mean an employer received
+    something, not that automation started and did not crash.
+    """
+
+    #: The portal returned a confirmation the agent could read.
+    CONFIRMED = "confirmed"
+    #: The run finished without an error but no confirmation was observed.
+    UNCONFIRMED = "unconfirmed"
+    #: No submission was attempted — the placeholder path.
+    SIMULATED = "simulated"
+    #: Not submitted yet.
+    PENDING = "pending"
+    #: The attempt failed before any submission could be confirmed.
+    FAILED = "failed"

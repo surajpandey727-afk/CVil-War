@@ -89,3 +89,12 @@ export function useUpdateApplicationStatus() {
     },
   });
 }
+
+/** Fetch the evidence bundle for one application. */
+export function useApplicationEvidence(appId: string | undefined) {
+  return useQuery({
+    queryKey: [...APPS_KEY, 'evidence', appId],
+    queryFn: () => appService.getApplicationEvidence(appId!),
+    enabled: !!appId,
+  });
+}

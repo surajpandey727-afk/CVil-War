@@ -17,6 +17,8 @@ from app.core.automation.platforms import platform_registry
 from app.core.automation.platforms.base import JobListing
 from app.core.exceptions import RecordNotFoundError
 from app.core.job_discovery.exa_search import ExaJobSearch
+from app.core.job_discovery.location import location_matches
+from app.core.job_discovery.sources.base import matches_query
 from app.models.job import Job
 from app.models.resume import Resume
 from app.observability.metrics import job_searches_total, jobs_found_total
@@ -28,6 +30,11 @@ from app.schemas.job import (
 )
 
 logger = structlog.get_logger(__name__)
+
+#: Ceiling on rows read when a filter has to be evaluated in Python. Well above any
+#: realistic personal job cache, and low enough that a runaway account cannot turn a
+#: single list call into an unbounded table scan.
+MAX_STORED_SCAN = 2000
 
 
 def _job_identity(job: Job) -> str:
@@ -262,38 +269,85 @@ async def list_jobs(
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
     status: str | None = None,
+    *,
+    location: str | None = None,
+    query: str | None = None,
 ) -> JobListResponse:
-    """List jobs with pagination and optional status filter.
+    """List stored jobs, optionally filtered by location and title.
+
+    ``location`` and ``query`` used to be absent entirely, and that was the whole of the
+    "London filter does nothing" bug: the page fetched every cached job and filtered the
+    result on ATS, salary and seniority — never on where the job was. A search for London
+    therefore showed every job the account had ever discovered, from any search.
+
+    Both filters are applied **server-side**, for two reasons that matter beyond tidiness:
+    pagination is computed from the filtered count, so page 2 of a London search is London
+    jobs rather than whatever survived a client-side pass over page 1; and the totals the UI
+    reports ("38 roles") are then the real number of matches.
+
+    Location is matched in Python rather than SQL. The rule is not a substring test — a
+    London filter has to accept "EC4N 6EU" and "Canary Wharf" while rejecting "United
+    Kingdom" — and expressing that as SQL would mean either a LIKE that is wrong or an
+    extension SQLite does not have. See :mod:`app.core.job_discovery.location`.
 
     Args:
         db: Async database session.
         page: Page number (1-indexed).
         page_size: Items per page.
         status: Optional status filter.
+        location: Optional place filter, e.g. ``"London"`` or ``"London, UK"``.
+        query: Optional title filter, scored the same way discovery scores titles.
 
     Returns:
-        Paginated job list response.
+        Paginated job list response whose ``total`` counts matches, not stored rows.
     """
     page_size = min(page_size, MAX_PAGE_SIZE)
     offset = (page - 1) * page_size
 
-    query = select(Job)
-    count_query = select(func.count(Job.id))
-
+    stmt = select(Job)
     if status:
-        query = query.where(Job.status == status)
-        count_query = count_query.where(Job.status == status)
+        stmt = stmt.where(Job.status == status)
 
-    query = query.order_by(Job.created_at.desc()).offset(offset).limit(page_size)
+    wants_location = bool((location or "").strip())
+    wants_query = bool((query or "").strip())
 
-    result = await db.execute(query)
-    jobs = list(result.scalars().all())
+    if not (wants_location or wants_query):
+        # Unfiltered: count in SQL and page in SQL, as before.
+        count_stmt = select(func.count(Job.id))
+        if status:
+            count_stmt = count_stmt.where(Job.status == status)
+        total = (await db.execute(count_stmt)).scalar() or 0
+        rows = (
+            await db.execute(
+                stmt.order_by(Job.created_at.desc()).offset(offset).limit(page_size)
+            )
+        ).scalars().all()
+        items = [JobListingResponse.model_validate(j) for j in rows]
+        return JobListResponse(
+            items=items, total=total, page=page, page_size=page_size,
+            has_next=(page * page_size) < total,
+        )
 
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
+    # Filtered: the predicate is not expressible in SQL, so the candidate set is read and
+    # filtered here. Bounded by MAX_STORED_SCAN so a large account cannot turn one list call
+    # into an unbounded read.
+    candidates = (
+        await db.execute(stmt.order_by(Job.created_at.desc()).limit(MAX_STORED_SCAN))
+    ).scalars().all()
 
-    items = [JobListingResponse.model_validate(j) for j in jobs]
+    matched = [
+        job
+        for job in candidates
+        if (not wants_location
+            or location_matches(location or "", job.location or "", remote=bool(job.remote)))
+        and (not wants_query
+             or matches_query(query or "", job.title or "", _skills_text(job)))
+    ]
 
+    total = len(matched)
+    items = [
+        JobListingResponse.model_validate(j) for j in matched[offset : offset + page_size]
+    ]
     return JobListResponse(
         items=items,
         total=total,
@@ -301,6 +355,19 @@ async def list_jobs(
         page_size=page_size,
         has_next=(page * page_size) < total,
     )
+
+
+def _skills_text(job: Job) -> str:
+    """The job's skill tags as one string, for title/tag relevance scoring."""
+    skills = job.skills_required
+    if isinstance(skills, dict):
+        required = skills.get("required")
+        if isinstance(required, list):
+            return " ".join(str(s) for s in required)
+        return " ".join(str(k) for k in skills)
+    if isinstance(skills, list):
+        return " ".join(str(s) for s in skills)
+    return ""
 
 
 async def get_job(db: AsyncSession, job_id: str) -> Job:

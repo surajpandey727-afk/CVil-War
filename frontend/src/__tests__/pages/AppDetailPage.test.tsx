@@ -35,15 +35,17 @@ describe('AppDetailPage', () => {
   it('shows the application job title and company once loaded', async () => {
     server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp())));
     renderDetail();
-    expect(await screen.findByText('Senior Product Manager')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Senior Product Manager' }),
+    ).toBeInTheDocument();
     // Company is shown in the subtitle line (combined with mode + date), so match on substring.
-    expect(screen.getByText(/Northwind Labs/)).toBeInTheDocument();
+    expect(screen.getByText(/Northwind Labs · review mode/)).toBeInTheDocument();
   });
 
   it('renders the run timeline for the application status + mode', async () => {
     server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp({ status: 'applied', apply_mode: 'review' }))));
     renderDetail();
-    await screen.findByText('Senior Product Manager');
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
     // review-mode applied → the "Applied" step is the current one in the timeline.
     const applied = document.querySelector('[data-step="applied"]');
     expect(applied).not.toBeNull();
@@ -53,69 +55,28 @@ describe('AppDetailPage', () => {
   it('surfaces the failure diagnosis for a failed run', async () => {
     server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp({ status: 'failed', apply_mode: 'autonomous' }))));
     renderDetail();
-    await screen.findByText('Senior Product Manager');
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
     expect(document.querySelector('[data-step="applying"]')?.getAttribute('data-state')).toBe('failed');
   });
 
-  describe('documents sent', () => {
-    it('names the CV that actually went to the employer', async () => {
-      // The application already stored the résumé reference; before this panel existed the
-      // one question a submitted application is for — "which CV did they get?" — had no
-      // answer anywhere in the UI.
-      server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp())));
-      renderDetail();
+  it('renders the evidence panel alongside the timeline', async () => {
+    // The right-hand column used to be empty. What lives there is tested in detail against
+    // the panel itself; this only pins that the page actually mounts it with the id.
+    server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp())));
+    renderDetail();
 
-      expect(await screen.findByText('Suraj_Pandey_AIPM.pdf')).toBeInTheDocument();
-      expect(screen.getByText(/tailored CV/)).toBeInTheDocument();
-      expect(screen.getByText(/88% ATS/)).toBeInTheDocument();
-    });
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
+    expect(await screen.findByRole('link', { name: /open job/i })).toBeInTheDocument();
+    expect(screen.getByText('AI Product Manager CV')).toBeInTheDocument();
+  });
 
-    it('still names an archived CV, and says that is why it is kept', async () => {
-      // The payoff for archiving rather than deleting a used CV: the record survives.
-      server.use(
-        http.get('/api/v1/applications/:appId', () =>
-          HttpResponse.json(fullApp({ resume_archived: true })),
-        ),
-      );
-      renderDetail();
+  it('no longer offers a "View job" button that only opened the jobs list', async () => {
+    // It looked like it opened the job and did not. The panel's "Open job" uses the stored
+    // URL, so the misleading duplicate is gone rather than sitting next to the real one.
+    server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp())));
+    renderDetail();
 
-      expect(await screen.findByText('Suraj_Pandey_AIPM.pdf')).toBeInTheDocument();
-      expect(screen.getByText(/archived, kept for this record/)).toBeInTheDocument();
-    });
-
-    it('says plainly when no CV was attached rather than showing an empty row', async () => {
-      server.use(
-        http.get('/api/v1/applications/:appId', () =>
-          HttpResponse.json(fullApp({ resume_id: null, resume_name: null })),
-        ),
-      );
-      renderDetail();
-
-      expect(await screen.findByText(/no cv was attached/i)).toBeInTheDocument();
-    });
-
-    it('distinguishes a cover letter that was sent from one that was not', async () => {
-      server.use(
-        http.get('/api/v1/applications/:appId', () =>
-          HttpResponse.json(fullApp({ has_cover_letter: true })),
-        ),
-      );
-      renderDetail();
-
-      expect(await screen.findByText(/tailored cover letter was generated/i)).toBeInTheDocument();
-    });
-
-    it('describes an unsent application in the future tense', async () => {
-      // "What the employer received" is a lie for something still queued.
-      server.use(
-        http.get('/api/v1/applications/:appId', () =>
-          HttpResponse.json(fullApp({ status: 'queued', applied_at: null })),
-        ),
-      );
-      renderDetail();
-
-      expect(await screen.findByText(/what will go out when this application is submitted/i))
-        .toBeInTheDocument();
-    });
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
+    expect(screen.queryByRole('button', { name: /view job/i })).not.toBeInTheDocument();
   });
 });

@@ -42,10 +42,25 @@ async def list_jobs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     status: str | None = Query(default=None),
+    location: str | None = Query(
+        default=None,
+        description=(
+            "Filter to a place, e.g. 'London'. Matched against the stored job location: "
+            "boroughs and London postcodes count, 'United Kingdom' and 'Remote' do not."
+        ),
+    ),
+    q: str | None = Query(default=None, description="Filter by job title relevance."),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> JobListResponse:
-    """List the current user's stored job listings with optional status filter."""
-    return await job_service.list_jobs(db, page, page_size, status)
+    """List the current user's stored job listings.
+
+    ``location`` and ``q`` are applied here rather than in the browser. Filtering client-side
+    meant ``total`` counted every stored job and page 2 of a London search was not London —
+    the filter existed only in the rendered list.
+    """
+    return await job_service.list_jobs(
+        db, page, page_size, status, location=location, query=q
+    )
 
 
 @router.get("/{job_id}", response_model=JobListingResponse, summary="Get a single job")

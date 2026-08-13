@@ -79,6 +79,25 @@ async def _assert_owned(db: AsyncSession, model: Any, record_id: str) -> None:
         raise RecordNotFoundError(f"{model.__name__} '{record_id}' not found")
 
 
+def apply_job_provenance(application: Application, job: Job | None) -> None:
+    """Copy the job's platform and application URL onto the application at creation.
+
+    Both columns existed and neither was ever written, so every application recorded which
+    job it came from but not which board it lived on or where a human could open it. That is
+    the difference between "you applied" and "you applied *there*, and here is the page".
+
+    Snapshotted rather than read through the relationship on demand: a job row can be
+    re-scraped and its URL changed, and the application is supposed to say where the
+    submission actually went, not where the posting later moved to.
+    """
+    if job is None:
+        return
+    application.portal = application.portal or job.platform or None
+    application.application_url = (
+        application.application_url or job.application_url or job.url or None
+    )
+
+
 async def create_application(
     db: AsyncSession,
     data: ApplicationCreate,
@@ -104,6 +123,7 @@ async def create_application(
         apply_mode=data.apply_mode,
         status=ApplicationStatus.QUEUED,
     )
+    apply_job_provenance(application, await db.get(Job, data.job_id))
     # Attempt the insert inside a SAVEPOINT so a unique-constraint violation rolls back
     # ONLY this insert (not the whole session) — the caller then continues to commit.
     try:
@@ -178,6 +198,7 @@ async def create_batch(
             apply_mode=data.apply_mode,
             status=ApplicationStatus.QUEUED,
         )
+        apply_job_provenance(app, await db.get(Job, job_id))
         db.add(app)
         applications.append(app)
 

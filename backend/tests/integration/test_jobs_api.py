@@ -168,3 +168,124 @@ class TestDeleteJob:
         # Verify job is gone
         response = await client.get(f"{API_PREFIX}/{job.id}")
         assert response.status_code == 404
+
+
+class TestLocationFilteringEndToEnd:
+    """The filter has to survive the whole round trip, not just exist in a helper.
+
+    It previously existed nowhere: `GET /jobs` took no location parameter at all, so a London
+    search returned every job the account had ever stored — including a Cleveland
+    accounts-payable role and a Worldwide office assistant.
+    """
+
+    @staticmethod
+    def _job(user_id, **overrides):  # type: ignore[no-untyped-def]
+        from uuid import uuid4
+
+        from app.models.job import Job
+
+        data = {
+            "id": uuid4().hex,
+            "user_id": user_id,
+            "platform": "reed",
+            "platform_job_id": uuid4().hex[:12],
+            "title": "Product Manager",
+            "company": "Acme",
+            "location": "London",
+            "url": "https://example.invalid/j",
+            "description": "",
+            "status": "new",
+        }
+        return Job(**{**data, **overrides})
+
+    async def _seed(self, db_session):  # type: ignore[no-untyped-def]
+        from tests.conftest import TEST_USER_ID
+
+        rows = [
+            self._job(TEST_USER_ID, title="Senior Product Manager", location="London, UK"),
+            self._job(TEST_USER_ID, title="Group Product Manager", location="Canary Wharf"),
+            self._job(TEST_USER_ID, title="Product Owner", location="EC4N6EU"),
+            self._job(TEST_USER_ID, title="Assistant Account Payable", location="USA"),
+            self._job(TEST_USER_ID, title="Remote Office Assistant", location="Worldwide",
+                      remote=True),
+            self._job(TEST_USER_ID, title="Sales Jedi", location="Europe"),
+            self._job(TEST_USER_ID, title="Delivery Manager", location="United Kingdom"),
+            self._job(TEST_USER_ID, title="Data Engineer", location="Manchester"),
+        ]
+        for row in rows:
+            db_session.add(row)
+        await db_session.commit()
+
+    async def test_a_london_filter_returns_only_london_jobs(self, client, db_session):
+        await self._seed(db_session)
+
+        response = await client.get("/api/v1/jobs/?location=London&page_size=100")
+
+        assert response.status_code == 200
+        body = response.json()
+        locations = {item["location"] for item in body["items"]}
+        assert locations == {"London, UK", "Canary Wharf", "EC4N6EU"}
+        assert "USA" not in locations
+        assert "United Kingdom" not in locations
+        assert "Worldwide" not in locations
+
+    async def test_the_reported_total_counts_matches_not_stored_rows(self, client, db_session):
+        """`total` drives the "38 roles" counter. Counting every stored job while showing a
+        filtered list is how the UI came to claim results it was not displaying."""
+        await self._seed(db_session)
+
+        body = (await client.get("/api/v1/jobs/?location=London&page_size=100")).json()
+        assert body["total"] == 3
+
+    async def test_pagination_pages_through_the_filtered_set(self, client, db_session):
+        """Filtering client-side meant page 2 of a London search was not London at all."""
+        await self._seed(db_session)
+
+        page1 = (await client.get("/api/v1/jobs/?location=London&page=1&page_size=2")).json()
+        page2 = (await client.get("/api/v1/jobs/?location=London&page=2&page_size=2")).json()
+
+        assert len(page1["items"]) == 2
+        assert page1["has_next"] is True
+        assert len(page2["items"]) == 1
+        assert page2["has_next"] is False
+        seen = {i["location"] for i in page1["items"]} | {i["location"] for i in page2["items"]}
+        assert seen == {"London, UK", "Canary Wharf", "EC4N6EU"}
+
+    async def test_the_title_filter_is_applied_server_side_too(self, client, db_session):
+        await self._seed(db_session)
+
+        body = (await client.get("/api/v1/jobs/?q=Product%20Manager&page_size=100")).json()
+        titles = {i["title"] for i in body["items"]}
+
+        assert "Senior Product Manager" in titles
+        assert "Assistant Account Payable" not in titles
+
+    async def test_location_and_title_filters_combine(self, client, db_session):
+        await self._seed(db_session)
+
+        body = (
+            await client.get("/api/v1/jobs/?location=London&q=Product%20Manager&page_size=100")
+        ).json()
+        titles = {i["title"] for i in body["items"]}
+
+        assert titles == {"Senior Product Manager", "Group Product Manager"}
+
+    async def test_a_newly_imported_job_is_filtered_by_the_same_rule(self, client, db_session):
+        """No static list anywhere: the filter reads Job.location, so an import added after
+        the fact is filtered on its own merits."""
+        from tests.conftest import TEST_USER_ID
+
+        await self._seed(db_session)
+        db_session.add(
+            self._job(TEST_USER_ID, title="Late Import PM", location="Shoreditch, London")
+        )
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/jobs/?location=London&page_size=100")).json()
+        assert "Late Import PM" in {i["title"] for i in body["items"]}
+
+    async def test_no_filter_still_returns_everything(self, client, db_session):
+        await self._seed(db_session)
+
+        body = (await client.get("/api/v1/jobs/?page_size=100")).json()
+        assert body["total"] == 8

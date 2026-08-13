@@ -314,6 +314,68 @@ export const handlers = [
     ]);
   }),
 
+  // Application evidence. Deliberately a *complete* bundle here; individual tests override
+  // this handler to exercise the "not recorded" paths, which is where the interesting
+  // behaviour lives.
+  http.get('/api/v1/applications/:appId/evidence', ({ params }) => {
+    return HttpResponse.json({
+      application_id: params['appId'],
+      job: {
+        recorded: true,
+        job_id: 'job-1',
+        title: 'Senior Product Manager',
+        company: 'Zartis',
+        location: 'London, UK',
+        salary: '£75,000 - £95,000',
+        remote: false,
+        source: 'reed',
+        job_url: 'https://www.reed.co.uk/jobs/senior-product-manager/56654149',
+        application_url: null,
+        posted_at: null,
+      },
+      submission: {
+        status: 'applied',
+        method: 'automated',
+        confirmation_state: 'confirmed',
+        confirmation_detail: 'Application submitted — reference REED-88213',
+        external_reference: 'REED-88213',
+        submitted_at: '2026-08-13T21:05:00Z',
+        ats_score: 0.72,
+        apply_mode: 'review',
+        origin: 'discovery',
+        actor: 'agent',
+        recorded: true,
+      },
+      resume: {
+        recorded: true,
+        document_id: 'resume-1',
+        name: 'AI Product Manager CV',
+        kind: 'tailored',
+        ats_score: 0.88,
+        created_at: '2026-08-12T10:00:00Z',
+        archived: false,
+        has_pdf: true,
+        has_docx: false,
+      },
+      cover_letter: { recorded: true, used: true, name: 'zartis-cl-v2.pdf', origin: 'generated' },
+      account: {
+        recorded: true,
+        platform: 'reed',
+        account: 'sur***@example.com',
+        connected: true,
+        state: 'session_active',
+        detail: null,
+        last_used_at: '2026-08-13T21:04:00Z',
+      },
+      failure: null,
+      log: [
+        { at: '2026-08-13T21:04:12Z', source: 'application', kind: 'discovered', message: 'Job discovered', detail: null, actor: 'system' },
+        { at: '2026-08-13T21:05:05Z', source: 'automation', kind: 'step_1', message: 'Submission confirmation detected', detail: null, actor: 'agent' },
+      ],
+      log_recorded: true,
+    });
+  }),
+
   // Settings
   http.get('/api/v1/settings/', () => {
     return HttpResponse.json({

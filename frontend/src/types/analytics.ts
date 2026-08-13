@@ -7,6 +7,13 @@ export interface DashboardStats {
   applications_interview: number;
   applications_rejected: number;
   applications_offer: number;
+  applications_failed: number;
+  /** Agent activity right now. */
+  applications_queued: number;
+  applications_applying: number;
+  /** Submissions actually sent, counted on applied_at — a queued row is not one sent. */
+  submitted_today: number;
+  submitted_this_week: number;
   avg_ats_score: number;
   total_llm_cost_usd: number;
 }

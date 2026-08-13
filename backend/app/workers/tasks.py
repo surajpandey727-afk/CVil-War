@@ -32,7 +32,12 @@ from app.core.llm.factory import build_llm_client_for_user
 from app.db.session import async_session_factory
 from app.db.tenant import current_user_id
 from app.models.application import Application
-from app.models.enums import ApplicationStatus, RunVerdictResult
+from app.models.enums import (
+    ApplicationStatus,
+    ConfirmationState,
+    RunVerdictResult,
+    SubmissionMethod,
+)
 from app.models.harness import RunTrajectory
 from app.models.job import Job
 from app.observability.metrics import (
@@ -94,7 +99,16 @@ async def _submit_application(
     """
     if not get_settings().browser.live_apply:
         logger.info("apply.placeholder_submit", application_id=app.id)
-        return "placeholder-confirmation"
+        # Nothing was sent anywhere. Recorded as SIMULATED rather than returning a
+        # confirmation-shaped string, which is what made a rehearsal indistinguishable from a
+        # real submission in every downstream view.
+        app.submission_method = SubmissionMethod.SIMULATED
+        app.confirmation_state = ConfirmationState.SIMULATED
+        app.confirmation_detail = (
+            "Live apply is disabled (BROWSER__LIVE_APPLY=false), so no browser ran and "
+            "nothing was submitted to the employer."
+        )
+        return ""
 
     from app.core.automation.runtime.apply import ApplyPrerequisiteError, run_apply
 
@@ -109,7 +123,18 @@ async def _submit_application(
         raise
     if not result.submitted:
         raise RuntimeError(result.notes or "Submission not confirmed by the agent")
-    return result.confirmation_id or "submitted"
+    app.submission_method = SubmissionMethod.AUTOMATED
+    # A confirmation id means the portal acknowledged the submission and the agent could read
+    # it back. Without one the run finished cleanly but nothing corroborates it, and saying
+    # so is the whole point of the distinction.
+    reference = (result.confirmation_id or "").strip()
+    app.confirmation_state = (
+        ConfirmationState.CONFIRMED if reference else ConfirmationState.UNCONFIRMED
+    )
+    app.confirmation_detail = (result.notes or "").strip()[:500] or None
+    if reference:
+        app.external_reference = reference[:200]
+    return reference
 
 
 async def _ats_score(db: AsyncSession, app: Application) -> float | None:
@@ -201,6 +226,9 @@ async def _mark_failed(
     """Transition an application to terminal FAILED + emit the metric and progress event."""
     app.status = ApplicationStatus.FAILED
     app.notes = note
+    # A failed attempt never reached the employer; leaving confirmation_state at PENDING
+    # would let the evidence panel imply a submission was still in flight.
+    app.confirmation_state = ConfirmationState.FAILED
     await db.commit()
     applications_total.labels(status="failed", platform=platform).inc()
     await _publish(ctx, app.user_id, app.id, ApplicationStatus.FAILED.value, note)

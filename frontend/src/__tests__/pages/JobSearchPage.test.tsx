@@ -53,6 +53,8 @@ describe('JobSearchPage', () => {
       selectedJobIds: [],
       location: 'London, UK',
       query: '',
+      appliedLocation: '',
+      appliedQuery: '',
     });
   });
 
@@ -120,6 +122,36 @@ describe('JobSearchPage', () => {
     renderJobs();
     expect(await screen.findByText(/no jobs yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/no roles match these filters/i)).not.toBeInTheDocument();
+  });
+
+  it('says nothing matches the search rather than "no jobs yet" when one is applied', async () => {
+    // A third state, and the one that appears in practice: jobs exist, but none in the
+    // requested place. Rendering that as "No jobs yet" reads as a broken app rather than as
+    // a prompt to run the search.
+    useDiscoveryStore.setState({ appliedLocation: 'London, UK' });
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf())));
+    renderJobs();
+
+    expect(await screen.findByText(/nothing stored matches that search/i)).toBeInTheDocument();
+    expect(screen.getByText(/in London, UK/)).toBeInTheDocument();
+  });
+
+  it('sends the applied location to the server rather than filtering in the browser', async () => {
+    // The London bug in one assertion: the request carried no location, so the backend
+    // returned every stored job and the page rendered them all.
+    let seen: URLSearchParams | null = null;
+    useDiscoveryStore.setState({ appliedLocation: 'London, UK', appliedQuery: 'Product Manager' });
+    server.use(
+      http.get('/api/v1/jobs/', ({ request }) => {
+        seen = new URL(request.url).searchParams;
+        return HttpResponse.json(listOf(job()));
+      }),
+    );
+    renderJobs();
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+
+    expect(seen!.get('location')).toBe('London, UK');
+    expect(seen!.get('q')).toBe('Product Manager');
   });
 
   it('queues a whole selection through the batch endpoint', async () => {

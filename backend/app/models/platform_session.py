@@ -44,3 +44,13 @@ class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     state_detail: Mapped[str | None] = mapped_column(String(300), nullable=True)
     #: Count of applications currently relying on this session, for the connection centre.
     applications_tracked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    #: Safe, human-readable identification of *which* account this is — typically a
+    #: masked email (``sur***@example.com``). Needed because an operator debugging a
+    #: portal has to know which login was used, and "Reed" alone does not say.
+    #:
+    #: Deliberately a display string, never a credential: the password, cookies and
+    #: tokens live encrypted in ``user_credentials`` and are not readable from here.
+    #: Masking happens on the way in (see ``services.platform_session.mask_account``)
+    #: so the full address is never stored on this row at all.
+    account_label: Mapped[str | None] = mapped_column(String(120), nullable=True)

@@ -53,12 +53,20 @@ export default function JobSearchPage() {
   const notify = useAppStore((s) => s.showNotification);
 
   const {
-    query, location, activeTitles, activeFamilies, enabledSources, filters, selectedJobIds,
-    setQuery, setLocation, toggleFamily, toggleSource, patchFilters, resetFilters,
+    query, location, appliedLocation, appliedQuery, activeTitles, activeFamilies,
+    enabledSources, filters, selectedJobIds,
+    setQuery, setLocation, commitSearch, toggleFamily, toggleSource, patchFilters, resetFilters,
     toggleJob, setSelected, clearSelection,
   } = useDiscoveryStore();
 
-  const { data, isLoading, isError } = useJobs(1, 100);
+  // The location and title filters go to the server, which matches them against the stored
+  // job location rather than the rendered text. Doing this in the browser is what made a
+  // London search return a Cleveland accounts-payable role: the filter was never applied at
+  // all, and `total` counted every job the account had ever cached.
+  const { data, isLoading, isError } = useJobs(1, 100, undefined, {
+    location: appliedLocation,
+    query: appliedQuery,
+  });
   const { data: resumeData } = useResumes();
   const search = useSearchJobs();
   const analyze = useAnalyzeJob();
@@ -137,6 +145,9 @@ export default function JobSearchPage() {
       notify('None of the enabled sources have a working adapter yet', 'warning');
       return;
     }
+    // Promote the typed boxes to the filter the list is fetched with, so the results shown
+    // after a search are the results of *that* search.
+    commitSearch();
     search.mutate(
       { query: effective, location: location.trim() || undefined, platforms: usable, limit: 100 },
       {
@@ -334,12 +345,21 @@ export default function JobSearchPage() {
               <Icon name="search" size={20} />
             </div>
             <div style={{ font: '700 14px/1.2 var(--font)', color: 'var(--text)' }}>
-              {allJobs.length ? 'No roles match these filters' : 'No jobs yet'}
+              {allJobs.length
+                ? 'No roles match these filters'
+                : appliedLocation.trim() || appliedQuery.trim()
+                  ? 'Nothing stored matches that search'
+                  : 'No jobs yet'}
             </div>
             <span>
+              {/* Three different situations that all used to render as "No jobs yet". The
+                  location filter now runs on the server, so an empty list can mean "nothing
+                  in London yet" — which is a prompt to search, not evidence of a broken app. */}
               {allJobs.length
                 ? `${allJobs.length} stored roles were filtered out. Lower the ATS threshold, widen seniority, or enable more sources.`
-                : 'Run a search above to discover roles across the enabled sources.'}
+                : appliedLocation.trim() || appliedQuery.trim()
+                  ? `No stored roles${appliedQuery.trim() ? ` matching “${appliedQuery.trim()}”` : ''}${appliedLocation.trim() ? ` in ${appliedLocation.trim()}` : ''}. Run the search to pull fresh ones from the enabled sources.`
+                  : 'Run a search above to discover roles across the enabled sources.'}
             </span>
             {allJobs.length > 0 && (
               <button onClick={resetFilters} style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}>Reset filters</button>

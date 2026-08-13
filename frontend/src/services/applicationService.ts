@@ -1,4 +1,5 @@
 import api from './api';
+import type { ApplicationEvidence } from '@/types/evidence';
 import type {
   Application,
   ApplicationCreate,
@@ -73,5 +74,15 @@ export async function updateApplicationStatus(
   update: ApplicationStatusUpdate,
 ): Promise<Application> {
   const { data } = await api.put<Application>(`/applications/${appId}/status`, update);
+  return data;
+}
+
+/**
+ * Everything needed to prove what happened to one application: job, submission, documents,
+ * account, run log and failure detail. Sections that were never recorded come back flagged,
+ * so the panel can say "Not recorded" rather than render a convincing blank.
+ */
+export async function getApplicationEvidence(appId: string): Promise<ApplicationEvidence> {
+  const { data } = await api.get<ApplicationEvidence>(`/applications/${appId}/evidence`);
   return data;
 }
