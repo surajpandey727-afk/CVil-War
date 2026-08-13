@@ -7,8 +7,12 @@ import { useDashboardStats } from '@/hooks/useAnalytics';
 const CRUMB: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/jobs': 'Jobs',
+  '/run': 'Run console',
   '/applications': 'Applications',
   '/resumes': 'Résumés',
+  '/targets': 'Role targets',
+  '/sources': 'Sources',
+  '/automation': 'Automation',
   '/analytics': 'Insights',
   '/settings': 'Settings',
   '/admin': 'System health',
@@ -77,7 +81,6 @@ export default function Header() {
           <span style={{ font: '700 12px/1 var(--mono)', color: 'var(--text)' }}>${stats.total_llm_cost_usd.toFixed(2)}</span>
         </div>
       )}
-      {/* Activity bell intentionally removed — the activity feed lands with live-apply. */}
     </header>
   );
 }

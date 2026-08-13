@@ -55,7 +55,10 @@ async def update_settings(
     """Update the current user's settings. Only provided fields are changed."""
     settings = await _get_or_create_settings(db, user.id)
 
-    update_data = update.model_dump(exclude_unset=True)
+    # ``mode="json"`` matters: `candidate_profile`, `role_targets` and `automation` are nested
+    # Pydantic models bound to JSON columns. Without it SQLAlchemy is handed model instances
+    # and the JSON serializer raises at flush time.
+    update_data = update.model_dump(exclude_unset=True, mode="json")
     for field, value in update_data.items():
         setattr(settings, field, value)
 

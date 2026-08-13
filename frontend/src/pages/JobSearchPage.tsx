@@ -1,68 +1,110 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import JobDrawer from '@/components/jobs/JobDrawer';
 import { useJobs, useSearchJobs, useAnalyzeJob } from '@/hooks/useJobs';
-import { useCreateApplication } from '@/hooks/useApplications';
+import { useCreateApplicationBatch } from '@/hooks/useApplications';
 import { useResumes, useGenerateResume } from '@/hooks/useResumes';
 import { useAppStore } from '@/store/useAppStore';
-import { atsColor, relativeTime } from '@/lib/status';
+import { useDiscoveryStore } from '@/store/useDiscoveryStore';
+import { atsColor, atsPercent, relativeTime } from '@/lib/status';
+import { ROLE_FAMILIES, familyForTitle, queryForTitles, type RoleFamily } from '@/lib/roleTargets';
+import {
+  HEALTH_META, SOURCE_BY_KEY, SOURCE_TIERS, sourceLabel, sourcesInTier,
+} from '@/lib/sources';
 import type { Job, JobAnalysisResponse } from '@/types/job';
 
 const card: React.CSSProperties = {
-  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)',
+  background: 'var(--surface)', border: '1px solid var(--border)',
+  borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)',
 };
 
-/**
- * Selectable job sources.
- *
- * `working: false` marks sources that are registered but cannot currently return results —
- * LinkedIn/Indeed/Glassdoor go through a browser-automation path that targets a removed
- * browser-use API, and Exa needs an API key. They stay listed (and are disabled + labelled)
- * rather than being hidden, because silently dropping them is what made the old UI show a
- * neutral "No matching roles" for what was actually a dead subsystem.
- */
-const PLATFORMS: {
-  key: string;
-  label: string;
-  color: string;
-  working: boolean;
-  note?: string;
-}[] = [
-  { key: 'remotive', label: 'Remotive', color: 'var(--accent)', working: true },
-  { key: 'jobicy', label: 'Jobicy', color: 'var(--secondary)', working: true },
-  { key: 'arbeitnow', label: 'Arbeitnow', color: 'var(--interview)', working: true },
-  { key: 'remoteok', label: 'RemoteOK', color: 'var(--offer)', working: true },
-  { key: 'linkedin', label: 'LinkedIn', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
-  { key: 'indeed', label: 'Indeed', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
-  { key: 'glassdoor', label: 'Glassdoor', color: 'var(--text-4)', working: false, note: 'Scraper offline' },
-  { key: 'exa', label: 'Exa', color: 'var(--text-4)', working: false, note: 'Needs API key' },
+const SENIORITY = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
+const POSTED: { key: '24h' | '7d' | '30d' | 'any'; label: string; days: number }[] = [
+  { key: '24h', label: '24h', days: 1 },
+  { key: '7d', label: '7d', days: 7 },
+  { key: '30d', label: '30d', days: 30 },
+  { key: 'any', label: 'Any', days: 3650 },
 ];
 
-const WORKING_PLATFORMS = PLATFORMS.filter((p) => p.working).map((p) => p.key);
+/** Lowest number in a salary string, in thousands. `null` when no band is published. */
+function salaryK(range: string | null): number | null {
+  if (!range) return null;
+  const nums = range.match(/\d[\d,.]*/g);
+  if (!nums) return null;
+  const values = nums.map((n) => {
+    const v = Number(n.replace(/[,]/g, ''));
+    return v > 1000 ? v / 1000 : v;
+  });
+  return Math.min(...values);
+}
+
+function ageInDays(iso: string | null): number {
+  if (!iso) return 9999;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 9999;
+  return (Date.now() - t) / 86_400_000;
+}
 
 export default function JobSearchPage() {
   const navigate = useNavigate();
   const notify = useAppStore((s) => s.showNotification);
-  const [query, setQuery] = useState('');
-  const [location, setLocation] = useState('');
-  // Only the sources that can actually return results are selected by default; including the
-  // offline ones just adds guaranteed-failing round-trips to every search.
-  const [platforms, setPlatforms] = useState<Set<string>>(new Set(WORKING_PLATFORMS));
-  const { data, isLoading, isError } = useJobs(1, 30);
+
+  const {
+    query, location, activeTitles, activeFamilies, enabledSources, filters, selectedJobIds,
+    setQuery, setLocation, toggleFamily, toggleSource, patchFilters, resetFilters,
+    toggleJob, setSelected, clearSelection,
+  } = useDiscoveryStore();
+
+  const { data, isLoading, isError } = useJobs(1, 100);
   const { data: resumeData } = useResumes();
   const search = useSearchJobs();
   const analyze = useAnalyzeJob();
-  const createApp = useCreateApplication();
+  const createApps = useCreateApplicationBatch();
   const generate = useGenerateResume();
 
   const [drawerJob, setDrawerJob] = useState<Job | null>(null);
   const [analysis, setAnalysis] = useState<JobAnalysisResponse | null>(null);
+  const [runResumeId, setRunResumeId] = useState<string>('auto');
 
-  const jobs = data?.items ?? [];
-  const resumes = resumeData?.items ?? [];
+  const resumes = useMemo(() => resumeData?.items ?? [], [resumeData]);
   const baseResumeId = resumes.find((r) => r.type === 'base')?.id ?? resumes[0]?.id ?? null;
+  const allJobs = useMemo(() => data?.items ?? [], [data]);
+
+  /** Client-side filtering. The backend returns the stored corpus; these are the operator's
+   *  standing preferences, applied to whatever is in it. */
+  const jobs = useMemo(() => {
+    const maxAge = POSTED.find((p) => p.key === filters.postedWithin)?.days ?? 3650;
+    const out = allJobs.filter((j) => {
+      if (enabledSources.length && !enabledSources.includes(j.platform)) return false;
+      if (atsPercent(j.match_score) < filters.minAtsScore && j.match_score != null) return false;
+      if (filters.remoteOnly && !j.remote) return false;
+      if (filters.hideApplied && j.status !== 'new' && j.status !== 'discovered') return false;
+      // A missing posted_date is unknown, not old: excluding it would silently drop every
+      // source that does not publish one (Arbeitnow, several career pages).
+      if (j.posted_date && ageInDays(j.posted_date) > maxAge) return false;
+      const band = salaryK(j.salary_range);
+      if (filters.publishedSalaryOnly && band == null) return false;
+      if (filters.minSalaryK > 0 && band != null && band < filters.minSalaryK) return false;
+      if (filters.seniority.length) {
+        const level = (j.experience_level ?? '').toLowerCase();
+        if (!filters.seniority.some((s) => level.includes(s.toLowerCase()))) return false;
+      }
+      if (activeFamilies.length && !activeFamilies.includes(familyForTitle(j.title))) return false;
+      return true;
+    });
+    out.sort((a, b) => {
+      if (filters.sort === 'match') return atsPercent(b.match_score) - atsPercent(a.match_score);
+      if (filters.sort === 'newest') return ageInDays(a.posted_date) - ageInDays(b.posted_date);
+      return (salaryK(b.salary_range) ?? 0) - (salaryK(a.salary_range) ?? 0);
+    });
+    return out;
+  }, [allJobs, enabledSources, filters, activeFamilies]);
+
+  const selected = selectedJobIds.filter((id) => jobs.some((j) => j.id === id));
+  const allSelected = jobs.length > 0 && selected.length === jobs.length;
 
   const openDrawer = (job: Job) => {
     setDrawerJob(job);
@@ -84,215 +126,441 @@ export default function JobSearchPage() {
     );
   };
 
-  const togglePlatform = (key: string) =>
-    setPlatforms((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-
   const runSearch = () => {
-    if (!query.trim()) { notify('Enter a job title or keywords to search', 'warning'); return; }
+    const effective = query.trim() || queryForTitles(activeTitles);
+    if (!effective) {
+      notify('Add at least one role target, or type a search term', 'warning');
+      return;
+    }
+    const usable = enabledSources.filter((k) => SOURCE_BY_KEY[k]?.implemented);
+    if (!usable.length) {
+      notify('None of the enabled sources have a working adapter yet', 'warning');
+      return;
+    }
     search.mutate(
-      { query: query.trim(), location: location.trim() || undefined, platforms: [...platforms] },
+      { query: effective, location: location.trim() || undefined, platforms: usable, limit: 100 },
       {
-        onSuccess: (r) => notify(`Found ${r.total} matching roles`, 'success'),
+        onSuccess: (r) => notify(`Found ${r.total} matching roles across ${usable.length} sources`, 'success'),
         onError: () => notify('Search failed — try again', 'error'),
       },
     );
   };
 
-  const onAnalyze = (job: Job) =>
-    analyze.mutate(job.id, {
-      onSuccess: (r) => notify(`Analyzed · ${Math.round(r.match_score * 100)} ATS match`, 'success'),
-      onError: () => notify('Could not analyze this job', 'error'),
-    });
-
-  const onApply = (job: Job) =>
-    createApp.mutate(
-      { job_id: job.id, apply_mode: 'review' },
+  /** Queue every ticked job in one request. `review` keeps the approval gate before submit;
+   *  the worker then emits progress over the existing application WebSocket. */
+  const startRun = () => {
+    if (!selected.length) return;
+    createApps.mutate(
       {
-        onSuccess: () => { notify(`Queued · ${job.title}`, 'success'); navigate('/applications'); },
-        onError: () => notify('Could not create the application', 'error'),
+        job_ids: selected,
+        apply_mode: 'review',
+        resume_id: runResumeId === 'auto' ? null : runResumeId,
+      },
+      {
+        onSuccess: (apps) => {
+          notify(`Run started · ${apps.length} applications queued`, 'success');
+          clearSelection();
+          navigate('/applications');
+        },
+        onError: () => notify('Could not queue the run', 'error'),
       },
     );
+  };
+
+  const enabledInTier = (tier: (typeof SOURCE_TIERS)[number]['id']) =>
+    sourcesInTier(tier).filter((s) => enabledSources.includes(s.key)).length;
 
   return (
-    <div style={{ animation: 'aaUp .4s var(--ease) both' }}>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ margin: 0, font: '800 24px/1.1 var(--font)', letterSpacing: '-.03em' }}>Jobs</h1>
-        <p style={{ margin: '6px 0 0', font: '500 13px/1.4 var(--font)', color: 'var(--text-3)' }}>Search across platforms and let the agent score every match against your résumé.</p>
-      </div>
-
-      {/* Search bar */}
-      <form
-        onSubmit={(e) => { e.preventDefault(); runSearch(); }}
-        style={{ ...card, display: 'flex', gap: 10, padding: 12, marginBottom: 14, flexWrap: 'wrap' }}
-      >
-        <div style={{ flex: '2 1 260px', display: 'flex', alignItems: 'center', gap: 9, height: 40, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>
-          <span style={{ color: 'var(--text-3)', display: 'grid', placeItems: 'center' }}><Icon name="search" size={16} /></span>
-          <input
-            aria-label="Job title or keywords"
-            placeholder="Job title, skills, or company"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ flex: 1, background: 'transparent', border: 0, outline: 'none', color: 'var(--text)', font: '500 13px/1 var(--font)' }}
-          />
+    <div style={{ animation: 'aaUp .4s var(--ease) both', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      {/* ---- Left rail: targets, filters, sources ------------------------------------ */}
+      <div style={{ flex: '0 0 268px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...card, padding: 14 }}>
+          <RailHead label="Role targets" action="Edit" onAction={() => navigate('/settings')} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(Object.keys(ROLE_FAMILIES) as RoleFamily[]).map((f) => (
+              <Chip key={f} on={activeFamilies.includes(f)} onClick={() => toggleFamily(f)}>
+                {ROLE_FAMILIES[f].short}
+              </Chip>
+            ))}
+          </div>
+          <div style={{ font: '500 11px/1.4 var(--font)', color: 'var(--text-4)', marginTop: 10 }}>
+            {activeTitles.length} titles active · {activeFamilies.length ? 'filtered' : 'all families'}
+          </div>
         </div>
-        <div style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 9, height: 40, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>
-          <span style={{ color: 'var(--text-3)', display: 'grid', placeItems: 'center' }}><Icon name="mappin" size={16} /></span>
-          <input
-            aria-label="Location"
-            placeholder="Location or Remote"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            style={{ flex: 1, background: 'transparent', border: 0, outline: 'none', color: 'var(--text)', font: '500 13px/1 var(--font)' }}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={search.isPending}
-          style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 7, height: 40, padding: '0 18px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 13px/1 var(--font)', cursor: 'pointer' }}
-        >
-          {search.isPending ? 'Searching…' : 'Search'}
-        </button>
-      </form>
 
-      {/* Platform chips */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {PLATFORMS.map((p) => {
-          const on = platforms.has(p.key);
-          return (
-            <button
-              key={p.key}
-              aria-pressed={on}
-              aria-disabled={!p.working}
-              title={p.note}
-              onClick={() => p.working && togglePlatform(p.key)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 999, cursor: p.working ? 'pointer' : 'not-allowed', font: '600 12px/1 var(--font)', border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-3)', opacity: p.working ? 1 : 0.45 }}
-            >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? p.color : 'var(--text-4)' }} /> {p.label}
-              {!p.working && (
-                <span style={{ font: '600 9px/1 var(--mono)', color: 'var(--text-4)', letterSpacing: '.04em' }}>
-                  OFFLINE
+        <div style={{ ...card, padding: 14 }}>
+          <div style={{ font: '700 12.5px/1 var(--font)', marginBottom: 12 }}>Filters</div>
+
+          <RangeRow
+            label="MIN ATS MATCH" value={`${filters.minAtsScore}%`}
+            min={0} max={95} step={5} current={filters.minAtsScore}
+            onChange={(v) => patchFilters({ minAtsScore: v })}
+          />
+          <RangeRow
+            label="MIN SALARY" value={filters.minSalaryK ? `£${filters.minSalaryK}k` : 'Any'}
+            min={0} max={150} step={5} current={filters.minSalaryK}
+            onChange={(v) => patchFilters({ minSalaryK: v })}
+          />
+
+          <FieldLabel>SENIORITY</FieldLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+            {SENIORITY.map((s) => (
+              <Chip
+                key={s} small on={filters.seniority.includes(s)}
+                onClick={() => patchFilters({
+                  seniority: filters.seniority.includes(s)
+                    ? filters.seniority.filter((x) => x !== s)
+                    : [...filters.seniority, s],
+                })}
+              >
+                {s}
+              </Chip>
+            ))}
+          </div>
+
+          <FieldLabel>POSTED WITHIN</FieldLabel>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+            {POSTED.map((p) => (
+              <Chip key={p.key} small on={filters.postedWithin === p.key} onClick={() => patchFilters({ postedWithin: p.key })}>
+                {p.label}
+              </Chip>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <CheckRow label="Remote or hybrid only" on={filters.remoteOnly} onClick={() => patchFilters({ remoteOnly: !filters.remoteOnly })} />
+            <CheckRow label="Hide already applied" on={filters.hideApplied} onClick={() => patchFilters({ hideApplied: !filters.hideApplied })} />
+            <CheckRow label="Published salary only" on={filters.publishedSalaryOnly} onClick={() => patchFilters({ publishedSalaryOnly: !filters.publishedSalaryOnly })} />
+          </div>
+
+          <button onClick={resetFilters} style={ghostBtn}>Reset filters</button>
+        </div>
+
+        <div style={{ ...card, padding: 14 }}>
+          <RailHead label="Sources" action="Manage" onAction={() => navigate('/settings')} />
+          {SOURCE_TIERS.map((tier) => (
+            <div key={tier.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '6px 2px' }}>
+                <span style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)' }}>
+                  {tier.name.replace(/ —.*/, '').toUpperCase()}
                 </span>
-              )}
-            </button>
-          );
-        })}
+                <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)' }}>
+                  {enabledInTier(tier.id)}/{sourcesInTier(tier.id).length}
+                </span>
+              </div>
+              {sourcesInTier(tier.id).slice(0, 6).map((src) => {
+                const on = enabledSources.includes(src.key);
+                const meta = HEALTH_META[src.health];
+                return (
+                  <button
+                    key={src.key} onClick={() => toggleSource(src.key)} title={src.note ?? meta.label}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 30,
+                      padding: '0 8px', borderRadius: 'var(--r-sm)', border: 0, cursor: 'pointer',
+                      background: 'transparent', font: '600 11.5px/1 var(--font)',
+                      color: on ? 'var(--text-2)' : 'var(--text-4)',
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? meta.color : 'var(--text-4)', flex: '0 0 auto' }} />
+                    <span style={{ flex: '1 1 auto', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {src.label}
+                    </span>
+                    {!src.implemented && (
+                      <span style={{ font: '600 9px/1 var(--mono)', color: 'var(--text-4)' }}>SOON</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Results grid */}
-      {isError ? (
-        <div style={{ ...card, ...notice }}><span style={{ color: 'var(--failed)' }}><Icon name="alert" size={16} /></span> Couldn't load jobs. Retry in a moment.</div>
-      ) : isLoading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} style={{ ...card, height: 150, background: 'linear-gradient(90deg,var(--surface-2),var(--hover),var(--surface-2))', backgroundSize: '200% 100%', animation: 'aaShimmer 1.3s linear infinite' }} />
-          ))}
+      {/* ---- Results ------------------------------------------------------------------ */}
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <form
+          onSubmit={(e) => { e.preventDefault(); runSearch(); }}
+          style={{ ...card, display: 'flex', gap: 10, padding: 12, marginBottom: 12, flexWrap: 'wrap' }}
+        >
+          <SearchField icon="search" label="Job title or keywords" placeholder={queryForTitles(activeTitles.slice(0, 2)) || 'Job title, skills, or company'} value={query} onChange={setQuery} grow={2} />
+          <SearchField icon="mappin" label="Location" placeholder="London, UK" value={location} onChange={setLocation} grow={1} />
+          <button
+            type="submit" disabled={search.isPending}
+            style={{
+              flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 7, height: 40,
+              padding: '0 18px', borderRadius: 'var(--r-md)', background: 'var(--accent)',
+              border: '1px solid var(--accent)', color: 'var(--accent-ink)',
+              font: '700 13px/1 var(--font)', cursor: 'pointer',
+            }}
+          >
+            {search.isPending ? 'Searching…' : 'Search'}
+          </button>
+        </form>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setSelected(allSelected ? [] : jobs.map((j) => j.id))}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+          >
+            <CheckBox on={allSelected} />
+            <span style={{ font: '600 12px/1 var(--font)', color: 'var(--text-2)' }}>
+              {jobs.length} roles · {selected.length} selected
+            </span>
+          </button>
+          <div style={{ flex: '1 1 auto' }} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['match', 'newest', 'salary'] as const).map((k) => (
+              <Chip key={k} small on={filters.sort === k} onClick={() => patchFilters({ sort: k })}>
+                {k[0]!.toUpperCase() + k.slice(1)}
+              </Chip>
+            ))}
+          </div>
         </div>
-      ) : jobs.length === 0 ? (
-        <div style={{ ...card, ...notice, flexDirection: 'column', gap: 8, padding: '46px 20px' }}>
-          <div style={{ display: 'grid', placeItems: 'center', width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon name="search" size={20} /></div>
-          {search.isSuccess ? (
-            <>
-              <div style={{ font: '700 14px/1.2 var(--font)', color: 'var(--text)' }}>No matching roles</div>
-              <span>Nothing matched your search. Try broadening the keywords, changing the location, or enabling more platforms.</span>
-            </>
-          ) : (
-            <>
-              <div style={{ font: '700 14px/1.2 var(--font)', color: 'var(--text)' }}>No jobs yet</div>
-              <span>Run a search above to discover roles across platforms.</span>
-            </>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-          {jobs.map((j) => (
-            <JobCardView key={j.id} job={j} onOpen={() => openDrawer(j)} onAnalyze={() => onAnalyze(j)} onApply={() => onApply(j)} analyzing={analyze.isPending} applying={createApp.isPending} />
-          ))}
+
+        {isError ? (
+          <div style={{ ...card, ...notice }}>
+            <span style={{ color: 'var(--failed)' }}><Icon name="alert" size={16} /></span>
+            Couldn&apos;t load jobs. Retry in a moment.
+          </div>
+        ) : isLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} style={{ ...card, height: 118, background: 'linear-gradient(90deg,var(--surface-2),var(--hover),var(--surface-2))', backgroundSize: '200% 100%', animation: 'aaShimmer 1.3s linear infinite' }} />
+            ))}
+          </div>
+        ) : jobs.length === 0 ? (
+          <div style={{ ...card, ...notice, flexDirection: 'column', gap: 8, padding: '46px 20px' }}>
+            <div style={{ display: 'grid', placeItems: 'center', width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+              <Icon name="search" size={20} />
+            </div>
+            <div style={{ font: '700 14px/1.2 var(--font)', color: 'var(--text)' }}>
+              {allJobs.length ? 'No roles match these filters' : 'No jobs yet'}
+            </div>
+            <span>
+              {allJobs.length
+                ? `${allJobs.length} stored roles were filtered out. Lower the ATS threshold, widen seniority, or enable more sources.`
+                : 'Run a search above to discover roles across the enabled sources.'}
+            </span>
+            {allJobs.length > 0 && (
+              <button onClick={resetFilters} style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}>Reset filters</button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {jobs.map((j) => (
+              <JobRow
+                key={j.id} job={j} selected={selected.includes(j.id)}
+                onToggle={() => toggleJob(j.id)} onOpen={() => openDrawer(j)}
+                onApply={() => { setSelected([j.id]); notify(`Selected · ${j.title}`, 'success'); }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ---- Selection bar ------------------------------------------------------------- */}
+      {selected.length > 0 && (
+        <div
+          style={{
+            position: 'fixed', left: '50%', bottom: 22, transform: 'translateX(-50%)', zIndex: 80,
+            display: 'flex', alignItems: 'center', gap: 14, padding: '11px 12px 11px 18px',
+            borderRadius: 'var(--r-lg)', background: 'var(--surface-2)', border: '1px solid var(--border-2)',
+            boxShadow: 'var(--shadow-pop)', animation: 'aaPop .16s var(--ease)', flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--text)' }}>
+            {selected.length} role{selected.length === 1 ? '' : 's'} selected
+          </span>
+          <span style={{ width: 1, height: 20, background: 'var(--border-2)' }} />
+          <span style={{ font: '600 11.5px/1 var(--font)', color: 'var(--text-3)' }}>CV</span>
+          <select
+            value={runResumeId} onChange={(e) => setRunResumeId(e.target.value)}
+            style={{ height: 32, padding: '0 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', maxWidth: 240 }}
+          >
+            <option value="auto">Auto — rule-based per role</option>
+            {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <button onClick={clearSelection} style={{ height: 32, padding: '0 12px', borderRadius: 'var(--r-sm)', background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}>
+            Clear
+          </button>
+          <button
+            onClick={startRun} disabled={createApps.isPending}
+            style={{ height: 32, padding: '0 16px', borderRadius: 'var(--r-sm)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}
+          >
+            {createApps.isPending ? 'Queueing…' : 'Start applying'}
+          </button>
         </div>
       )}
 
       {drawerJob && (
         <JobDrawer
-          job={drawerJob}
-          analysis={analysis}
-          analyzing={analyze.isPending}
-          baseResumeId={baseResumeId}
-          generating={generate.isPending}
-          onClose={() => setDrawerJob(null)}
-          onGenerate={onGenerateTailored}
+          job={drawerJob} analysis={analysis} analyzing={analyze.isPending}
+          baseResumeId={baseResumeId} generating={generate.isPending}
+          onClose={() => setDrawerJob(null)} onGenerate={onGenerateTailored}
         />
       )}
     </div>
   );
 }
 
-const notice: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '30px 20px', color: 'var(--text-3)', font: '500 12.5px/1.4 var(--font)', textAlign: 'center' };
+/* -- pieces ------------------------------------------------------------------------- */
 
-function ScoreRing({ score }: { score: number | null }) {
-  const r = 15.5;
-  const c = 2 * Math.PI * r;
-  const pct = score != null ? Math.max(0, Math.min(1, score)) : 0;
-  const color = score != null ? atsColor(Math.round(score * 100)) : 'var(--text-4)';
+const notice: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '30px 20px',
+  color: 'var(--text-3)', font: '500 12.5px/1.4 var(--font)', textAlign: 'center',
+};
+
+const ghostBtn: React.CSSProperties = {
+  width: '100%', marginTop: 14, height: 32, borderRadius: 'var(--r-md)', background: 'var(--surface-2)',
+  border: '1px solid var(--border)', color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer',
+};
+
+function RailHead({ label, action, onAction }: { label: string; action: string; onAction: () => void }) {
   return (
-    <div style={{ position: 'relative', width: 40, height: 40, flex: '0 0 auto' }}>
-      <svg width={40} height={40} viewBox="0 0 40 40" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={20} cy={20} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={3.5} />
-        <circle cx={20} cy={20} r={r} fill="none" stroke={color} strokeWidth={3.5} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
-      </svg>
-      <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', font: '700 11px/1 var(--mono)', color }}>
-        {score != null ? Math.round(score * 100) : '—'}
-      </span>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 }}>
+      <span style={{ font: '700 12.5px/1 var(--font)' }}>{label}</span>
+      <button onClick={onAction} style={{ background: 'none', border: 0, color: 'var(--accent)', font: '600 11px/1 var(--font)', cursor: 'pointer', padding: 0 }}>
+        {action}
+      </button>
     </div>
   );
 }
 
-function JobCardView({ job, onOpen, onAnalyze, onApply, analyzing, applying }: { job: Job; onOpen: () => void; onAnalyze: () => void; onApply: () => void; analyzing: boolean; applying: boolean }) {
-  const plat = PLATFORMS.find((p) => p.key === job.platform);
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)', marginBottom: 8 }}>{children}</div>;
+}
+
+function RangeRow({ label, value, min, max, step, current, onChange }: {
+  label: string; value: string; min: number; max: number; step: number; current: number; onChange: (v: number) => void;
+}) {
   return (
-    <div style={{ ...card, padding: 15, display: 'flex', flexDirection: 'column', gap: 11 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-        <ScoreRing score={job.match_score} />
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: plat?.color ?? 'var(--text-4)' }} /> {plat?.label ?? job.platform}
-        </span>
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)' }}>{label}</span>
+        <span style={{ font: '700 11px/1 var(--mono)', color: 'var(--accent)' }}>{value}</span>
       </div>
-      <div>
-        <button onClick={onOpen} style={{ display: 'block', width: '100%', textAlign: 'left', padding: 0, margin: 0, background: 'none', border: 0, cursor: 'pointer', font: '700 14px/1.3 var(--font)', color: 'var(--text)' }}>{job.title}</button>
-        <div style={{ font: '500 12px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 3 }}>{job.company} · {job.location || (job.remote ? 'Remote' : '—')}</div>
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {job.remote && <Tag>Remote</Tag>}
-        {job.job_type && <Tag>{job.job_type}</Tag>}
-        {job.posted_date && <Tag>{relativeTime(job.posted_date)}</Tag>}
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-        {job.match_score == null && (
-          <button onClick={onAnalyze} disabled={analyzing} style={btn('ghost')}>
-            <Icon name="target" size={13} sw={2} /> Analyze
-          </button>
-        )}
-        <button onClick={onApply} disabled={applying} style={btn('primary')}>
-          <Icon name="check" size={13} sw={2.2} /> Apply
+      <input
+        type="range" min={min} max={max} step={step} value={current} aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: 'var(--accent)' }}
+      />
+    </div>
+  );
+}
+
+function CheckBox({ on }: { on: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'grid', placeItems: 'center', width: 17, height: 17, borderRadius: 5, flex: '0 0 auto',
+        border: `1px solid ${on ? 'var(--accent)' : 'var(--border-3)'}`, background: on ? 'var(--accent)' : 'transparent',
+      }}
+    >
+      {on && <Icon name="check" size={11} sw={3.4} />}
+    </span>
+  );
+}
+
+function CheckRow({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 0, padding: 0, cursor: 'pointer', width: '100%' }}>
+      <CheckBox on={on} />
+      <span style={{ flex: '1 1 auto', textAlign: 'left', font: '600 12px/1 var(--font)', color: 'var(--text-2)' }}>{label}</span>
+    </button>
+  );
+}
+
+function Chip({ on, small, onClick, children }: { on: boolean; small?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick} aria-pressed={on}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, height: small ? 26 : 28,
+        padding: `0 ${small ? 9 : 11}px`, borderRadius: 999, cursor: 'pointer',
+        font: `600 ${small ? 11 : 11.5}px/1 var(--font)`,
+        border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`,
+        background: on ? 'var(--accent-soft)' : 'var(--surface-2)',
+        color: on ? 'var(--accent)' : 'var(--text-3)',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SearchField({ icon, label, placeholder, value, onChange, grow }: {
+  icon: 'search' | 'mappin'; label: string; placeholder: string; value: string; onChange: (v: string) => void; grow: number;
+}) {
+  return (
+    <div style={{ flex: `${grow} 1 ${grow === 2 ? 260 : 180}px`, display: 'flex', alignItems: 'center', gap: 9, height: 40, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>
+      <span style={{ color: 'var(--text-3)', display: 'grid', placeItems: 'center' }}><Icon name={icon} size={16} /></span>
+      <input
+        aria-label={label} placeholder={placeholder} value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 0, outline: 'none', color: 'var(--text)', font: '500 13px/1 var(--font)' }}
+      />
+    </div>
+  );
+}
+
+function JobRow({ job, selected, onToggle, onOpen, onApply }: {
+  job: Job; selected: boolean; onToggle: () => void; onOpen: () => void; onApply: () => void;
+}) {
+  const pct = atsPercent(job.match_score);
+  const src = SOURCE_BY_KEY[job.platform];
+  const tags = [job.salary_range, job.job_type, job.experience_level, job.remote ? 'Remote' : null]
+    .filter(Boolean) as string[];
+
+  return (
+    <div style={{ ...card, padding: '15px 16px', borderColor: selected ? 'var(--accent-line)' : 'var(--border)' }}>
+      <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start' }}>
+        <button onClick={onToggle} aria-label="Select role" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', marginTop: 3, flex: '0 0 auto' }}>
+          <CheckBox on={selected} />
         </button>
+        <CompanyLogo name={job.company} />
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+          <button onClick={onOpen} style={{ display: 'block', textAlign: 'left', padding: 0, background: 'none', border: 0, cursor: 'pointer', font: '700 14.5px/1.25 var(--font)', color: 'var(--text)' }}>
+            {job.title}
+          </button>
+          <div style={{ font: '500 12.5px/1.3 var(--font)', color: 'var(--text-2)', marginTop: 4 }}>
+            {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
+            {tags.map((t) => (
+              <span key={t} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
+                {t}
+              </span>
+            ))}
+            {job.posted_date && (
+              <span style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
+                {relativeTime(job.posted_date)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: src ? HEALTH_META[src.health].color : 'var(--text-4)' }} />
+              {sourceLabel(job.platform)}
+            </span>
+            <span
+              title="ATS match"
+              style={{ display: 'inline-grid', placeItems: 'center', minWidth: 44, height: 26, padding: '0 9px', borderRadius: 'var(--r-sm)', font: '700 12.5px/1 var(--mono)', color: job.match_score == null ? 'var(--text-4)' : atsColor(pct), background: 'var(--surface-2)' }}
+            >
+              {job.match_score == null ? '—' : `${pct}%`}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <a href={job.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 11.5px/1 var(--font)', textDecoration: 'none' }}>
+              Posting
+            </a>
+            <button onClick={onApply} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 11.5px/1 var(--font)', cursor: 'pointer' }}>
+              Apply
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
-}
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return <span style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>{children}</span>;
-}
-
-function btn(kind: 'primary' | 'ghost'): React.CSSProperties {
-  const primary = kind === 'primary';
-  return {
-    flex: '1 1 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 32,
-    padding: '0 12px', borderRadius: 'var(--r-md)', cursor: 'pointer', font: '700 12px/1 var(--font)',
-    background: primary ? 'var(--accent)' : 'var(--surface-2)', border: `1px solid ${primary ? 'var(--accent)' : 'var(--border)'}`,
-    color: primary ? 'var(--accent-ink)' : 'var(--text-2)',
-  };
 }

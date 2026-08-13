@@ -15,13 +15,22 @@ interface NavItem {
   icon: IconName;
 }
 
+/** Day-to-day workspace. */
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'grid' },
   { to: '/jobs', label: 'Jobs', icon: 'briefcase' },
+  { to: '/run', label: 'Run console', icon: 'activity' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },
   { to: '/resumes', label: 'Résumés', icon: 'file' },
   { to: '/analytics', label: 'Insights', icon: 'chart' },
-  { to: '/settings', label: 'Settings', icon: 'sliders' },
+];
+
+/** Standing configuration — changed occasionally, read on every run. */
+const CONFIG_NAV: NavItem[] = [
+  { to: '/targets', label: 'Role targets', icon: 'target' },
+  { to: '/sources', label: 'Sources', icon: 'plug' },
+  { to: '/automation', label: 'Automation', icon: 'sliders' },
+  { to: '/settings', label: 'Settings', icon: 'user' },
 ];
 
 function initials(name?: string | null, email?: string): string {
@@ -43,15 +52,56 @@ export default function Sidebar() {
   const clear = useAuthStore((s) => s.clear);
   const [menuOpen, setMenuOpen] = useState(false);
   const expanded = !collapsed;
-  const nav = user?.is_superuser
-    ? [...NAV, { to: '/admin', label: 'System health', icon: 'shield' as const }]
-    : NAV;
+  const configNav = user?.is_superuser
+    ? [...CONFIG_NAV, { to: '/admin', label: 'System health', icon: 'shield' as const }]
+    : CONFIG_NAV;
 
   const signOut = () => {
     api.post('/auth/logout').catch(() => {});
     clear();
     navigate('/login');
   };
+
+  const renderItem = (item: NavItem) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      title={item.label}
+      aria-label={item.label}
+      style={({ isActive }) => ({
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 11,
+        height: 38,
+        padding: expanded ? '0 10px' : 0,
+        justifyContent: expanded ? 'flex-start' : 'center',
+        borderRadius: 'var(--r-md)',
+        textDecoration: 'none',
+        cursor: 'pointer',
+        font: '600 12.5px/1 var(--font)',
+        color: isActive ? 'var(--accent)' : 'var(--text-3)',
+        background: isActive ? 'var(--accent-soft)' : 'transparent',
+        transition: 'background .15s var(--ease), color .15s var(--ease)',
+      })}
+    >
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2.5, borderRadius: 2, background: 'var(--accent)' }} />
+          )}
+          <span style={{ display: 'grid', placeItems: 'center', width: 18, height: 18, flex: '0 0 auto' }}>
+            <Icon name={item.icon} size={18} sw={1.85} />
+          </span>
+          {expanded && (
+            <span style={{ flex: '1 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {item.label}
+            </span>
+          )}
+        </>
+      )}
+    </NavLink>
+  );
 
   return (
     <aside
@@ -96,52 +146,19 @@ export default function Sidebar() {
             WORKSPACE
           </div>
         )}
-        {nav.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            title={item.label}
-            aria-label={item.label}
-            style={({ isActive }) => ({
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 11,
-              height: 38,
-              padding: expanded ? '0 10px' : 0,
-              justifyContent: expanded ? 'flex-start' : 'center',
-              borderRadius: 'var(--r-md)',
-              textDecoration: 'none',
-              cursor: 'pointer',
-              font: '600 12.5px/1 var(--font)',
-              color: isActive ? 'var(--accent)' : 'var(--text-3)',
-              background: isActive ? 'var(--accent-soft)' : 'transparent',
-              transition: 'background .15s var(--ease), color .15s var(--ease)',
-            })}
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2.5, borderRadius: 2, background: 'var(--accent)' }} />
-                )}
-                <span style={{ display: 'grid', placeItems: 'center', width: 18, height: 18, flex: '0 0 auto' }}>
-                  <Icon name={item.icon} size={18} sw={1.85} />
-                </span>
-                {expanded && (
-                  <span style={{ flex: '1 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {item.label}
-                  </span>
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
+        {NAV.map(renderItem)}
+        {expanded && (
+          <div style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.15em', color: 'var(--text-4)', padding: '16px 10px 6px' }}>
+            CONFIGURE
+          </div>
+        )}
+        {configNav.map(renderItem)}
       </nav>
 
       {/* Footer */}
       <div style={{ borderTop: '1px solid var(--border)', padding: 12 }}>
         <button
-          onClick={() => navigate('/applications')}
+          onClick={() => navigate('/run')}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px',
             borderRadius: 'var(--r-md)', background: 'var(--surface)', border: '1px solid var(--border)',
@@ -155,7 +172,7 @@ export default function Sidebar() {
           {expanded && (
             <span style={{ flex: '1 1 auto', minWidth: 0 }}>
               <span style={{ display: 'block', font: '700 11.5px/1.2 var(--font)', color: 'var(--text)' }}>Agent active</span>
-              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>Live apply ready</span>
+              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>Open the run console</span>
             </span>
           )}
           {expanded && <span style={{ color: 'var(--text-4)', flex: '0 0 auto' }}><Icon name="chevR" size={15} /></span>}

@@ -2,6 +2,7 @@ import api from './api';
 import type {
   Application,
   ApplicationCreate,
+  ApplicationBatchCreate,
   ApplicationStatusUpdate,
   ApplicationListResponse,
 } from '@/types/application';
@@ -11,6 +12,20 @@ export async function createApplication(
   data: ApplicationCreate,
 ): Promise<Application> {
   const { data: result } = await api.post<Application>('/applications/', data);
+  return result;
+}
+
+/**
+ * Create several applications in one request.
+ *
+ * Use this rather than looping `createApplication`: the endpoint dispatches each application
+ * inside a single transaction and a single rate-limit slot, so a 20-role run is one round trip
+ * instead of twenty — and a partial failure does not leave half a run queued.
+ */
+export async function createApplicationBatch(
+  data: ApplicationBatchCreate,
+): Promise<Application[]> {
+  const { data: result } = await api.post<Application[]>('/applications/batch', data);
   return result;
 }
 

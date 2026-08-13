@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as appService from '@/services/applicationService';
 import type {
+  ApplicationBatchCreate,
   ApplicationCreate,
   ApplicationStatusUpdate,
 } from '@/types/application';
@@ -31,6 +32,18 @@ export function useCreateApplication() {
     mutationFn: (data: ApplicationCreate) => appService.createApplication(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: APPS_KEY });
+    },
+  });
+}
+
+/** Create a whole run's worth of applications in one request. Used by the Jobs selection bar. */
+export function useCreateApplicationBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ApplicationBatchCreate) => appService.createApplicationBatch(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
 }
