@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as settingsService from '@/services/settingsService';
-import type { SettingsUpdate } from '@/types/settings';
+import type { AutomationSettings, SettingsUpdate } from '@/types/settings';
 
 const SETTINGS_KEY = ['settings'] as const;
 
@@ -28,5 +28,24 @@ export function useLLMProviders() {
   return useQuery({
     queryKey: [...SETTINGS_KEY, 'llm-providers'],
     queryFn: () => settingsService.getLLMProviders(),
+  });
+}
+
+/** Fetch the automation policy catalogue that drives the automation screen. */
+export function usePolicyCatalogue() {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'automation-policy'],
+    queryFn: () => settingsService.getPolicyCatalogue(),
+  });
+}
+
+/**
+ * Dry-run a candidate policy. A mutation rather than a query because it is an explicit
+ * action with a body: previewing on every keystroke would put a burst of multi-query
+ * evaluations behind a single slider drag.
+ */
+export function usePolicyPreview() {
+  return useMutation({
+    mutationFn: (candidate: AutomationSettings) => settingsService.previewPolicy(candidate),
   });
 }

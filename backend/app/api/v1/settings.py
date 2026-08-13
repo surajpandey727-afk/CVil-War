@@ -8,11 +8,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_tenant_db
 from app.config.settings import get_settings as get_app_settings
+from app.core.policy import POLICY_VERSION, RULES, TAG_TITLES, AutomationPolicy, evaluate
+from app.models.application import Application
+from app.models.enums import ApplicationStatus
+from app.models.job import Job
 from app.models.user_settings import UserSettings
-from app.schemas.settings import LLMProviderStatus, SettingsResponse, SettingsUpdate
+from app.schemas.settings import (
+    LLMProviderStatus,
+    PolicyCatalogue,
+    PolicyControl,
+    PolicyGroup,
+    PolicyPreview,
+    PolicyPreviewItem,
+    PolicyRuleInfo,
+    SettingsResponse,
+    SettingsUpdate,
+)
+from app.services.policy import build_context, load_policy
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+#: Ceiling on a preview run. Each application costs a handful of counting queries, and the
+#: operator does not need every row to see the shape of a change.
+_PREVIEW_LIMIT = 50
 
 
 async def _get_or_create_settings(db: AsyncSession, user_id: str) -> UserSettings:
@@ -67,6 +86,106 @@ async def update_settings(
 
     logger.info("settings_updated", user_id=user.id, changed_fields=list(update_data.keys()))
     return SettingsResponse.model_validate(settings)
+
+
+@router.get(
+    "/automation-policy",
+    response_model=PolicyCatalogue,
+    summary="The automation policy: every clause, its control, and the current value",
+)
+async def get_automation_policy(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> PolicyCatalogue:
+    """Return the rule catalogue joined to this user's stored values.
+
+    The automation screen builds itself from this rather than hard-coding controls, which is
+    what keeps the UI, the enforced rules and ``docs/AUTOMATION_POLICY.md`` from drifting
+    apart — a new clause shows up with its own bounds and rationale attached.
+    """
+    policy = await load_policy(db, user.id)
+    by_tag: dict[str, list[PolicyRuleInfo]] = {}
+    for rule in RULES:
+        info = PolicyRuleInfo(
+            id=rule.id,
+            clause=rule.clause,
+            title=rule.title,
+            rationale=rule.rationale,
+            enforcement=rule.enforcement.value,
+            verdict=rule.verdict.value,
+            locked=rule.locked,
+            control=PolicyControl(
+                kind=rule.control.kind.value,
+                min=rule.control.min,
+                max=rule.control.max,
+                step=rule.control.step,
+                unit=rule.control.unit,
+                options=rule.control.options,
+            ),
+            field_name=rule.field_name,
+            enforced_by=rule.enforced_by,
+            value=getattr(policy, rule.field_name, None) if rule.field_name else None,
+        )
+        for tag in rule.tags or ("other",):
+            by_tag.setdefault(tag, []).append(info)
+
+    groups = [
+        PolicyGroup(id=tag, title=title, rules=by_tag[tag])
+        for tag, title in TAG_TITLES
+        if by_tag.get(tag)
+    ]
+    return PolicyCatalogue(policy_version=POLICY_VERSION, groups=groups, policy=policy)
+
+
+@router.post(
+    "/automation-policy/preview",
+    response_model=PolicyPreview,
+    summary="Dry-run a candidate policy against everything currently queued",
+)
+async def preview_automation_policy(
+    candidate: AutomationPolicy,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> PolicyPreview:
+    """Evaluate an unsaved policy against the operator's waiting applications.
+
+    Nothing is written — ``record=False`` keeps a preview off the timeline, and the candidate
+    policy is never persisted. The point is to make a threshold change reviewable before it
+    takes effect rather than discovering its blast radius afterwards.
+    """
+    result = await db.execute(
+        select(Application)
+        .where(
+            Application.status.in_(
+                (
+                    ApplicationStatus.QUEUED,
+                    ApplicationStatus.PENDING_REVIEW,
+                    ApplicationStatus.APPROVED,
+                )
+            )
+        )
+        .order_by(Application.created_at.desc())
+        .limit(_PREVIEW_LIMIT)
+    )
+    applications = list(result.scalars().all())
+
+    preview = PolicyPreview(evaluated=len(applications))
+    for app in applications:
+        job = await db.get(Job, app.job_id)
+        ctx = await build_context(db, app, job, ats_score=app.ats_score)
+        decision = evaluate(candidate, ctx)
+        setattr(preview, decision.verdict.value, getattr(preview, decision.verdict.value) + 1)
+        preview.items.append(
+            PolicyPreviewItem(
+                application_id=app.id,
+                job_title=job.title if job else "",
+                company=job.company if job else "",
+                verdict=decision.verdict.value,
+                reasons=[o.reason for o in decision.outcomes if o.reason],
+                rule_ids=[o.rule_id for o in decision.outcomes],
+            )
+        )
+    return preview
 
 
 @router.get(

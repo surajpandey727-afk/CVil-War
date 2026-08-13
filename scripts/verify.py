@@ -223,6 +223,14 @@ def stage_live_api(report: Report, token: str | None) -> None:
         ("GET /command-centre/queue", f"{API}/api/v1/command-centre/queue", lambda b: "items" in b),
         ("GET /analytics/dashboard", f"{API}/api/v1/analytics/dashboard", lambda b: isinstance(b, dict)),
         ("GET /settings", f"{API}/api/v1/settings/", lambda b: isinstance(b, dict)),
+        # The automation policy catalogue. Checked live because it is what the automation
+        # screen renders itself from — an empty catalogue would present a system with no
+        # rules, which is indistinguishable on screen from one that permits everything.
+        (
+            "GET /settings/automation-policy",
+            f"{API}/api/v1/settings/automation-policy",
+            lambda b: bool(b.get("groups")) and bool(b["groups"][0].get("rules")),
+        ),
     ]
     for name, url, predicate in checks:
         t = time.time()

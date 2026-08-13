@@ -112,14 +112,20 @@ async def _submit_application(
     return result.confirmation_id or "submitted"
 
 
-async def _ats_gate_ok(db: AsyncSession, app: Application) -> tuple[bool, float]:
-    """Pre-apply ATS gate (ported from the legacy worker): block a clearly low-match resume.
+async def _ats_score(db: AsyncSession, app: Application) -> float | None:
+    """Score the attached résumé against the posting, or ``None`` if it could not be scored.
 
-    Returns ``(ok, score)``. A 0.0 score means scoring was unavailable (e.g. no spaCy / no
-    resume text) — in that case we DON'T block, only on a genuine below-threshold score.
+    ``None`` is load-bearing and is not the same as 0.0: the policy's match rule escalates an
+    unscoreable application rather than passing it, so an unavailable scorer can no longer
+    make the gate silently optional. This function used to *be* the gate and returned
+    ``(ok, score)`` with a hardcoded threshold; the decision now belongs to
+    :mod:`app.core.policy`.
     """
     if not app.resume_id:
-        return True, 0.0
+        # No CV attached. The stored score, if the matching service recorded one at
+        # discovery, is the best evidence available; otherwise this genuinely is unscored and
+        # the policy escalates rather than submitting an application with no CV behind it.
+        return app.ats_score
     from app.schemas.resume import ResumeScoreRequest
     from app.services import resume as resume_service
 
@@ -127,12 +133,66 @@ async def _ats_gate_ok(db: AsyncSession, app: Application) -> tuple[bool, float]
         resp = await resume_service.score_resume(
             db, app.resume_id, ResumeScoreRequest(job_id=app.job_id)
         )
-        score = resp.overall_score
     except Exception as exc:
         logger.warning("apply.ats_score_unavailable", application_id=app.id, error=str(exc))
-        return True, 0.0
-    threshold = get_settings().min_ats_score
-    return not (0.0 < score < threshold), score
+        return app.ats_score
+    return resp.overall_score
+
+
+async def _enforce_policy(
+    db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str
+) -> bool:
+    """Run the automation policy gate. Returns True only if the submission may proceed.
+
+    Each refusal has a different resting place, and conflating them is what produces dead
+    ends: a HOLD goes back on the queue with a wake-up time, an ESCALATE lands in the review
+    queue for a human, a BLOCK is terminal. Every one of them is already on the timeline with
+    its reasons by the time this returns — see ``services.policy.gate``.
+    """
+    from app.core.policy import Verdict
+    from app.services.dispatch import enqueue_apply
+    from app.services.policy import gate
+
+    score = await _ats_score(db, app)
+    decision = await gate(db, app, ats_score=score)
+    if decision.verdict is Verdict.ALLOW:
+        await db.commit()
+        return True
+
+    reason = decision.summary
+    if decision.verdict is Verdict.HOLD:
+        app.status = ApplicationStatus.QUEUED
+        app.notes = reason
+        await db.commit()
+        # Wake it up when the earliest hold could clear. Capped at an hour so a rule that
+        # names a distant time (a 90-day cooldown) still gets re-checked against a policy the
+        # operator may have changed in the meantime.
+        delay = 3600
+        if decision.retry_after:
+            wait = (decision.retry_after - datetime.now(UTC)).total_seconds()
+            delay = max(30, min(int(wait), 3600))
+        await enqueue_apply(
+            ctx.get("redis"),
+            app.id,
+            defer=delay,
+            job_id=f"apply:{app.id}:hold:{int(time.time()) + delay}",
+        )
+        await _publish(ctx, app.user_id, app.id, ApplicationStatus.QUEUED.value, reason)
+        logger.info("apply.policy_hold", application_id=app.id, delay=delay, reason=reason)
+        return False
+
+    if decision.verdict is Verdict.ESCALATE:
+        app.status = ApplicationStatus.PENDING_REVIEW
+        app.notes = reason
+        await db.commit()
+        await _publish(
+            ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, reason
+        )
+        logger.info("apply.policy_escalate", application_id=app.id, reason=reason)
+        return False
+
+    await _mark_failed(db, ctx, app, platform, reason)
+    return False
 
 
 async def _mark_failed(
@@ -173,13 +233,8 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         job = await db.get(Job, app.job_id)
         platform = job.platform if job else "unknown"
 
-        # Pre-apply ATS gate: don't burn a submission on a clearly low-match resume.
-        gate_ok, score = await _ats_gate_ok(db, app)
-        if not gate_ok:
-            await _mark_failed(
-                db, ctx, app, platform,
-                f"ATS score {score:.2f} below threshold {get_settings().min_ats_score}",
-            )
+        # The automation policy gate — the one place submission is permitted or refused.
+        if not await _enforce_policy(db, ctx, app, platform):
             return
 
         # In-flight marker, committed before the (non-transactional) submit.

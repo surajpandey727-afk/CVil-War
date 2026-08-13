@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.policy.model import AutomationPolicy, ResumeRule, RunWindow
+
 
 class WorkExperienceSchema(BaseModel):
     """A single work experience entry."""
@@ -59,60 +61,14 @@ class RoleTargetSchema(BaseModel):
     active: bool = True
 
 
-class ResumeRuleSchema(BaseModel):
-    """Pick a résumé by matching the job title or the employer.
-
-    Rules are evaluated in list order and the first match wins; a job that matches nothing
-    falls back to ``AutomationSettingsSchema.default_resume_id``.
-    """
-
-    #: Case-insensitive regular expression matched against the job title.
-    title_pattern: str = ""
-    #: Case-insensitive regular expression matched against the company name.
-    company_pattern: str = ""
-    #: Résumé id to use when this rule matches.
-    resume_id: str = ""
-    label: str = ""
-
-
-class RunWindowSchema(BaseModel):
-    """Hours during which the worker may submit. Outside them, runs queue but do not send."""
-
-    #: Three-letter day abbreviations, e.g. ``["Mon", "Tue"]``. Empty means every day.
-    days: list[str] = Field(default_factory=lambda: ["Mon", "Tue", "Wed", "Thu", "Fri"])
-    start: str = "08:00"
-    end: str = "19:00"
-    timezone: str = "Europe/London"
-
-
-class AutomationSettingsSchema(BaseModel):
-    """Everything the auto-apply agent consults before and during a run."""
-
-    #: 0-1, matching ``UserSettings.min_ats_score``. Postings below this are never auto-applied.
-    min_ats_score: float = Field(default=0.75, ge=0.0, le=1.0)
-    #: Thousands of GBP. 0 disables the filter.
-    min_salary_k: int = Field(default=0, ge=0, le=1000)
-    #: Empty means any seniority.
-    seniority: list[str] = Field(default_factory=list)
-    #: Employers never applied to, matched case-insensitively on the company name.
-    blocked_companies: list[str] = Field(default_factory=list)
-
-    default_resume_id: str | None = None
-    resume_rules: list[ResumeRuleSchema] = Field(default_factory=list)
-
-    cover_letters: bool = True
-    cover_letter_tone: Literal["direct", "warm", "formal", "technical"] = "direct"
-
-    retry_failed: bool = True
-    max_retries: int = Field(default=3, ge=0, le=10)
-    pause_on_captcha: bool = True
-    email_fallback: bool = True
-    notify_each_outcome: bool = True
-
-    run_window: RunWindowSchema = Field(default_factory=RunWindowSchema)
-
-    #: Source keys the operator has enabled. Empty means "every implemented source".
-    enabled_sources: list[str] = Field(default_factory=list)
+# The automation blob is the policy. It used to be declared here as a plain settings shape
+# while the real rules lived nowhere; now :mod:`app.core.policy` owns the model, the rule
+# catalogue evaluates it, and this module re-exports it under the old names so the settings
+# API surface is unchanged. One definition, so the stored blob, the engine and the UI cannot
+# drift apart.
+ResumeRuleSchema = ResumeRule
+RunWindowSchema = RunWindow
+AutomationSettingsSchema = AutomationPolicy
 
 
 class SettingsResponse(BaseModel):
@@ -171,6 +127,87 @@ class SettingsUpdate(BaseModel):
     candidate_profile: CandidateProfileSchema | None = None
     role_targets: list[RoleTargetSchema] | None = None
     automation: AutomationSettingsSchema | None = None
+
+
+class PolicyControl(BaseModel):
+    """How one policy field is edited. Mirrors ``core.policy.ControlSpec`` onto the wire."""
+
+    kind: str
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    unit: str = ""
+    options: list[str] = Field(default_factory=list)
+
+
+class PolicyRuleInfo(BaseModel):
+    """One clause of the automation policy, with its control and its current value.
+
+    The automation screen renders itself from a list of these rather than hard-coding the
+    controls, so a rule added to the backend catalogue appears in the UI — with its clause
+    reference, its rationale and its bounds — without a frontend change.
+    """
+
+    id: str
+    clause: str
+    title: str
+    rationale: str
+    #: ``gate`` (checked before every submission), ``elsewhere`` (an invariant enforced at
+    #: another layer), or ``behaviour`` (changes what the agent does, never refuses).
+    enforcement: str
+    #: Verdict when a gate rule fires: allow / hold / escalate / block.
+    verdict: str
+    locked: bool
+    control: PolicyControl
+    field_name: str = ""
+    #: For a locked invariant: where it is actually enforced, so the claim is checkable.
+    enforced_by: str = ""
+    #: Current value, or ``None`` for a locked invariant with nothing to store.
+    value: Any = None
+
+
+class PolicyGroup(BaseModel):
+    """A titled group of rules, in the order the UI should present them."""
+
+    id: str
+    title: str
+    rules: list[PolicyRuleInfo] = Field(default_factory=list)
+
+
+class PolicyCatalogue(BaseModel):
+    """The whole policy: its clauses, their controls, and the operator's current values."""
+
+    policy_version: int
+    document: str = "docs/AUTOMATION_POLICY.md"
+    groups: list[PolicyGroup] = Field(default_factory=list)
+    policy: AutomationPolicy = Field(default_factory=AutomationPolicy)
+
+
+class PolicyPreviewItem(BaseModel):
+    """What the candidate policy would do to one queued application."""
+
+    application_id: str
+    job_title: str = ""
+    company: str = ""
+    verdict: str
+    reasons: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(default_factory=list)
+
+
+class PolicyPreview(BaseModel):
+    """A dry run of a candidate policy against everything currently waiting.
+
+    Exists so a threshold is not changed blind. Dragging the ATS minimum from 75 to 85 is a
+    reasonable thing to try and an unreasonable thing to guess at: this answers "how many of
+    my queued applications would that stop" before the change is saved.
+    """
+
+    evaluated: int
+    allow: int = 0
+    hold: int = 0
+    escalate: int = 0
+    block: int = 0
+    items: list[PolicyPreviewItem] = Field(default_factory=list)
 
 
 class LLMProviderStatus(BaseModel):

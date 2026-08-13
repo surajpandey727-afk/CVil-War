@@ -32,19 +32,31 @@ REVIEW_TASK = "review_application_run"  # harness follow-on job, enqueued after 
 
 
 async def enqueue_apply(
-    pool: ArqRedis | None, application_id: str, *, defer: int | None = None
+    pool: ArqRedis | None,
+    application_id: str,
+    *,
+    defer: int | None = None,
+    job_id: str | None = None,
 ) -> str | None:
     """Enqueue the apply task for one application.
 
     Idempotent: the job id is derived from ``application_id`` so a duplicate enqueue
     (e.g. a double click or retry) is a no-op while a job is still pending. Returns the
     job id, ``None`` on a dedup hit, or ``None`` (logged) if the queue is unavailable.
+
+    ``job_id`` overrides that derivation. The policy gate needs it: re-queueing a held
+    application happens from *inside* the run for that same application, and the default id
+    is still held by the in-flight job, so the re-queue would be silently deduplicated away
+    and the application would never wake up.
     """
     if pool is None:
         logger.warning("enqueue_apply.queue_unavailable", application_id=application_id)
         return None
     job = await pool.enqueue_job(
-        APPLY_TASK, application_id, _job_id=f"apply:{application_id}", _defer_by=defer
+        APPLY_TASK,
+        application_id,
+        _job_id=job_id or f"apply:{application_id}",
+        _defer_by=defer,
     )
     job_id = job.job_id if job else None
     logger.info("apply_enqueued", application_id=application_id, job_id=job_id)

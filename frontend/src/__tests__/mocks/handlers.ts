@@ -1,5 +1,11 @@
 import { http, HttpResponse } from 'msw';
 
+import { DEFAULT_AUTOMATION } from '@/types/settings';
+
+/** The stored policy the catalogue handler reports. Shipped defaults, so a test that cares
+ *  about a specific value overrides the handler rather than depending on this one. */
+const DEFAULT_TEST_POLICY = DEFAULT_AUTOMATION;
+
 /** Sample job listing used across tests. */
 const sampleJob = {
   id: 'job-1',
@@ -307,6 +313,120 @@ export const handlers = [
       auto_apply: true,
       platforms: ['linkedin', 'indeed'],
       llm_provider: 'openai',
+    });
+  }),
+
+  // The automation policy catalogue. Only a few rules, one per control kind that the page
+  // renders differently — the point of the schema-driven page is that it does not know the
+  // real list, so a test that mirrored the backend's twenty-odd rules would be asserting on
+  // a copy rather than on the rendering.
+  http.get('/api/v1/settings/automation-policy', () => {
+    return HttpResponse.json({
+      policy_version: 1,
+      document: 'docs/AUTOMATION_POLICY.md',
+      groups: [
+        {
+          id: 'oversight',
+          title: 'Human oversight',
+          rules: [
+            {
+              id: 'oversight.kill_switch',
+              clause: '§4.2',
+              title: 'Pause all automation',
+              rationale: 'Everything queued stays queued.',
+              enforcement: 'gate',
+              verdict: 'hold',
+              locked: false,
+              control: { kind: 'toggle', min: null, max: null, step: null, unit: '', options: [] },
+              field_name: 'paused',
+              enforced_by: '',
+              value: false,
+            },
+            {
+              id: 'oversight.high_value_review',
+              clause: '§4.3',
+              title: 'Review roles above',
+              rationale: 'The cost of a bad automated application scales with the role.',
+              enforcement: 'gate',
+              verdict: 'escalate',
+              locked: false,
+              control: { kind: 'money_k', min: 0, max: 500, step: 10, unit: '£k', options: [] },
+              field_name: 'require_review_above_salary_k',
+              enforced_by: '',
+              value: 120,
+            },
+          ],
+        },
+        {
+          id: 'volume',
+          title: 'Volume & rate',
+          rules: [
+            {
+              id: 'volume.daily_cap',
+              clause: '§2.1',
+              title: 'Applications per day',
+              rationale: 'Above a considered human pace, below anything read as scripted.',
+              enforcement: 'gate',
+              verdict: 'hold',
+              locked: false,
+              control: { kind: 'integer', min: 0, max: 200, step: 1, unit: 'per day', options: [] },
+              field_name: 'max_per_day',
+              enforced_by: '',
+              value: 20,
+            },
+          ],
+        },
+        {
+          id: 'integrity',
+          title: 'Integrity — not configurable',
+          rules: [
+            {
+              id: 'integrity.no_fabrication',
+              clause: '§1.1',
+              title: 'Never invent experience',
+              rationale: 'The agent may re-word what is in your CV. It may not invent it.',
+              enforcement: 'elsewhere',
+              verdict: 'hold',
+              locked: true,
+              control: { kind: 'locked', min: null, max: null, step: null, unit: '', options: [] },
+              field_name: '',
+              enforced_by: 'app.services.resume',
+              value: null,
+            },
+          ],
+        },
+      ],
+      policy: {
+        ...DEFAULT_TEST_POLICY,
+      },
+    });
+  }),
+
+  http.post('/api/v1/settings/automation-policy/preview', () => {
+    return HttpResponse.json({
+      evaluated: 2,
+      allow: 1,
+      hold: 1,
+      escalate: 0,
+      block: 0,
+      items: [
+        {
+          application_id: 'app-1',
+          job_title: 'Product Manager',
+          company: 'Monzo',
+          verdict: 'allow',
+          reasons: [],
+          rule_ids: [],
+        },
+        {
+          application_id: 'app-2',
+          job_title: 'Staff Product Manager',
+          company: 'Wise',
+          verdict: 'hold',
+          reasons: ['ATS match 61% is below your 75% threshold.'],
+          rule_ids: ['match.min_ats_score'],
+        },
+      ],
     });
   }),
 
