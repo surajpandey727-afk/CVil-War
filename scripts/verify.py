@@ -346,7 +346,9 @@ def main() -> int:
         print(f"{verdict}  —  {passed} passed, {len(failures)} failed, {skipped} skipped "
               f"in {time.time() - started:.0f}s")
         for r in failures:
-            print(f"  {RED}✗{RESET} {r.name}: {r.detail}")
+            # ASCII marker on purpose: this console is cp1252, and a U+2717 here crashed the
+            # harness *while reporting a failure* — the one moment it has to work.
+            print(f"  {RED}x{RESET} {r.name}: {r.detail}")
         print("=" * 82)
         overall |= 1 if failures else 0
 

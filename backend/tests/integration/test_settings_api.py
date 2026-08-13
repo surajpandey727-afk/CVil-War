@@ -368,3 +368,87 @@ class TestAICatalogueIsDiscovered:
         assert body["reachable"] is False
         assert body["model_count"] == 0
         assert "refused" in body["error"]
+
+
+class TestRoleTargetsAreExtensible:
+    """A role target had five fields — title, fit, why, family, active — which cannot express
+    a search anyone actually runs. Adding a criterion must not require a code change, and an
+    older build must not silently drop one it does not recognise."""
+
+    async def test_rich_criteria_round_trip(self, client):
+        target = {
+            "title": "AI Product Manager",
+            "fit": 5,
+            "family": "product",
+            "seniority": ["Senior", "Lead"],
+            "skills": ["roadmapping", "LLM evaluation"],
+            "excluded_keywords": ["unpaid", "commission only"],
+            "locations": ["London"],
+            "work_mode": "hybrid",
+            "min_salary_k": 80,
+            "excluded_companies": ["Acme"],
+            "job_boards": ["reed", "adzuna"],
+            "ai_instructions": "Weight platform experience over people management.",
+            "priority": 1,
+            "strategy": "autonomous",
+        }
+        response = await client.put(f"{API_PREFIX}/", json={"role_targets": [target]})
+        assert response.status_code == 200
+
+        stored = (await client.get(f"{API_PREFIX}/")).json()["role_targets"][0]
+        assert stored["skills"] == ["roadmapping", "LLM evaluation"]
+        assert stored["excluded_keywords"] == ["unpaid", "commission only"]
+        assert stored["min_salary_k"] == 80
+        assert stored["strategy"] == "autonomous"
+        assert stored["ai_instructions"].startswith("Weight platform")
+
+    async def test_a_family_outside_the_shipped_four_is_accepted(self, client):
+        """`family` was a Literal of product/engineering/architecture/data, so anyone hunting
+        for design or security roles had to change code to say so."""
+        response = await client.put(
+            f"{API_PREFIX}/",
+            json={"role_targets": [{"title": "Security Engineer", "family": "security"}]},
+        )
+        assert response.status_code == 200
+        assert (await client.get(f"{API_PREFIX}/")).json()["role_targets"][0]["family"] == (
+            "security"
+        )
+
+    async def test_an_unknown_criterion_survives_a_round_trip(self, client):
+        """Losing an operator's configuration because a field was unrecognised is worse than
+        carrying a field nothing reads yet."""
+        await client.put(
+            f"{API_PREFIX}/",
+            json={"role_targets": [{"title": "PM", "clearance_required": "SC"}]},
+        )
+        stored = (await client.get(f"{API_PREFIX}/")).json()["role_targets"][0]
+        assert stored["clearance_required"] == "SC"
+
+    async def test_a_target_stored_in_the_old_five_field_shape_still_loads(self, client):
+        """Existing rows predate every criterion above and must not fail validation."""
+        await client.put(
+            f"{API_PREFIX}/",
+            json={"role_targets": [
+                {"title": "Data Scientist", "fit": 4, "why": "MSc", "family": "data",
+                 "active": True}
+            ]},
+        )
+        stored = (await client.get(f"{API_PREFIX}/")).json()["role_targets"][0]
+        assert stored["title"] == "Data Scientist"
+        assert stored["skills"] == []
+        assert stored["strategy"] == "approval"
+
+    async def test_several_targets_are_independent(self, client):
+        """Changing one target must not silently change another."""
+        await client.put(
+            f"{API_PREFIX}/",
+            json={"role_targets": [
+                {"title": "AI PM", "locations": ["London"], "strategy": "approval"},
+                {"title": "Data Scientist", "locations": ["Remote UK"], "strategy": "autonomous"},
+            ]},
+        )
+        stored = (await client.get(f"{API_PREFIX}/")).json()["role_targets"]
+        assert stored[0]["locations"] == ["London"]
+        assert stored[0]["strategy"] == "approval"
+        assert stored[1]["locations"] == ["Remote UK"]
+        assert stored[1]["strategy"] == "autonomous"

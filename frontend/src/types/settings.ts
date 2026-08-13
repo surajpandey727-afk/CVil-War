@@ -28,15 +28,59 @@ export interface CandidateProfile {
   certifications: string[];
 }
 
-export type RoleFamilyKey = 'product' | 'engineering' | 'architecture' | 'data';
+/**
+ * A role family. A plain string, not a closed union: a family is a label the operator groups
+ * their own targets by, and closing the set meant someone hunting for design or security
+ * roles had to change code to say so. The four below are what the product ships with.
+ */
+export type RoleFamilyKey = string;
 
-/** One targeted role title. Corresponds to the backend `RoleTargetSchema`. */
+export const SHIPPED_ROLE_FAMILIES = ['product', 'engineering', 'architecture', 'data'] as const;
+
+/**
+ * One targeted role and the criteria that define it. Corresponds to `RoleTargetSchema`.
+ *
+ * The index signature matters at runtime as much as in the type system: the page reads
+ * targets from the API, edits them by spread, and writes the whole list back. A closed
+ * interface would still round-trip unknown keys in JS, but declaring it makes the intent
+ * explicit — a criterion added on the backend must survive an edit made by this build
+ * rather than being silently dropped on save.
+ */
 export interface RoleTargetRecord {
+  [criterion: string]: unknown;
   title: string;
   fit: number;
   why: string;
   family: RoleFamilyKey;
   active: boolean;
+
+  alternative_titles?: string[];
+  seniority?: string[];
+  departments?: string[];
+  skills?: string[];
+  technologies?: string[];
+  keywords?: string[];
+  excluded_keywords?: string[];
+
+  locations?: string[];
+  /** remote | hybrid | onsite | any */
+  work_mode?: string;
+  min_salary_k?: number;
+  max_salary_k?: number;
+  employment_types?: string[];
+
+  industries?: string[];
+  target_companies?: string[];
+  excluded_companies?: string[];
+  /** Source keys to search for this target. Empty means every enabled source. */
+  job_boards?: string[];
+
+  ai_instructions?: string;
+  priority?: number;
+  /** manual | assisted | approval | autonomous */
+  strategy?: string;
+  /** Model override. Empty means the global default — an explicit, visible override. */
+  model?: string;
 }
 
 /** Résumé-selection rule. Evaluated in order; first match wins. */

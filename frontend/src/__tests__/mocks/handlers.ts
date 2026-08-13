@@ -376,6 +376,26 @@ export const handlers = [
     });
   }),
 
+  // The source registry. Settings now renders platforms from this rather than a list kept
+  // on the page, so it is part of the default set — the setup runs MSW with
+  // onUnhandledRequest:'error', which is what caught the omission.
+  http.get('/api/v1/sources/', () => {
+    return HttpResponse.json({
+      total: 55,
+      tiers: [
+        {
+          id: 'aggregator',
+          label: 'Aggregators',
+          sources: [
+            { key: 'remotive', label: 'Remotive', health: 'live', implemented: true },
+            { key: 'adzuna', label: 'Adzuna', health: 'live', implemented: true },
+          ],
+        },
+      ],
+      live_keys: ['remotive', 'adzuna'],
+    });
+  }),
+
   // Settings
   http.get('/api/v1/settings/', () => {
     return HttpResponse.json({

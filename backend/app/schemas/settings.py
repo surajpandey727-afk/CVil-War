@@ -1,6 +1,6 @@
 """Pydantic schemas for user settings API requests and responses."""
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -43,22 +43,80 @@ class CandidateProfileSchema(BaseModel):
     certifications: list[str] = Field(default_factory=list)
 
 
-RoleFamily = Literal["product", "engineering", "architecture", "data"]
+#: Families the product ships with. Deliberately **not** a ``Literal``: a family is a label
+#: the operator groups their own targets by, and closing the set meant someone hunting for
+#: "design" or "security" roles had to change code to say so. The shipped four remain as
+#: sensible defaults and as the seed for a new profile.
+DEFAULT_ROLE_FAMILIES = ("product", "engineering", "architecture", "data")
+RoleFamily = str
 
 
 class RoleTargetSchema(BaseModel):
-    """One role title the operator is targeting.
+    """One role the operator is targeting, and the criteria that define it.
 
-    ``fit`` is the operator's own 1-5 assessment and is advisory: it orders the table and
-    seeds which titles are active, but the ATS scorer, not this number, decides whether a
-    given posting is applied to.
+    Deliberately extensible in two ways, because the previous shape — title, fit, why,
+    family, active — could not express a search anyone actually runs. "Product Manager" says
+    nothing about seniority, salary, the skills that matter, the companies to avoid, or which
+    boards to look on, so every one of those had to live somewhere else or nowhere.
+
+    * Every criterion below is **optional**, so an existing stored target with only the old
+      five fields still validates and simply carries no extra criteria.
+    * ``extra="allow"`` keeps a criterion added by a newer build from being silently dropped
+      when an older one reads and rewrites the row. Losing an operator's configuration
+      because a field was unrecognised is worse than carrying a field nobody reads yet.
+
+    None of this is enforced here — the shape is storage. Scoring and filtering read it.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     title: str
+    #: The operator's own 1-5 assessment. Advisory: it orders the table and seeds which
+    #: titles are active, but the ATS scorer decides whether a posting is applied to.
     fit: float = Field(default=3.0, ge=0.0, le=5.0)
     why: str = ""
     family: RoleFamily = "engineering"
     active: bool = True
+
+    # -- Matching ------------------------------------------------------------------------
+    #: Other titles that mean the same job. Boards are wildly inconsistent about naming.
+    alternative_titles: list[str] = Field(default_factory=list)
+    seniority: list[str] = Field(default_factory=list)
+    departments: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    technologies: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    #: A posting containing any of these is rejected outright, whatever else it matches.
+    excluded_keywords: list[str] = Field(default_factory=list)
+
+    # -- Where and on what terms ---------------------------------------------------------
+    locations: list[str] = Field(default_factory=list)
+    #: remote | hybrid | onsite | any
+    work_mode: str = "any"
+    #: Thousands of the local currency. 0 means no floor rather than a floor of zero.
+    min_salary_k: int = Field(default=0, ge=0, le=1000)
+    max_salary_k: int = Field(default=0, ge=0, le=1000)
+    employment_types: list[str] = Field(default_factory=list)
+
+    # -- Who ------------------------------------------------------------------------------
+    industries: list[str] = Field(default_factory=list)
+    #: Employers to prioritise; empty means no preference, not "none of them".
+    target_companies: list[str] = Field(default_factory=list)
+    excluded_companies: list[str] = Field(default_factory=list)
+    #: Source keys to search for this target. Empty means every enabled source.
+    job_boards: list[str] = Field(default_factory=list)
+
+    # -- How the agent should treat it ----------------------------------------------------
+    #: Free text handed to the model when scoring or tailoring for this target.
+    ai_instructions: str = ""
+    #: Ordering hint when several targets compete for the same run budget.
+    priority: int = Field(default=3, ge=1, le=5)
+    #: manual | assisted | approval | autonomous — how far the agent may go unattended.
+    #: Per-target, so a speculative role can stay manual while a strong one runs autonomously.
+    strategy: str = "approval"
+    #: Model override for this target. Empty means the global default; a value here is the
+    #: explicit, visible override the AI hierarchy allows.
+    model: str = ""
 
 
 # The automation blob is the policy. It used to be declared here as a plain settings shape
