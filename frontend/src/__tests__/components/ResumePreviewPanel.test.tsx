@@ -9,6 +9,7 @@ import type { Job } from '@/types/job';
 const resume = (o: Partial<Resume> = {}): Resume => ({
   id: 'r1', name: 'Alex Morgan — Base', type: 'base', template_id: 'modern',
   base_resume_id: null, job_id: null, has_pdf: true, has_docx: false, ats_score: 0.82,
+  used_in_applications: 0, submitted_applications: 0, archived: false,
   created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z', ...o,
 });
 

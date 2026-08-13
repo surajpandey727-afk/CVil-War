@@ -31,16 +31,29 @@ logger = structlog.get_logger(__name__)
 
 
 def application_to_response(app: Application) -> ApplicationResponse:
-    """Serialize an Application, hydrating job_title/company from the related job.
+    """Serialize an Application, hydrating the job and résumé display fields.
 
-    The denormalized display fields are only filled when the ``job`` relationship is already
-    loaded (list/detail eager-load it); callers that pass an object without it loaded — e.g.
-    a freshly created row — get ``None``, and never trigger a lazy load in the async context.
+    The denormalized display fields are only filled when the relationship is already loaded
+    (list/detail eager-load both); callers that pass an object without it loaded — e.g. a
+    freshly created row — get ``None``, and never trigger a lazy load in the async context.
+
+    The résumé name matters as much as the job title: an application that shows only a
+    ``resume_id`` cannot answer "which CV did they actually get", which is the whole point of
+    keeping the reference.
     """
     item = ApplicationResponse.model_validate(app)
-    if "job" not in sa_inspect(app).unloaded and app.job is not None:
+    unloaded = sa_inspect(app).unloaded
+    if "job" not in unloaded and app.job is not None:
         item.job_title = app.job.title
         item.company = app.job.company
+    if "resume" not in unloaded and app.resume is not None:
+        item.resume_name = app.resume.name
+        # str(), not .value: the column holds a StrEnum but a row written in this session and
+        # not yet refreshed still carries the plain string it was assigned.
+        item.resume_type = str(app.resume.type)
+        item.resume_ats_score = app.resume.ats_score
+        item.resume_archived = app.resume.archived_at is not None
+    item.has_cover_letter = bool(app.cover_letter_path)
     return item
 
 # States that DON'T block a fresh application for the same (user, job) — mirrors the
@@ -196,7 +209,9 @@ async def list_applications(
     page_size = min(page_size, MAX_PAGE_SIZE)
     offset = (page - 1) * page_size
 
-    query = select(Application).options(selectinload(Application.job))
+    query = select(Application).options(
+        selectinload(Application.job), selectinload(Application.resume)
+    )
     count_query = select(func.count(Application.id))
 
     if status:
@@ -238,7 +253,7 @@ async def get_application(db: AsyncSession, app_id: str) -> Application:
     result = await db.execute(
         select(Application)
         .where(Application.id == app_id)
-        .options(selectinload(Application.job)),
+        .options(selectinload(Application.job), selectinload(Application.resume)),
     )
     app = result.scalar_one_or_none()
     if app is None:

@@ -1,10 +1,12 @@
 import api from './api';
 import type {
   Resume,
+  ResumeDeleteResponse,
   ResumeUploadResponse,
   ResumeScoreResponse,
   ResumeGenerateRequest,
   ResumeListResponse,
+  ResumeUsageResponse,
 } from '@/types/resume';
 
 /** Upload a PDF or DOCX resume file. */
@@ -71,4 +73,19 @@ export async function downloadResumeFile(
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** Where a résumé has been used, so removing it is an informed decision. */
+export async function getResumeUsage(resumeId: string): Promise<ResumeUsageResponse> {
+  const { data } = await api.get<ResumeUsageResponse>(`/resumes/${resumeId}/usage`);
+  return data;
+}
+
+/**
+ * Remove a résumé. The backend deletes an unused one outright and archives one that has been
+ * sent to an employer, so the response says which happened rather than assuming.
+ */
+export async function deleteResume(resumeId: string): Promise<ResumeDeleteResponse> {
+  const { data } = await api.delete<ResumeDeleteResponse>(`/resumes/${resumeId}`);
+  return data;
 }

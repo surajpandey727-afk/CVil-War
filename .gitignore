@@ -33,6 +33,9 @@ env/
 # also catch backend/data/... — the previous `data/db/*.db` form was anchored to the
 # repo root and silently let `backend/data/db/cvilwar.db` (real user data) be staged.
 **/data/db/*.db
+# Migration backups are copies of the same real data under a different suffix, so a
+# `*.db` glob misses them entirely — two were committed before this line existed.
+**/data/db/*.db.*
 **/data/db/*.db-journal
 **/data/db/*.db-wal
 **/data/db/*.db-shm

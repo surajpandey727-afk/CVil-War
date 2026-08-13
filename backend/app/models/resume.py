@@ -1,6 +1,8 @@
 """Resume database model."""
 
-from sqlalchemy import Float, ForeignKey, Index, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
@@ -43,6 +45,16 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
 
     # Extracted text for search and analysis
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: Set when the user removed this CV from their working list while it was still attached
+    #: to a submitted application.
+    #:
+    #: A CV that has been sent to an employer cannot simply be deleted: the application record
+    #: is supposed to answer "what did they actually receive", and dropping the row turns that
+    #: into a dangling id. Archiving hides it from every picker and from the résumés list while
+    #: keeping the record intact. Unused CVs are still deleted outright — there is nothing to
+    #: preserve.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     base_resume: Mapped["Resume | None"] = relationship(

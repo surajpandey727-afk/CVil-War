@@ -1,9 +1,10 @@
 import { useState } from 'react';
 
 import Icon from '@/components/ui/Icon';
+import DeleteResumeDialog from '@/components/resumes/DeleteResumeDialog';
 import ResumeCard from '@/components/resumes/ResumeCard';
 import ResumePreviewPanel from '@/components/resumes/ResumePreviewPanel';
-import { useResumes, useUploadResume, useOptimizeResume, useGenerateResume, useScoreResume } from '@/hooks/useResumes';
+import { useResumes, useUploadResume, useOptimizeResume, useGenerateResume, useScoreResume, useDeleteResume } from '@/hooks/useResumes';
 import { useJobs } from '@/hooks/useJobs';
 import { downloadResumeFile } from '@/services/resumeService';
 import { useAppStore } from '@/store/useAppStore';
@@ -22,12 +23,15 @@ export default function ResumesPage() {
   const optimize = useOptimizeResume();
   const generate = useGenerateResume();
   const score = useScoreResume();
+  const remove = useDeleteResume();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [targetJobId, setTargetJobId] = useState('');
   const [scoreResult, setScoreResult] = useState<ResumeScoreResponse | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Resume | null>(null);
 
   const resumes = data?.items ?? [];
+  const archivedCount = data?.archived_count ?? 0;
   const jobs = jobData?.items ?? [];
   const selected = resumes.find((r) => r.id === selectedId) ?? resumes[0] ?? null;
   const baseResumeId = resumes.find((r) => r.type === 'base')?.id ?? resumes[0]?.id ?? null;
@@ -57,6 +61,19 @@ export default function ResumesPage() {
       notify('Could not download the résumé', 'error');
     }
   };
+
+  const onDelete = (r: Resume) =>
+    remove.mutate(r.id, {
+      onSuccess: (result) => {
+        setPendingDelete(null);
+        // The backend's own sentence, verbatim. It is the only thing that knows whether the
+        // CV was deleted or archived, and paraphrasing it here is how a UI ends up telling
+        // the user something that did not happen.
+        notify(result.detail, result.deleted ? 'success' : 'info');
+        if (selectedId === r.id) setSelectedId(null);
+      },
+      onError: () => notify(`Could not remove ${r.name}`, 'error'),
+    });
 
   const onScore = () => {
     if (!selected || !targetJobId) return;
@@ -139,7 +156,12 @@ export default function ResumesPage() {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ font: '700 13px/1 var(--font)' }}>Your résumés</span>
-                  <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>{resumes.length} {resumes.length === 1 ? 'VARIANT' : 'VARIANTS'}</span>
+                  <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>
+                    {resumes.length} {resumes.length === 1 ? 'VARIANT' : 'VARIANTS'}
+                    {/* Archived CVs are hidden but still exist. Saying nothing would leave
+                        the user hunting for a CV that is sitting one flag away. */}
+                    {archivedCount > 0 && ` · ${archivedCount} ARCHIVED`}
+                  </span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(206px,1fr))', gap: 14 }}>
                   {resumes.map((r) => (
@@ -151,7 +173,9 @@ export default function ResumesPage() {
                       onSelect={() => onSelect(r)}
                       onOptimize={() => onOptimize(r)}
                       onDownload={() => onDownload(r, r.has_pdf ? 'pdf' : 'docx')}
+                      onDelete={() => setPendingDelete(r)}
                       optimizing={optimize.isPending}
+                      deleting={remove.isPending && pendingDelete?.id === r.id}
                     />
                   ))}
                 </div>
@@ -178,6 +202,15 @@ export default function ResumesPage() {
             />
           )}
         </div>
+      )}
+
+      {pendingDelete && (
+        <DeleteResumeDialog
+          resume={pendingDelete}
+          busy={remove.isPending}
+          onConfirm={() => onDelete(pendingDelete)}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );

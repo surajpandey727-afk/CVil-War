@@ -15,13 +15,16 @@ interface ResumeCardProps {
   onSelect: () => void;
   onOptimize: () => void;
   onDownload: () => void;
+  onDelete: () => void;
   optimizing: boolean;
+  deleting: boolean;
 }
 
-/** A résumé tile: thumbnail + type badge + ATS + optimize / download (design §RÉSUMÉS card). */
-export default function ResumeCard({ resume, jobLabel, selected, onSelect, onOptimize, onDownload, optimizing }: ResumeCardProps) {
+/** A résumé tile: thumbnail + type badge + ATS + usage + optimize / download / remove. */
+export default function ResumeCard({ resume, jobLabel, selected, onSelect, onOptimize, onDownload, onDelete, optimizing, deleting }: ResumeCardProps) {
   const t = TYPE_META[resume.type] ?? TYPE_META['base']!;
   const canDownload = resume.has_pdf || resume.has_docx;
+  const usage = resume.submitted_applications;
   const iconBtn: React.CSSProperties = {
     width: 28, height: 28, borderRadius: 7, background: 'var(--surface-2)', border: '1px solid var(--border)',
     color: 'var(--text-3)', cursor: 'pointer', display: 'grid', placeItems: 'center',
@@ -40,6 +43,16 @@ export default function ResumeCard({ resume, jobLabel, selected, onSelect, onOpt
         <div style={{ marginTop: 10 }}>
           <div style={{ font: '700 12.5px/1.25 var(--font)', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{resume.name}</div>
           <div style={{ font: '500 11px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{jobLabel || 'Base résumé'} · {relativeTime(resume.created_at)}</div>
+          {/* Usage is stated on the card, not discovered at the moment of deleting. The
+              number is what decides whether removing this CV destroys a record, so it
+              belongs where the user is choosing, not in the confirmation afterwards. */}
+          <div style={{ font: '500 11px/1.3 var(--font)', color: usage ? 'var(--text-2)' : 'var(--text-4)', marginTop: 4 }}>
+            {usage
+              ? `Sent with ${usage} application${usage === 1 ? '' : 's'}`
+              : resume.used_in_applications > 0
+                ? `Attached to ${resume.used_in_applications} draft${resume.used_in_applications === 1 ? '' : 's'}`
+                : 'Not used yet'}
+          </div>
         </div>
       </button>
 
@@ -51,6 +64,17 @@ export default function ResumeCard({ resume, jobLabel, selected, onSelect, onOpt
         <span style={{ display: 'flex', gap: 5 }}>
           <button onClick={onOptimize} disabled={optimizing} aria-label={`Optimize résumé ${resume.name}`} style={iconBtn}><Icon name="wand" size={14} /></button>
           <button onClick={onDownload} disabled={!canDownload} aria-label={`Download résumé ${resume.name}`} style={{ ...iconBtn, cursor: canDownload ? 'pointer' : 'not-allowed', color: canDownload ? 'var(--text-3)' : 'var(--text-4)' }}><Icon name="download" size={14} /></button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            // The label says which of the two things will happen, because they differ and
+            // the user has to know before clicking, not after.
+            aria-label={usage > 0 ? `Archive résumé ${resume.name}` : `Delete résumé ${resume.name}`}
+            title={usage > 0 ? 'Archive — this CV has already been sent to an employer' : 'Delete'}
+            style={{ ...iconBtn, color: 'var(--rejected)' }}
+          >
+            <Icon name={usage > 0 ? 'archive' : 'trash'} size={14} />
+          </button>
         </span>
       </div>
     </div>

@@ -139,6 +139,25 @@ export const handlers = [
     });
   }),
 
+  http.get('/api/v1/resumes/:resumeId/usage', ({ params }) => {
+    return HttpResponse.json({
+      resume_id: params['resumeId'],
+      total: 0,
+      submitted: 0,
+      items: [],
+    });
+  }),
+
+  http.delete('/api/v1/resumes/:resumeId', ({ params }) => {
+    return HttpResponse.json({
+      resume_id: params['resumeId'],
+      deleted: true,
+      archived: false,
+      used_by: 0,
+      detail: 'Deleted, along with its stored files. It had never been sent to an employer.',
+    });
+  }),
+
   http.post('/api/v1/resumes/upload', () => {
     return HttpResponse.json({
       id: 'resume-2',

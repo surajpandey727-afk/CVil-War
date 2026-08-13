@@ -85,6 +85,57 @@ export default function AppDetailPage() {
                 </div>
               </div>
 
+              {/* What actually went to the employer. The application already stored the
+                  résumé reference; showing only a status meant the one question a submitted
+                  application exists to answer — "which CV did they get?" — had no answer
+                  anywhere in the UI. */}
+              <div style={{ ...card, padding: 20, marginBottom: 16 }}>
+                <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 4 }}>
+                  Documents sent
+                </div>
+                <p style={{ margin: '0 0 14px', font: '500 12px/1.45 var(--font)', color: 'var(--text-3)' }}>
+                  {app.applied_at
+                    ? 'Exactly what the employer received with this application.'
+                    : 'What will go out when this application is submitted.'}
+                </p>
+
+                {app.resume_id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <span style={{ flex: '0 0 auto', width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                      <Icon name="file" size={16} />
+                    </span>
+                    <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                      <div style={{ font: '700 12.5px/1.3 var(--font)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {app.resume_name ?? 'CV no longer available'}
+                      </div>
+                      <div style={{ font: '500 11.5px/1.4 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>
+                        {app.resume_type ? `${app.resume_type} CV` : 'CV'}
+                        {app.resume_ats_score != null && ` · ${atsPercent(app.resume_ats_score)}% ATS`}
+                        {/* Archived is not an error. It is why the name is still here at
+                            all — a used CV is kept rather than deleted. */}
+                        {app.resume_archived && ' · archived, kept for this record'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate('/resumes')}
+                      style={{ flex: '0 0 auto', height: 30, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '600 11.5px/1 var(--font)', cursor: 'pointer' }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ font: '500 12.5px/1.5 var(--font)', color: 'var(--text-3)' }}>
+                    No CV was attached to this application.
+                  </div>
+                )}
+
+                <div style={{ font: '500 12px/1.45 var(--font)', color: 'var(--text-3)', marginTop: 10 }}>
+                  {app.has_cover_letter
+                    ? 'A tailored cover letter was generated and sent with it.'
+                    : 'No cover letter — this application went out with the CV alone.'}
+                </div>
+              </div>
+
               {/* Timeline */}
               <div style={{ ...card, padding: 20 }}>
                 <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 16 }}>Run timeline</div>

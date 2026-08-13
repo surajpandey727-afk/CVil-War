@@ -56,6 +56,15 @@ class ApplicationResponse(BaseModel):
     job_title: str | None = None
     company: str | None = None
     resume_id: str | None = None
+    # Which CV actually went out. An id alone cannot answer that, and "what did they receive"
+    # is the question a submitted application exists to answer.
+    resume_name: str | None = None
+    resume_type: str | None = None
+    resume_ats_score: float | None = None
+    #: True when that CV has since been archived. The application still points at it — this
+    #: is why archiving exists instead of deletion.
+    resume_archived: bool = False
+    has_cover_letter: bool = False
     status: str
     apply_mode: str
     ats_score: float | None = None

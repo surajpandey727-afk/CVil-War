@@ -52,3 +52,26 @@ export function useOptimizeResume() {
     },
   });
 }
+
+/** Fetch where one résumé has been used. Only enabled once an id is chosen. */
+export function useResumeUsage(resumeId: string | null) {
+  return useQuery({
+    queryKey: [...RESUMES_KEY, 'usage', resumeId],
+    queryFn: () => resumeService.getResumeUsage(resumeId!),
+    enabled: Boolean(resumeId),
+  });
+}
+
+/** Delete (or archive) a résumé. */
+export function useDeleteResume() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (resumeId: string) => resumeService.deleteResume(resumeId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: RESUMES_KEY });
+      // An archived CV stays attached to its applications, and those rows render its name
+      // and archived flag — leaving them cached would show it as still live.
+      void queryClient.invalidateQueries({ queryKey: ['applications'] });
+    },
+  });
+}

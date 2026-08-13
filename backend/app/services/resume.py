@@ -8,11 +8,12 @@ import asyncio
 import contextlib
 import re
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.documents.generator import DocumentGenerator
@@ -25,15 +26,20 @@ from app.core.storage.documents import (
     PDF_CONTENT_TYPE,
     persist_generated_document,
 )
+from app.models.application import Application
+from app.models.enums import ApplicationStatus
 from app.models.job import Job
 from app.models.resume import Resume
 from app.schemas.resume import (
+    ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
     ResumeResponse,
     ResumeScoreRequest,
     ResumeScoreResponse,
     ResumeUploadResponse,
+    ResumeUsageItem,
+    ResumeUsageResponse,
 )
 
 logger = structlog.get_logger(__name__)
@@ -174,19 +180,52 @@ async def upload_resume(
     )
 
 
-async def list_resumes(db: AsyncSession) -> ResumeListResponse:
-    """List all resumes.
+async def list_resumes(
+    db: AsyncSession, *, include_archived: bool = False
+) -> ResumeListResponse:
+    """List résumés with how often each has been used.
+
+    Archived résumés are held back by default but counted, so the UI can offer to show them
+    instead of leaving the user to wonder where a CV went. The usage counts are a single
+    grouped query rather than one per row — a user with twenty CVs would otherwise pay twenty
+    round trips to render a list.
 
     Args:
         db: Async database session.
+        include_archived: Also return CVs archived after being sent to an employer.
 
     Returns:
-        List of all resumes with total count.
+        Résumés with total and archived counts.
     """
     result = await db.execute(select(Resume).order_by(Resume.created_at.desc()))
     resumes = list(result.scalars().all())
-    items = [ResumeResponse.model_validate(r) for r in resumes]
-    return ResumeListResponse(items=items, total=len(items))
+
+    usage_rows = (
+        await db.execute(
+            select(
+                Application.resume_id,
+                func.count().label("total"),
+                func.sum(
+                    case((Application.status.in_(_SENT_STATUSES), 1), else_=0)
+                ).label("submitted"),
+            )
+            .where(Application.resume_id.isnot(None))
+            .group_by(Application.resume_id)
+        )
+    ).all()
+    usage = {row.resume_id: (row.total, int(row.submitted or 0)) for row in usage_rows}
+
+    archived_count = sum(1 for r in resumes if r.archived_at is not None)
+    visible = resumes if include_archived else [r for r in resumes if r.archived_at is None]
+
+    items = []
+    for resume in visible:
+        item = ResumeResponse.model_validate(resume)
+        item.used_in_applications, item.submitted_applications = usage.get(resume.id, (0, 0))
+        items.append(item)
+    return ResumeListResponse(
+        items=items, total=len(items), archived_count=archived_count
+    )
 
 
 async def get_resume(db: AsyncSession, resume_id: str) -> Resume:
@@ -699,3 +738,109 @@ async def optimize_resume(
         new_score=optimized.ats_score,
     )
     return ResumeResponse.model_validate(optimized)
+
+
+#: Statuses in which an application has actually been sent, or is being sent, to an employer.
+#: A résumé attached to one of these is a record of what somebody received, not a working
+#: file — see ``delete_resume``.
+_SENT_STATUSES = (
+    ApplicationStatus.APPLYING,
+    ApplicationStatus.APPLIED,
+    ApplicationStatus.INTERVIEW,
+    ApplicationStatus.REJECTED,
+    ApplicationStatus.OFFER,
+)
+
+
+async def resume_usage(db: AsyncSession, resume_id: str) -> ResumeUsageResponse:
+    """Every application this résumé was attached to, newest first.
+
+    Answers the question the résumé list cannot: not "is this in use" but "where, and did it
+    actually go out". A CV attached to a draft is disposable; one attached to a submitted
+    application is evidence.
+    """
+    await get_resume(db, resume_id)  # 404s rather than reporting empty usage for a bad id
+    rows = (
+        await db.execute(
+            select(Application, Job)
+            .join(Job, Job.id == Application.job_id)
+            .where(Application.resume_id == resume_id)
+            .order_by(Application.created_at.desc())
+        )
+    ).all()
+    items = [
+        ResumeUsageItem(
+            application_id=app.id,
+            job_title=job.title,
+            company=job.company,
+            status=app.status.value,
+            submitted=app.status in _SENT_STATUSES,
+            applied_at=app.applied_at,
+            ats_score=app.ats_score,
+        )
+        for app, job in rows
+    ]
+    return ResumeUsageResponse(
+        resume_id=resume_id,
+        total=len(items),
+        submitted=sum(1 for i in items if i.submitted),
+        items=items,
+    )
+
+
+async def delete_resume(db: AsyncSession, resume_id: str) -> ResumeDeleteResponse:
+    """Delete a résumé, or archive it if an employer has already received it.
+
+    The two cases are genuinely different and the endpoint does not pretend otherwise:
+
+    * **Never submitted** — deleted outright, along with its stored PDF and DOCX. There is
+      nothing to preserve, and leaving orphaned files behind is how a storage bucket fills up
+      with documents nobody can reach.
+    * **Submitted with at least one application** — archived instead. Hard-deleting it would
+      set every one of those applications' ``resume_id`` to NULL, so the record of what an
+      employer actually received would be silently destroyed. The response says which
+      happened and how many applications were involved, so the UI can tell the user rather
+      than leaving them to guess why the CV is still visible somewhere.
+
+    Archiving is idempotent: archiving an already-archived résumé is a no-op that reports the
+    same counts.
+    """
+    resume = await get_resume(db, resume_id)
+    usage = await resume_usage(db, resume_id)
+
+    if usage.submitted > 0:
+        if resume.archived_at is None:
+            resume.archived_at = datetime.now(UTC)
+            await db.commit()
+        logger.info("resume_archived", resume_id=resume_id, used_by=usage.submitted)
+        return ResumeDeleteResponse(
+            resume_id=resume_id,
+            deleted=False,
+            archived=True,
+            used_by=usage.submitted,
+            detail=(
+                f"Kept and archived: this CV was sent with {usage.submitted} "
+                f"application{'s' if usage.submitted != 1 else ''}, and those records need to "
+                "keep showing what the employer actually received. It no longer appears in "
+                "your list or in any CV picker."
+            ),
+        )
+
+    # Unused: remove the stored files first. Doing it after the row is gone would lose the
+    # keys on failure and orphan the objects permanently.
+    storage = StorageService(get_storage(), resume.user_id)
+    for key in (resume.file_path_pdf, resume.file_path_docx):
+        if key:
+            with contextlib.suppress(Exception):  # a missing object must not block the delete
+                await storage.delete(key)
+
+    await db.delete(resume)
+    await db.commit()
+    logger.info("resume_deleted", resume_id=resume_id)
+    return ResumeDeleteResponse(
+        resume_id=resume_id,
+        deleted=True,
+        archived=False,
+        used_by=0,
+        detail="Deleted, along with its stored files. It had never been sent to an employer.",
+    )

@@ -14,6 +14,7 @@ from app.core.exceptions import RecordNotFoundError
 from app.core.ratelimit import rate_limit
 from app.core.storage import StorageService, get_storage
 from app.schemas.resume import (
+    ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
     ResumeOptimizeRequest,
@@ -21,6 +22,7 @@ from app.schemas.resume import (
     ResumeScoreRequest,
     ResumeScoreResponse,
     ResumeUploadResponse,
+    ResumeUsageResponse,
 )
 from app.schemas.settings import CandidateProfileSchema
 from app.services import resume as resume_service
@@ -84,10 +86,55 @@ async def upload_resume(
     summary="List all resumes",
 )
 async def list_resumes(
+    include_archived: bool = Query(
+        False, description="Also return CVs archived after being sent to an employer."
+    ),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> ResumeListResponse:
-    """List all uploaded and generated resumes."""
-    return await resume_service.list_resumes(db)
+    """List uploaded and generated résumés, with how often each has been used."""
+    return await resume_service.list_resumes(db, include_archived=include_archived)
+
+
+@router.get(
+    "/{resume_id}/usage",
+    response_model=ResumeUsageResponse,
+    summary="Where a résumé has been used",
+)
+async def resume_usage(
+    resume_id: str,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeUsageResponse:
+    """List every application this CV was attached to, and whether each was submitted.
+
+    This is what makes deleting a CV an informed decision rather than a gamble, and it is the
+    answer to "which CV did I actually send them" from the résumé's side.
+    """
+    try:
+        return await resume_service.resume_usage(db, resume_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Resume not found") from None
+
+
+@router.delete(
+    "/{resume_id}",
+    response_model=ResumeDeleteResponse,
+    summary="Delete a résumé, or archive it if it has already been sent",
+)
+async def delete_resume(
+    resume_id: str,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeDeleteResponse:
+    """Remove a résumé from the working list.
+
+    Returns 200 with what actually happened rather than a bare 204, because the two outcomes
+    differ and the user needs to know which they got: an unused CV is deleted along with its
+    stored files, while one that has been sent to an employer is archived so the applications
+    that used it keep showing what was received.
+    """
+    try:
+        return await resume_service.delete_resume(db, resume_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Resume not found") from None
 
 
 @router.post(

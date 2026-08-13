@@ -39,6 +39,10 @@ export const ICON_PATHS = {
   keyboard: ['M3.5 7h17v10h-17z', 'M7 11h.01', 'M11 11h.01', 'M15 11h.01', 'M8 14h8'],
   bookmark: ['M6.5 4h11v16.5l-5.5-3.8-5.5 3.8z'],
   trash: ['M4 7h16', 'M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2', 'M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13', 'M10 11v6', 'M14 11v6'],
+  // Box with a lid: distinct from `trash` at 14px, which is the size these render at.
+  // A CV that has been sent is archived rather than deleted, and the two buttons must not
+  // look like the same action.
+  archive: ['M3.5 4.5h17v4h-17z', 'M5 8.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8.5', 'M10 12h4'],
   key: ['M15 7a4 4 0 1 0-4 4L4 18v3h3l1-1h2v-2h2l1.2-1.2A4 4 0 0 0 15 7z', 'M15.5 8.5h.01'],
   plug: ['M9 3v6', 'M15 3v6', 'M7 9h10v3a5 5 0 0 1-10 0z', 'M12 17v4'],
   filter: ['M3 5h18l-7 8.5V20l-4-2v-4.5z'],

@@ -10,6 +10,13 @@ export interface Application {
   job_title: string | null;
   company: string | null;
   resume_id: string | null;
+  /** Which CV actually went out. An id alone cannot answer "what did they receive". */
+  resume_name: string | null;
+  resume_type: string | null;
+  resume_ats_score: number | null;
+  /** True when that CV has since been archived. The application still points at it. */
+  resume_archived: boolean;
+  has_cover_letter: boolean;
   status: string;
   apply_mode: string;
   ats_score: number | null;
