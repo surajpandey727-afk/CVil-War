@@ -1,7 +1,9 @@
 """SQLAlchemy ORM models."""
 
 from app.models.application import Application
+from app.models.application_event import ApplicationEvent
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.document import Document, DocumentVersion
 from app.models.harness import (
     DomainSkill,
     RunDiagnosis,
@@ -23,7 +25,10 @@ from app.models.user_settings import UserSettings
 
 __all__ = [
     "Application",
+    "ApplicationEvent",
     "Base",
+    "Document",
+    "DocumentVersion",
     "DomainSkill",
     "Job",
     "LLMUsage",

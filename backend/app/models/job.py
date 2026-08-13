@@ -42,6 +42,19 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     skills_required: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Status tracking
+    # -- Local cache / incremental discovery (zero-cost brief §4/§5) --------------------
+    #
+    # The database is the primary job cache: re-fetching an unchanged posting costs free-tier
+    # capacity for nothing, so a run compares content_hash and skips reprocessing when it
+    # matches. first/last_seen also give an honest "still listed?" signal.
+    canonical_job_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Where a human applies, when it differs from the posting URL.
+    application_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+
     status: Mapped[JobStatus] = mapped_column(
         pg_enum(JobStatus, "job_status"), nullable=False, default=JobStatus.NEW
     )

@@ -11,11 +11,11 @@ import pytest
 pytest.importorskip("aioboto3")
 pytest.importorskip("moto")
 
-import boto3  # noqa: E402
-from moto.server import ThreadedMotoServer  # noqa: E402
+import boto3
+from moto.server import ThreadedMotoServer
 
-from app.core.storage.s3 import S3FileStorage  # noqa: E402
-from app.core.storage.service import StorageService  # noqa: E402
+from app.core.storage.s3 import S3FileStorage
+from app.core.storage.service import StorageService
 
 _BUCKET = "test-bucket"
 

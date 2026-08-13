@@ -203,7 +203,7 @@ def _weasyprint_importable() -> bool:
     import raises and any test that patches ``weasyprint.*`` cannot run at all.
     """
     try:
-        import weasyprint  # noqa: F401, PLC0415
+        import weasyprint  # noqa: F401
     except Exception:
         return False
     return True

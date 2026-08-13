@@ -6,7 +6,13 @@ from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, String, Text, t
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
-from app.models.enums import ApplicationStatus, ApplyMode
+from app.models.enums import (
+    ActionPriority,
+    ApplicationHealth,
+    ApplicationStatus,
+    ApplyMode,
+    NextAction,
+)
 
 
 class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
@@ -64,9 +70,63 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     browser_screenshots: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # -- Operational state (distinct from the hiring `status` above) --------------------
+    #
+    # An application can be at INTERVIEW and simultaneously BLOCKED because a session
+    # expired. One column cannot carry both without losing the thing the command centre
+    # exists to surface, so health and next_action are tracked separately.
+    health: Mapped[ApplicationHealth] = mapped_column(
+        pg_enum(ApplicationHealth, "application_health"),
+        nullable=False,
+        default=ApplicationHealth.HEALTHY,
+    )
+    next_action: Mapped[NextAction] = mapped_column(
+        pg_enum(NextAction, "next_action"), nullable=False, default=NextAction.NONE
+    )
+    #: Plain-English reason the action is needed, shown verbatim in the queue.
+    next_action_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    next_action_priority: Mapped[ActionPriority] = mapped_column(
+        pg_enum(ActionPriority, "action_priority"), nullable=False, default=ActionPriority.NONE
+    )
+    #: Computed score used to order the queue; the reason string explains it to the user.
+    next_action_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    #: Hard deadline driving urgency (assessment close, interview, response-by).
+    action_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # -- Provenance (Job OS §1: one canonical record whatever the origin) ---------------
+    #: How this application entered the system: discovery, sprint, manual, import, ats.
+    origin: Mapped[str] = mapped_column(String(30), nullable=False, default="discovery")
+    #: Platform the application actually lives on, when it differs from the discovery source.
+    portal: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    #: Where a human completes or reviews this application.
+    application_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    #: Employer's own reference, when one is issued — used to reconcile external status.
+    external_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # -- Resume-from-position (Job OS §7/§8) ---------------------------------------------
+    #: Where a paused application stopped, e.g. {"stage": "application_form",
+    #: "completed": [...], "current": "work_authorisation", "remaining": [...]}.
+    #: Persisted so a reconnect resumes at the current field instead of restarting.
+    resume_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # -- Follow-up / assessment / interview tracking -------------------------------------
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    assessment_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    assessment_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    interview_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Document version actually submitted. A version, never a document — see models/document.
+    document_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Relationships
     job: Mapped["Job"] = relationship(back_populates="applications")  # noqa: F821
     resume: Mapped["Resume | None"] = relationship(back_populates="applications")  # noqa: F821
+    events: Mapped[list["ApplicationEvent"]] = relationship(  # noqa: F821
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="ApplicationEvent.occurred_at",
+    )
 
     def __repr__(self) -> str:
         return f"<Application(id={self.id}, job_id={self.job_id}, status='{self.status}')>"

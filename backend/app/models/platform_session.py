@@ -2,10 +2,11 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.enums import SessionState
 
 
 class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -27,3 +28,19 @@ class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fingerprint_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # -- Granular lifecycle (Job OS §6/§7) ----------------------------------------------
+    #
+    # Collapsing these into a generic FAILED is what produced dead ends: an expired session
+    # needs a reconnect, MFA needs a hand-off, and a server block means a different access
+    # mechanism entirely. Three different user actions, so three different states.
+    state: Mapped[SessionState] = mapped_column(
+        pg_enum(SessionState, "session_state"),
+        nullable=False,
+        default=SessionState.NOT_CONNECTED,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Why the session needs attention, shown to the user verbatim.
+    state_detail: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    #: Count of applications currently relying on this session, for the connection centre.
+    applications_tracked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
