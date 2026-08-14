@@ -1,3 +1,5 @@
+import { useNavigate } from 'react-router-dom';
+
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import { useSources } from '@/hooks/useSources';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
@@ -23,6 +25,7 @@ export default function SourcesPage() {
   const all = catalogue.tiers.flatMap((t) => t.sources);
   const enabledCount = all.filter((s) => enabledSources.includes(s.key)).length;
   const liveCount = all.filter((s) => s.health === 'live').length;
+  const navigate = useNavigate();
 
   return (
     <div style={{ animation: 'aaUp .4s var(--ease) both', maxWidth: 1320 }}>
@@ -34,12 +37,23 @@ export default function SourcesPage() {
             {isFallback && ' Showing the built-in catalogue — live health is unavailable.'}
           </p>
         </div>
-        <button
-          onClick={() => setSources(catalogue.live_keys)}
-          style={{ height: 36, padding: '0 15px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
-        >
-          Enable only working sources
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setSources(catalogue.live_keys)}
+            style={{ height: 36, padding: '0 15px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
+          >
+            Enable only working sources
+          </button>
+          {/* Connections, credentials and per-platform configuration live in Settings. The
+              deep link puts that section in front of the operator instead of dropping them
+              at the top of a long page to find it. */}
+          <button
+            onClick={() => navigate('/settings?section=platforms')}
+            style={{ height: 36, padding: '0 15px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
+          >
+            Manage connections
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, opacity: isFetching ? 0.7 : 1 }}>

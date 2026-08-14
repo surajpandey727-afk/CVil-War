@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 import { server } from '@/__tests__/mocks/server';
 import SettingsPage from '@/pages/SettingsPage';
@@ -19,11 +20,15 @@ function settings(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderSettings() {
+function renderSettings(route = '/settings') {
+  // The page reads ?section= to deep-link the platform panel, so it needs a router — the
+  // real app always has one.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <SettingsPage />
+      <MemoryRouter initialEntries={[route]}>
+        <SettingsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -69,10 +74,17 @@ describe('SettingsPage', () => {
     server.use(http.get('/api/v1/settings/', () => HttpResponse.json(settings())));
     renderSettings();
 
+    // The page issues four independent requests now (settings, platforms, catalogue,
+    // usage), so wait for the AI section itself before reaching into it — a bare findBy on
+    // the provider row races the slowest of the four under suite load.
+    await screen.findByText('AI providers & models', undefined, { timeout: 5000 });
+
     // Each provider is an expandable row; the usage breakdown names them again, which is
     // correct — the same provider appears as something the gateway offers and as something
     // tokens were spent on. Targeting the button disambiguates without hiding that.
-    expect(await screen.findByRole('button', { name: /combo 2 models/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /combo 2 models/i }, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /groq 1 model/i })).toBeInTheDocument();
     expect(screen.getByText(/3 models across 2 providers/)).toBeInTheDocument();
     expect(screen.getByText('openai/Full-Send')).toBeInTheDocument();
@@ -145,21 +157,22 @@ describe('SettingsPage', () => {
     expect(await screen.findByText(/no llm calls recorded in this period/i)).toBeInTheDocument();
   });
 
-  it('lists platforms from the source registry, not a list kept on this page', async () => {
-    // Settings hard-coded four platforms while /sources served fifty-five, so the two
-    // screens disagreed about what the product supports.
+  it('renders the platform manager from the registry', async () => {
+    // Settings hard-coded four platforms while the registry served fifty-five, so the two
+    // screens disagreed about what the product supports. Detail is covered against the
+    // panel itself in PlatformsPanel.test.tsx.
     server.use(http.get('/api/v1/settings/', () => HttpResponse.json(settings())));
-    server.use(
-      http.get('/api/v1/sources/', () =>
-        HttpResponse.json({
-          total: 55, tiers: [], live_keys: ['remotive', 'adzuna', 'careers:monzo'],
-        }),
-      ),
-    );
     renderSettings();
 
-    expect(await screen.findByRole('button', { name: /remotive/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /careers:monzo/i })).toBeInTheDocument();
-    expect(screen.getByText(/3 of 55 catalogued sources/)).toBeInTheDocument();
+    expect(await screen.findByText('Remotive')).toBeInTheDocument();
+    expect(screen.getByText(/2 of 3 sources have a working adapter/)).toBeInTheDocument();
+  });
+
+  it('deep-links to the platform section from Sources', async () => {
+    // "Manage" used to land on /settings with no indication of where to look.
+    server.use(http.get('/api/v1/settings/', () => HttpResponse.json(settings())));
+    renderSettings('/settings?section=platforms');
+
+    expect(await screen.findByText('Platforms')).toBeInTheDocument();
   });
 });

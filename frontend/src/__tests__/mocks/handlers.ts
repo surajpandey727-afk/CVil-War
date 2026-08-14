@@ -559,6 +559,55 @@ export const handlers = [
 
   // The AI control plane. Shaped like the real gateway's /v1/models response, trimmed —
   // tests that care about a specific state override these.
+  http.get('/api/v1/settings/platforms', () =>
+    HttpResponse.json({
+      total: 3,
+      usable: 2,
+      connected: 1,
+      platforms: [
+        {
+          key: 'remotive', label: 'Remotive', tier: 'aggregator', health: 'live',
+          implemented: true, needs_credential: false, capabilities: ['search'],
+          enabled: true, connected: false, connection_state: 'not_connected',
+          account: null, last_used_at: null, expires_at: null, detail: null, last_error: null,
+          actions: [
+            { key: 'toggle', label: 'Enable for discovery', available: true, reason: '' },
+            { key: 'connect', label: 'Connect', available: false, reason: 'This source is a public API and needs no login.' },
+            { key: 'test', label: 'Test', available: true, reason: '' },
+          ],
+        },
+        {
+          key: 'linkedin', label: 'LinkedIn', tier: 'board', health: 'degraded',
+          implemented: true, needs_credential: true, capabilities: ['search'],
+          enabled: false, connected: true, connection_state: 'session_active',
+          account: 'sur***@example.com', last_used_at: null, expires_at: null,
+          detail: null, last_error: null,
+          actions: [
+            { key: 'toggle', label: 'Enable for discovery', available: true, reason: '' },
+            { key: 'connect', label: 'Reconnect', available: true, reason: '' },
+            { key: 'disconnect', label: 'Disconnect', available: true, reason: '' },
+            { key: 'test', label: 'Test', available: false, reason: 'Nothing to test until an adapter can reach this source.' },
+          ],
+        },
+        {
+          key: 'careers:starling', label: 'Starling Bank', tier: 'careers',
+          health: 'not_implemented', implemented: false, needs_credential: false,
+          capabilities: [], enabled: false, connected: false,
+          connection_state: 'not_connected', account: null, last_used_at: null,
+          expires_at: null, detail: null,
+          last_error: 'No public ATS board found.',
+          actions: [
+            { key: 'toggle', label: 'Enable for discovery', available: false, reason: 'No adapter can serve this source yet.' },
+            { key: 'connect', label: 'Connect', available: false, reason: 'This source is a public API and needs no login.' },
+            { key: 'test', label: 'Test', available: false, reason: 'Nothing to test until an adapter can reach this source.' },
+          ],
+        },
+      ],
+    }),
+  ),
+
+  http.delete('/api/v1/platform-sessions/:platform', () => new HttpResponse(null, { status: 204 })),
+
   http.get('/api/v1/settings/ai/catalogue', () => {
     return HttpResponse.json({
       reachable: true,

@@ -452,3 +452,131 @@ class TestRoleTargetsAreExtensible:
         assert stored[0]["strategy"] == "approval"
         assert stored[1]["locations"] == ["Remote UK"]
         assert stored[1]["strategy"] == "autonomous"
+
+
+class TestPlatformManagement:
+    """Settings and Sources must read the same registry. They previously did not: Settings
+    hard-coded four platforms while the registry served fifty-five."""
+
+    async def test_the_whole_registry_is_returned_not_a_curated_subset(self, client):
+        from app.core.job_discovery.source_registry import ALL_SOURCES
+
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+
+        assert body["total"] == len(ALL_SOURCES)
+        assert {p["key"] for p in body["platforms"]} == {s.key for s in ALL_SOURCES}
+
+    async def test_each_platform_carries_its_health_and_capabilities(self, client):
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        by_key = {p["key"]: p for p in body["platforms"]}
+
+        remotive = by_key["remotive"]
+        assert remotive["implemented"] is True
+        assert remotive["health"] == "live"
+        assert "search" in remotive["capabilities"]
+
+    async def test_a_catalogued_source_with_no_adapter_says_so(self, client):
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        by_key = {p["key"]: p for p in body["platforms"]}
+
+        starling = by_key["careers:starling"]
+        assert starling["implemented"] is False
+        assert starling["health"] == "not_implemented"
+
+    async def test_a_blocked_portal_reports_the_reason_rather_than_a_blank(self, client):
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        trac = next(p for p in body["platforms"] if p["key"] == "tracjobs")
+        assert trac["last_error"] and "403" in trac["last_error"]
+
+    async def test_nothing_is_connected_for_a_user_with_no_sessions(self, client):
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+
+        assert body["connected"] == 0
+        assert all(p["connected"] is False for p in body["platforms"])
+        assert all(p["connection_state"] == "not_connected" for p in body["platforms"])
+
+    async def test_a_connected_session_is_reported_with_a_masked_account(
+        self, client, db_session, current_user
+    ):
+        from app.models.enums import SessionState
+        from app.models.platform_session import PlatformSession
+
+        db_session.add(PlatformSession(
+            user_id=TEST_USER_ID, platform="linkedin", state=SessionState.SESSION_ACTIVE,
+            account_label="suraj.pandey@example.com",
+        ))
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        linkedin = next(p for p in body["platforms"] if p["key"] == "linkedin")
+
+        assert linkedin["connected"] is True
+        # Masked on read as well as on write — a row from an older build must not leak.
+        assert linkedin["account"] == "sur***@example.com"
+        assert body["connected"] == 1
+
+    async def test_an_expired_session_is_not_reported_as_connected(
+        self, client, db_session, current_user
+    ):
+        """Saying "connected" when the agent cannot authenticate sends the operator looking
+        in entirely the wrong place."""
+        from app.models.enums import SessionState
+        from app.models.platform_session import PlatformSession
+
+        db_session.add(PlatformSession(
+            user_id=TEST_USER_ID, platform="indeed", state=SessionState.SESSION_EXPIRED,
+            state_detail="Session expired three days ago.",
+        ))
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        indeed = next(p for p in body["platforms"] if p["key"] == "indeed")
+
+        assert indeed["connected"] is False
+        assert indeed["connection_state"] == "session_expired"
+        assert "expired" in indeed["detail"]
+
+    async def test_enablement_comes_from_the_users_saved_settings(
+        self, client
+    ):
+        await client.put(f"{API_PREFIX}/", json={"platforms_enabled": ["remotive"]})
+
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        by_key = {p["key"]: p for p in body["platforms"]}
+
+        assert by_key["remotive"]["enabled"] is True
+        assert by_key["jobicy"]["enabled"] is False
+
+    async def test_actions_state_why_they_are_unavailable(self, client):
+        """A disabled control with a reason beats a button that silently does nothing."""
+        body = (await client.get(f"{API_PREFIX}/platforms")).json()
+        by_key = {p["key"]: p for p in body["platforms"]}
+
+        # A keyless public API needs no login, and says so rather than hiding the control.
+        connect = next(a for a in by_key["remotive"]["actions"] if a["key"] == "connect")
+        assert connect["available"] is False
+        assert "public API" in connect["reason"]
+
+        # A source with no adapter cannot be enabled for discovery.
+        toggle = next(
+            a for a in by_key["careers:starling"]["actions"] if a["key"] == "toggle"
+        )
+        assert toggle["available"] is False
+        assert "adapter" in toggle["reason"]
+
+    async def test_no_credential_appears_in_the_payload(self, client, db_session, current_user):
+        from app.models.enums import SessionState
+        from app.models.platform_session import PlatformSession
+
+        db_session.add(PlatformSession(
+            user_id=TEST_USER_ID, platform="linkedin", state=SessionState.SESSION_ACTIVE,
+            account_label="sur***@example.com", fingerprint_hash="deadbeefcafe",
+        ))
+        await db_session.commit()
+
+        raw = (await client.get(f"{API_PREFIX}/platforms")).text.lower()
+        for forbidden in ("password", "cookie", "token", "storage_state", "deadbeefcafe"):
+            assert forbidden not in raw
+
+    async def test_the_endpoint_needs_authentication(self, anon_client):
+        assert (await anon_client.get(f"{API_PREFIX}/platforms")).status_code in (401, 403)

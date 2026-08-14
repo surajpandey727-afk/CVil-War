@@ -193,7 +193,7 @@ export default function JobSearchPage() {
       {/* ---- Left rail: targets, filters, sources ------------------------------------ */}
       <div style={{ flex: '0 0 268px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ ...card, padding: 14 }}>
-          <RailHead label="Role targets" action="Edit" onAction={() => navigate('/settings')} />
+          <RailHead label="Role targets" action="Edit" onAction={() => navigate('/targets')} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {(Object.keys(ROLE_FAMILIES) as RoleFamily[]).map((f) => (
               <Chip key={f} on={activeFamilies.includes(f)} onClick={() => toggleFamily(f)}>
@@ -255,7 +255,9 @@ export default function JobSearchPage() {
         </div>
 
         <div style={{ ...card, padding: 14 }}>
-          <RailHead label="Sources" action="Manage" onAction={() => navigate('/settings')} />
+          {/* Deep link, not a bare /settings: "Manage" landing at the top of a long page with
+              no indication of where to look is what made this flow a dead end. */}
+          <RailHead label="Sources" action="Manage" onAction={() => navigate('/settings?section=platforms')} />
           {SOURCE_TIERS.map((tier) => (
             <div key={tier.id} style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '6px 2px' }}>

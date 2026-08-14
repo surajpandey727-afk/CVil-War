@@ -66,3 +66,23 @@ export function useAIUsage(period: AIUsagePeriod) {
     queryFn: () => settingsService.getAIUsage(period),
   });
 }
+
+/** Job sources with connection state, from the same registry the Sources screen reads. */
+export function usePlatforms() {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'platforms'],
+    queryFn: () => settingsService.getPlatforms(),
+  });
+}
+
+/** Disconnect a platform. Invalidates settings and sources so both screens agree. */
+export function useDisconnectPlatform() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (platform: string) => settingsService.disconnectPlatform(platform),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['sources'] });
+    },
+  });
+}

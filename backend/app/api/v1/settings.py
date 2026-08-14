@@ -14,6 +14,7 @@ from app.models.enums import ApplicationStatus
 from app.models.job import Job
 from app.models.user_settings import UserSettings
 from app.schemas.ai_settings import AICatalogue, AIUsageReport
+from app.schemas.platforms import PlatformsResponse
 from app.schemas.settings import (
     LLMProviderStatus,
     PolicyCatalogue,
@@ -25,6 +26,7 @@ from app.schemas.settings import (
     SettingsResponse,
     SettingsUpdate,
 )
+from app.services import platforms as platform_service
 from app.services.ai_settings import build_catalogue, build_usage
 from app.services.policy import build_context, load_policy
 
@@ -188,6 +190,25 @@ async def preview_automation_policy(
             )
         )
     return preview
+
+
+@router.get(
+    "/platforms",
+    response_model=PlatformsResponse,
+    summary="Every job source, with this user's enablement and connection state",
+)
+async def list_platforms(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> PlatformsResponse:
+    """The platform control plane, assembled from the same registry the Sources screen reads.
+
+    One source of truth on purpose: Settings previously hard-coded four platforms while the
+    registry served fifty-five, so the two screens disagreed about what the product supports.
+    Available actions are decided here, because whether a source needs a login — or can be
+    tested at all — depends on the adapter, not on anything the browser knows.
+    """
+    return await platform_service.list_platforms(db, user.id)
 
 
 @router.get(

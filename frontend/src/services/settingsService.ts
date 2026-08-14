@@ -1,5 +1,6 @@
 import api from './api';
 import type { AICatalogue, AIUsagePeriod, AIUsageReport } from '@/types/aiSettings';
+import type { PlatformsResponse } from '@/types/platforms';
 import type {
   AutomationSettings,
   LLMProviderStatus,
@@ -61,4 +62,15 @@ export async function getAICatalogue(refresh = false): Promise<AICatalogue> {
 export async function getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport> {
   const { data } = await api.get<AIUsageReport>('/settings/ai/usage', { params: { period } });
   return data;
+}
+
+/** Every job source with this user's enablement and connection state. */
+export async function getPlatforms(): Promise<PlatformsResponse> {
+  const { data } = await api.get<PlatformsResponse>('/settings/platforms');
+  return data;
+}
+
+/** Disconnect a stored platform session. */
+export async function disconnectPlatform(platform: string): Promise<void> {
+  await api.delete(`/platform-sessions/${platform}`);
 }
