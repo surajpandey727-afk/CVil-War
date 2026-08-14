@@ -50,3 +50,36 @@ export function useAnalyzeJob() {
     mutationFn: (jobId: string) => jobService.analyzeJob(jobId),
   });
 }
+
+/** The stored fit assessment for a job, if one exists. */
+export function useStoredFit(jobId: string | undefined, resumeId?: string) {
+  return useQuery({
+    queryKey: [...JOBS_KEY, 'fit', jobId, resumeId],
+    queryFn: () => jobService.getStoredFit(jobId!, resumeId),
+    enabled: !!jobId,
+  });
+}
+
+/**
+ * Run a fit analysis. A mutation because it is an explicit, potentially expensive action —
+ * analysing on render would fire a model call every time a drawer opened.
+ */
+export function useAnalyseFit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, resumeId, refresh }: { jobId: string; resumeId: string; refresh?: boolean }) =>
+      jobService.analyseFit(jobId, resumeId, refresh ?? false),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: [...JOBS_KEY, 'fit', variables.jobId] });
+    },
+  });
+}
+
+/** What is known about a job's employer. */
+export function useCompanyProfile(jobId: string | undefined) {
+  return useQuery({
+    queryKey: [...JOBS_KEY, 'company', jobId],
+    queryFn: () => jobService.getCompanyProfile(jobId!),
+    enabled: !!jobId,
+  });
+}

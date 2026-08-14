@@ -12,6 +12,8 @@ export interface Job {
   company: string;
   location: string;
   url: string;
+  /** Where the form is, when the source distinguishes it from the advert. */
+  application_url?: string | null;
   description: string;
   salary_range: string | null;
   job_type: string | null;

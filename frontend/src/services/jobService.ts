@@ -1,4 +1,6 @@
 import api from './api';
+import type { CompanyProfile } from '@/types/company';
+import type { FitAnalysis } from '@/types/fit';
 import type { Job, JobSearchRequest, JobListResponse, JobAnalysisResponse } from '@/types/job';
 
 /** Search for jobs across multiple platforms. */
@@ -34,5 +36,40 @@ export async function getJob(jobId: string): Promise<Job> {
 /** Analyze how well the candidate matches a job listing. */
 export async function analyzeJob(jobId: string): Promise<JobAnalysisResponse> {
   const { data } = await api.post<JobAnalysisResponse>(`/jobs/${jobId}/analyze`);
+  return data;
+}
+
+/**
+ * Assess one CV against this job. Job-first: the job is the context and the CV is the
+ * variable, which is the opposite of picking a CV and then hunting for a job.
+ *
+ * A stored analysis for this exact (job, CV) pair is returned unless `refresh` is set.
+ */
+export async function analyseFit(
+  jobId: string,
+  resumeId: string,
+  refresh = false,
+): Promise<FitAnalysis> {
+  const { data } = await api.post<FitAnalysis>(`/jobs/${jobId}/fit`, {
+    resume_id: resumeId,
+    refresh,
+  });
+  return data;
+}
+
+/** A previously stored assessment, without recomputing. `null` when none exists. */
+export async function getStoredFit(
+  jobId: string,
+  resumeId?: string,
+): Promise<FitAnalysis | null> {
+  const { data } = await api.get<FitAnalysis | null>(`/jobs/${jobId}/fit`, {
+    params: resumeId ? { resume_id: resumeId } : undefined,
+  });
+  return data;
+}
+
+/** What is actually known about this job's employer. */
+export async function getCompanyProfile(jobId: string): Promise<CompanyProfile> {
+  const { data } = await api.get<CompanyProfile>(`/jobs/${jobId}/company`);
   return data;
 }

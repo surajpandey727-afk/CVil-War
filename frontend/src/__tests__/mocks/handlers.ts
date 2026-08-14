@@ -116,6 +116,32 @@ export const handlers = [
     });
   }),
 
+  // Fit + company. Default to "nothing stored yet" so a drawer that opens does not
+  // silently render a cached analysis a test did not set up.
+  http.get('/api/v1/jobs/:jobId/fit', () => HttpResponse.json(null)),
+
+  http.post('/api/v1/jobs/:jobId/fit', () =>
+    HttpResponse.json({
+      job_id: 'job-1', resume_id: 'resume-1', resume_name: 'my_resume.pdf',
+      overall: 0.72,
+      categories: [
+        { key: 'required_skills', label: 'Required skills', score: 0.8, rationale: '', method: 'Average of match levels.' },
+      ],
+      not_assessed: [], matches: [], recommendations: [],
+      method: 'keyword', model: '', analysed_at: null, cached: false, stale_reason: '',
+    }),
+  ),
+
+  http.get('/api/v1/jobs/:jobId/company', () =>
+    HttpResponse.json({
+      name: 'Acme Corp', available: true, website: null, website_source: '',
+      industry: null, description: null, source: 'linkedin',
+      other_jobs: [], other_jobs_count: 0,
+      unavailable_fields: ['Website', 'Industry', 'Company size'],
+      unavailable_reason: 'This job came from an aggregator.',
+    }),
+  ),
+
   http.delete('/api/v1/jobs/:jobId', () => {
     return new HttpResponse(null, { status: 204 });
   }),

@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import JobDrawer from '@/components/jobs/JobDrawer';
-import { useJobs, useSearchJobs, useAnalyzeJob } from '@/hooks/useJobs';
+import { useJobs, useSearchJobs } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
-import { useResumes, useGenerateResume } from '@/hooks/useResumes';
+import { useResumes } from '@/hooks/useResumes';
 import { useAppStore } from '@/store/useAppStore';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
 import { atsColor, atsPercent, relativeTime } from '@/lib/status';
@@ -14,7 +14,7 @@ import { ROLE_FAMILIES, familyForTitle, queryForTitles, type RoleFamily } from '
 import {
   HEALTH_META, SOURCE_BY_KEY, SOURCE_TIERS, sourceLabel, sourcesInTier,
 } from '@/lib/sources';
-import type { Job, JobAnalysisResponse } from '@/types/job';
+import type { Job } from '@/types/job';
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -69,16 +69,12 @@ export default function JobSearchPage() {
   });
   const { data: resumeData } = useResumes();
   const search = useSearchJobs();
-  const analyze = useAnalyzeJob();
   const createApps = useCreateApplicationBatch();
-  const generate = useGenerateResume();
 
   const [drawerJob, setDrawerJob] = useState<Job | null>(null);
-  const [analysis, setAnalysis] = useState<JobAnalysisResponse | null>(null);
   const [runResumeId, setRunResumeId] = useState<string>('auto');
 
   const resumes = useMemo(() => resumeData?.items ?? [], [resumeData]);
-  const baseResumeId = resumes.find((r) => r.type === 'base')?.id ?? resumes[0]?.id ?? null;
   const allJobs = useMemo(() => data?.items ?? [], [data]);
 
   /** Client-side filtering. The backend returns the stored corpus; these are the operator's
@@ -114,25 +110,36 @@ export default function JobSearchPage() {
   const selected = selectedJobIds.filter((id) => jobs.some((j) => j.id === id));
   const allSelected = jobs.length > 0 && selected.length === jobs.length;
 
-  const openDrawer = (job: Job) => {
-    setDrawerJob(job);
-    setAnalysis(null);
-    analyze.mutate(job.id, {
-      onSuccess: (r) => setAnalysis(r),
-      onError: () => notify('Could not analyze this job', 'error'),
-    });
-  };
+  const openDrawer = (job: Job) => setDrawerJob(job);
 
-  const onGenerateTailored = () => {
-    if (!drawerJob || !baseResumeId) return;
-    generate.mutate(
-      { base_resume_id: baseResumeId, job_id: drawerJob.id },
+  /** Queue this job for the agent with the CV chosen in the drawer. */
+  const onApplyWithAgent = (job: Job, resumeId: string | null) => {
+    createApps.mutate(
+      { job_ids: [job.id], resume_id: resumeId, apply_mode: 'review' },
       {
-        onSuccess: () => notify(`Tailored résumé generated · ${drawerJob.title}`, 'success'),
-        onError: () => notify('Could not generate the résumé', 'error'),
+        onSuccess: () => {
+          notify(`Queued for review · ${job.title}`, 'success');
+          setDrawerJob(null);
+        },
+        onError: () => notify('Could not queue this application', 'error'),
       },
     );
   };
+
+  /**
+   * The operator is applying on the external site themselves.
+   *
+   * The link opens the real page; this only records the intent. Nothing is marked applied —
+   * CVil-War opened a tab, which is not evidence that anyone submitted anything, and
+   * claiming otherwise is exactly the false "Applied" the product exists to avoid.
+   */
+  const onApplyManually = (url: string) => {
+    notify(
+      `Opening ${new URL(url).hostname} — record the outcome yourself once you have applied.`,
+      'info',
+    );
+  };
+
 
   const runSearch = () => {
     const effective = query.trim() || queryForTitles(activeTitles);
@@ -414,9 +421,16 @@ export default function JobSearchPage() {
 
       {drawerJob && (
         <JobDrawer
-          job={drawerJob} analysis={analysis} analyzing={analyze.isPending}
-          baseResumeId={baseResumeId} generating={generate.isPending}
-          onClose={() => setDrawerJob(null)} onGenerate={onGenerateTailored}
+          job={drawerJob}
+          resumes={resumes}
+          onClose={() => setDrawerJob(null)}
+          onApplyWithAgent={(resumeId) => onApplyWithAgent(drawerJob, resumeId)}
+          applying={createApps.isPending}
+          onApplyManually={onApplyManually}
+          onOpenJobId={(id) => {
+            const next = allJobs.find((j) => j.id === id);
+            if (next) openDrawer(next);
+          }}
         />
       )}
     </div>

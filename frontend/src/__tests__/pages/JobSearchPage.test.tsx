@@ -174,14 +174,19 @@ describe('JobSearchPage', () => {
     expect(body!.apply_mode).toBe('review');
   });
 
-  it('opens the job drawer with the analysis when a job title is clicked', async () => {
+  it('opens the job as the decision centre when its title is clicked', async () => {
+    // The drawer no longer fires an analysis on open. Analysing every job the operator
+    // glances at would spend a model call per click; the CV is chosen first, in the drawer,
+    // and the assessment is an explicit action.
     server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job()))));
-    server.use(http.post('/api/v1/jobs/:id/analyze', () =>
-      HttpResponse.json({ job_id: 'j1', match_score: 0.88, skill_match: 0.9, keyword_match: 0.8, missing_skills: ['GraphQL'], suggestions: ['Add GraphQL experience'] }),
-    ));
     renderJobs();
+
     await userEvent.click(await screen.findByRole('button', { name: 'Senior Product Manager' }));
-    expect(await screen.findByRole('dialog', { name: /job details/i })).toBeInTheDocument();
-    expect(await screen.findByText('GraphQL')).toBeInTheDocument();
+
+    const drawer = await screen.findByRole('dialog', { name: /job details/i });
+    expect(drawer).toBeInTheDocument();
+    expect(await screen.findByLabelText('CV')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /analyse my fit/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply with agent/i })).toBeInTheDocument();
   });
 });
