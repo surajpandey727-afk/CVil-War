@@ -209,7 +209,19 @@ async def search_jobs(
 
     # Apply limit
     limited = all_jobs[: request.limit]
+    # Serialised before the dedup pass on purpose: that pass commits, which expires every
+    # ORM instance, and validating an expired Job then triggers a lazy load with no greenlet
+    # to run it in. Pydantic models hold plain values and are unaffected.
     items = [JobListingResponse.model_validate(j) for j in limited]
+
+    # Link listings that describe one vacancy. Best-effort: a dedup failure must not lose the
+    # jobs the search just found.
+    if all_jobs:
+        try:
+            await assign_canonical_ids(db, user_id)
+        except Exception as exc:
+            logger.warning("job_search.dedup_failed", error=str(exc))
+            await db.rollback()
 
     return JobListResponse(
         items=items,
@@ -535,3 +547,68 @@ async def analyze_job(
                 "python -m spacy download en_core_web_sm",
             ],
         )
+
+
+async def assign_canonical_ids(db: AsyncSession, user_id: str) -> int:
+    """Group this user's jobs by vacancy and stamp each group with a shared canonical id.
+
+    ``canonical_job_id`` has existed since the Job OS migration and nothing populated it, so
+    the same vacancy discovered on Reed, LinkedIn and the employer's own board was three
+    unrelated rows — three list entries, three fit analyses, and three applications to one
+    employer for one role.
+
+    The oldest row in each group is the canonical one: it is the listing the operator saw
+    first, and keeping the choice stable means a later re-scrape does not reshuffle which id
+    everything points at. A group of one still gets stamped, so "has been deduplicated" and
+    "has not been examined" stay distinguishable.
+
+    Returns the number of rows updated.
+    """
+    from app.core.job_discovery.dedup import JobIdentity
+    from app.core.job_discovery.dedup import group as group_identities
+
+    rows = list(
+        (
+            await db.execute(
+                select(Job).where(Job.user_id == user_id).order_by(Job.created_at)
+            )
+        ).scalars().all()
+    )
+    if not rows:
+        return 0
+
+    identities = [
+        JobIdentity(
+            source=row.platform or "",
+            source_id=row.platform_job_id or "",
+            company=row.company or "",
+            title=row.title or "",
+            location=row.location or "",
+            url=row.url or "",
+            application_url=row.application_url or "",
+        )
+        for row in rows
+    ]
+
+    updated = 0
+    duplicates = 0
+    for cluster in group_identities(identities):
+        # Rows are ordered by created_at, so the lowest index is the earliest discovery.
+        canonical = rows[min(cluster)]
+        if len(cluster) > 1:
+            duplicates += len(cluster) - 1
+        for index in cluster:
+            row = rows[index]
+            if row.canonical_job_id != canonical.id:
+                row.canonical_job_id = canonical.id
+                updated += 1
+
+    if updated:
+        await db.commit()
+    logger.info(
+        "job_search.canonical_ids_assigned",
+        rows=len(rows),
+        updated=updated,
+        duplicates_linked=duplicates,
+    )
+    return updated
