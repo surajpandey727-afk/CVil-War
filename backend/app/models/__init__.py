@@ -4,6 +4,7 @@ from app.models.application import Application
 from app.models.application_event import ApplicationEvent
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.document import Document, DocumentVersion
+from app.models.fit_analysis import FitAnalysisRecord
 from app.models.harness import (
     DomainSkill,
     RunDiagnosis,
@@ -30,6 +31,7 @@ __all__ = [
     "Document",
     "DocumentVersion",
     "DomainSkill",
+    "FitAnalysisRecord",
     "Job",
     "LLMUsage",
     "PasswordResetToken",

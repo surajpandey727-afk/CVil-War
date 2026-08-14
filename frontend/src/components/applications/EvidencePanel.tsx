@@ -54,6 +54,9 @@ export default function EvidencePanel({
   evidence,
   isLoading,
   isError,
+  errorStatus,
+  errorDetail,
+  onReload,
   onRetry,
   retrying,
   onOpenResume,
@@ -61,6 +64,11 @@ export default function EvidencePanel({
   evidence: ApplicationEvidence | undefined;
   isLoading: boolean;
   isError: boolean;
+  /** HTTP status from the failed evidence request. 0 means the request never completed. */
+  errorStatus?: number;
+  errorDetail?: string;
+  /** Refetch the evidence itself — distinct from `onRetry`, which re-queues the application. */
+  onReload?: () => void;
   onRetry: () => void;
   retrying: boolean;
   onOpenResume: () => void;
@@ -74,16 +82,64 @@ export default function EvidencePanel({
   }
 
   if (isError || !evidence) {
-    // Distinguished from "nothing recorded": one means the panel could not load, the other
-    // means there is genuinely nothing to show. They look identical if you let them.
+    // Three different failures used to render as one sentence claiming "this is a display
+    // problem, not a missing record". That sentence was wrong in the case that actually
+    // happened: the endpoint 404'd because the running server did not have the route, and
+    // the panel confidently told the operator the data was fine. Say what went wrong, and
+    // offer the retry, because a 404 and a dead network need different reactions.
+    const status = errorStatus ?? 0;
+    const [heading, body] =
+      status === 404
+        ? [
+          'No evidence endpoint for this application',
+          'The application id was not found, or the running API does not expose the evidence route. If the API was recently updated, it may need restarting.',
+        ]
+        : status === 0
+          ? ['Could not reach the API', 'The request never completed. Check that the backend is running.']
+          : status >= 500
+            ? [`The API failed (HTTP ${status})`, 'The server errored while assembling this evidence. The stored history is unaffected.']
+            : [`The evidence request was refused (HTTP ${status})`, errorDetail ?? 'No reason was returned.'];
+
     return (
       <div style={{ ...card, borderColor: 'var(--rejected)' }}>
+        <div style={{ font: '700 13px/1.3 var(--font)', marginBottom: 6 }}>{heading}</div>
+        <p style={{ margin: '0 0 12px', font: '500 12px/1.5 var(--font)', color: 'var(--text-3)' }}>
+          {body}
+        </p>
+        {onReload && (
+          <button
+            onClick={onReload}
+            style={{
+              height: 30, padding: '0 13px', borderRadius: 'var(--r-md)',
+              background: 'var(--surface-2)', border: '1px solid var(--border)',
+              color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer',
+            }}
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Loaded, but every section came back unrecorded. That is a real answer about an old
+  // application, and it is not an error — saying "could not be loaded" here would send the
+  // operator hunting for a fault that does not exist.
+  if (
+    !evidence.job.recorded &&
+    !evidence.resume.recorded &&
+    !evidence.account.recorded &&
+    !evidence.log_recorded &&
+    !evidence.submission.recorded
+  ) {
+    return (
+      <div style={card}>
         <div style={{ font: '700 13px/1.3 var(--font)', marginBottom: 6 }}>
-          Evidence could not be loaded
+          Evidence not recorded for this application
         </div>
         <p style={{ margin: 0, font: '500 12px/1.5 var(--font)', color: 'var(--text-3)' }}>
-          This is a display problem, not a missing record — the application&rsquo;s history is
-          still stored.
+          It predates run recording, so no job snapshot, documents, account or log were kept.
+          Applications created from now on record all four.
         </p>
       </div>
     );

@@ -20,6 +20,7 @@ export default function AppDetailPage() {
   const { data: app, isLoading, isError } = useApplication(id);
   const {
     data: evidence, isLoading: evidenceLoading, isError: evidenceError,
+    error: evidenceErr, refetch: reloadEvidence,
   } = useApplicationEvidence(id);
   const updateStatus = useUpdateApplicationStatus();
 
@@ -113,6 +114,11 @@ export default function AppDetailPage() {
                     evidence={evidence}
                     isLoading={evidenceLoading}
                     isError={evidenceError}
+                    // The API client normalises every failure to { detail, status_code }, so
+                    // the panel can tell a 404 from a dead backend instead of guessing.
+                    errorStatus={(evidenceErr as { status_code?: number } | null)?.status_code}
+                    errorDetail={(evidenceErr as { detail?: string } | null)?.detail}
+                    onReload={() => void reloadEvidence()}
                     retrying={updateStatus.isPending}
                     onRetry={() => setStatus('queued', 'Re-queued — the agent will retry')}
                     onOpenResume={() => navigate('/resumes')}

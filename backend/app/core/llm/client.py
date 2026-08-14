@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.config.settings import get_settings
 from app.core.exceptions import LLMProviderError, LLMRateLimitError, LLMTimeoutError
+from app.core.llm.json_salvage import extract_json
 from app.core.llm.keyring import get_keyring, is_quota_exhausted
 from app.observability.metrics import (
     llm_cost_usd,
@@ -408,7 +409,7 @@ class LLMClient:
         )
 
         try:
-            data = json.loads(response.content)
+            data = json.loads(extract_json(response.content))
             return output_schema.model_validate(data)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.error(

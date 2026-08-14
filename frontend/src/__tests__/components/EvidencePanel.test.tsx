@@ -38,12 +38,21 @@ const full = (overrides: Partial<ApplicationEvidence> = {}): ApplicationEvidence
   ...overrides,
 });
 
-function renderPanel(evidence: ApplicationEvidence | undefined, props: Partial<{ onRetry: () => void; onOpenResume: () => void; isLoading: boolean; isError: boolean }> = {}) {
+function renderPanel(
+  evidence: ApplicationEvidence | undefined,
+  props: Partial<{
+    onRetry: () => void; onOpenResume: () => void; onReload: () => void;
+    isLoading: boolean; isError: boolean; errorStatus: number; errorDetail: string;
+  }> = {},
+) {
   return render(
     <EvidencePanel
       evidence={evidence}
       isLoading={props.isLoading ?? false}
       isError={props.isError ?? false}
+      errorStatus={props.errorStatus}
+      errorDetail={props.errorDetail}
+      onReload={props.onReload ?? vi.fn()}
       retrying={false}
       onRetry={props.onRetry ?? vi.fn()}
       onOpenResume={props.onOpenResume ?? vi.fn()}
@@ -233,11 +242,60 @@ describe('EvidencePanel', () => {
     });
   });
 
-  it('distinguishes a load failure from an application with nothing recorded', () => {
-    renderPanel(undefined, { isError: true });
+  describe('failure modes are distinguished', () => {
+    // One sentence used to cover all of these, and it claimed "this is a display problem,
+    // not a missing record". That was wrong in the case that actually happened: the endpoint
+    // 404'd because the running server did not expose the route, and the panel told the
+    // operator the data was fine.
 
-    expect(screen.getByText(/evidence could not be loaded/i)).toBeInTheDocument();
-    expect(screen.getByText(/still stored/i)).toBeInTheDocument();
+    it('names a 404 as a missing endpoint or id, not a display problem', () => {
+      renderPanel(undefined, { isError: true, errorStatus: 404 });
+
+      expect(screen.getByText(/no evidence endpoint for this application/i)).toBeInTheDocument();
+      expect(screen.getByText(/may need restarting/i)).toBeInTheDocument();
+      expect(screen.queryByText(/display problem/i)).not.toBeInTheDocument();
+    });
+
+    it('names an unreachable API', () => {
+      renderPanel(undefined, { isError: true, errorStatus: 0 });
+      expect(screen.getByText(/could not reach the api/i)).toBeInTheDocument();
+    });
+
+    it('names a server error and says the stored history is unaffected', () => {
+      renderPanel(undefined, { isError: true, errorStatus: 500 });
+      expect(screen.getByText(/the api failed \(http 500\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/stored history is unaffected/i)).toBeInTheDocument();
+    });
+
+    it('shows the reason for a refusal verbatim', () => {
+      renderPanel(undefined, { isError: true, errorStatus: 403, errorDetail: 'Not your application' });
+      expect(screen.getByText('Not your application')).toBeInTheDocument();
+    });
+
+    it('offers a retry that refetches the evidence', async () => {
+      const onReload = vi.fn();
+      renderPanel(undefined, { isError: true, errorStatus: 404, onReload });
+
+      await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+      expect(onReload).toHaveBeenCalledOnce();
+    });
+
+    it('says nothing was recorded when the request succeeded but every section is empty', () => {
+      // A real answer about an old application, not a fault. Reporting it as an error sends
+      // the operator hunting for a problem that does not exist.
+      const empty = full({
+        job: { recorded: false, job_id: null, title: null, company: null, location: null, salary: null, remote: false, source: null, job_url: null, application_url: null, posted_at: null },
+        resume: { recorded: false, document_id: null, name: null, kind: null, ats_score: null, created_at: null, archived: false, has_pdf: false, has_docx: false },
+        account: { recorded: false, platform: null, account: null, connected: false, state: null, detail: null, last_used_at: null },
+        submission: { status: 'queued', method: null, confirmation_state: 'pending', confirmation_detail: null, external_reference: null, submitted_at: null, ats_score: null, apply_mode: 'review', origin: 'discovery', actor: null, recorded: false },
+        log: [],
+        log_recorded: false,
+      });
+      renderPanel(empty);
+
+      expect(screen.getByText(/evidence not recorded for this application/i)).toBeInTheDocument();
+      expect(screen.queryByText(/could not/i)).not.toBeInTheDocument();
+    });
   });
 
   it('opens the résumé through the caller', async () => {

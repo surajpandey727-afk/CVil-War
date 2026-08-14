@@ -34,7 +34,13 @@ from typing import Any, ClassVar
 import httpx
 
 from app.core.automation.platforms.base import JobListing
-from app.core.job_discovery.sources.base import ApiJobSource, CostType, strip_html
+from app.core.job_discovery.sources.base import (
+    REQUEST_TIMEOUT_S,
+    USER_AGENT,
+    ApiJobSource,
+    CostType,
+    strip_html,
+)
 
 
 def _iso_from_epoch_ms(value: Any) -> str:
@@ -135,7 +141,13 @@ class LeverSource(AtsBoardSource):
             job_type=str(categories.get("commitment", "")) if isinstance(categories, dict) else "",
             remote=workplace == "remote" or "remote" in where.lower(),
             posted_at=_iso_from_epoch_ms(record.get("createdAt")),
-            raw_data={"team": categories.get("team") if isinstance(categories, dict) else None},
+            raw_data={
+                "team": categories.get("team") if isinstance(categories, dict) else None,
+                # Lever's own apply link. Previously read back out of raw_data by
+                # `get_application_url` but never written into it, so the fallback was dead
+                # code and the apply URL was always just the posting URL.
+                "apply_url": record.get("applyUrl") or None,
+            },
         )
 
     def get_application_url(self, listing: JobListing) -> str:
@@ -177,18 +189,55 @@ class SmartRecruitersSource(AtsBoardSource):
             str(loc.get(k)) for k in ("city", "country") if isinstance(loc, dict) and loc.get(k)
         )
         job_id = str(record.get("id") or "")
+        industry = record.get("industry") or {}
         return JobListing(
             platform=self.source_name,
             platform_job_id=job_id,
             title=(record.get("name") or "").strip(),
             company=self.company_name,
             location=where,
-            url=(record.get("ref") or f"https://jobs.smartrecruiters.com/{self.board_token}/{job_id}"),
-            description=strip_html(str(record.get("jobAd") or "")),
+            # `ref` is the API self-link (https://api.smartrecruiters.com/v1/...), which
+            # returns raw JSON. It was being stored as the job URL, so "Open job" sent the
+            # operator to a JSON document. The public posting page is the documented
+            # jobs.smartrecruiters.com form; verified 200 and redirecting to the canonical
+            # slug. Constructed from the board token and id, both of which came from the API.
+            url=f"https://jobs.smartrecruiters.com/{self.board_token}/{job_id}",
+            # The list endpoint carries no description at all — the previous read of
+            # `jobAd` matched no key, so every SmartRecruiters job was stored with an empty
+            # description and scored against nothing. The full text lives on the per-posting
+            # detail endpoint; see `fetch_description`.
+            description="",
+            job_type=str(record.get("typeOfEmployment", {}).get("label") or ""),
             remote=bool(isinstance(loc, dict) and loc.get("remote")),
             posted_at=str(record.get("releasedDate") or ""),
-            raw_data={},
+            # Free metadata the list response already carries and the adapter was discarding.
+            # `JobListing` has no seniority field, so experience level rides in raw_data with
+            # the rest rather than being dropped.
+            raw_data={
+                "industry": industry.get("label") if isinstance(industry, dict) else None,
+                "function": (record.get("function") or {}).get("label"),
+                "department": (record.get("department") or {}).get("label"),
+                "experience_level": (record.get("experienceLevel") or {}).get("label"),
+            },
         )
+
+    async def fetch_description(self, job_id: str) -> str:
+        """Full posting text for one job, from the detail endpoint.
+
+        Kept off the search path deliberately: the list endpoint returns no description, and
+        fetching one per result would turn a single search call into one per job. This is
+        called when a human opens the job, where one request is proportionate.
+        """
+        url = f"https://api.smartrecruiters.com/v1/companies/{self.board_token}/postings/{job_id}"
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+            response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            response.raise_for_status()
+            sections = (response.json().get("jobAd") or {}).get("sections") or {}
+        parts = [
+            (sections.get(key) or {}).get("text") or ""
+            for key in ("jobDescription", "qualifications", "additionalInformation")
+        ]
+        return strip_html("\n\n".join(p for p in parts if p))
 
 
 #: ``slug -> (adapter class, board token, display name)``.
