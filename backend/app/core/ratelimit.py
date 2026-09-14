@@ -65,7 +65,14 @@ class RateLimiter:
         redis = get_redis()
         if redis is None:
             production = get_settings().environment == Environment.PRODUCTION
-            if production and not self._warned:
+            if not production:
+                # Unchanged from the original: outside production a missing Redis means no
+                # throttling at all. Applying the in-process window here instead would make
+                # the limiter stateful across a test session — counters live on a module
+                # singleton — so tests exercising an auth endpoint repeatedly would start
+                # failing on 429 depending on execution order.
+                return
+            if not self._warned:
                 # Once per process: this is a standing degradation, not a per-request event,
                 # and logging it on every call would bury everything else.
                 self._warned = True

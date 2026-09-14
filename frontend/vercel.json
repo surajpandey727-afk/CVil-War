@@ -5,8 +5,8 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://cvil-war-api.vercel.app/api/:path*"
+      "source": "/api/(.*)",
+      "destination": "https://cvil-war-api.vercel.app/api/$1"
     },
     {
       "source": "/health",
