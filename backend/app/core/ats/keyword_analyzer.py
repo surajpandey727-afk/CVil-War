@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from typing import TYPE_CHECKING
 
-import spacy
 import structlog
+
+if TYPE_CHECKING:  # pragma: no cover - types only
+    # Annotation-only; the pipeline itself arrives via ``nlp.get_nlp``, which imports spaCy
+    # lazily. Keeping this out of the runtime path lets the API start where spaCy is absent.
+    import spacy
 
 logger = structlog.get_logger(__name__)
 

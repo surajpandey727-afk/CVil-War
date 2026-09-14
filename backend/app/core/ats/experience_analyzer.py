@@ -8,10 +8,15 @@ seniority alignment.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import spacy
 import structlog
+
+if TYPE_CHECKING:  # pragma: no cover - types only
+    # Imported for annotations alone. spaCy is loaded lazily by ``nlp.get_nlp`` at first use,
+    # so a deployment without the model (or without spaCy at all) still starts and degrades to
+    # the regex path rather than failing at import time.
+    import spacy
 
 logger = structlog.get_logger(__name__)
 

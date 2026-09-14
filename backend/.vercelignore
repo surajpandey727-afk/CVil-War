@@ -1,0 +1,39 @@
+# Vercel uploads the working directory, not the git index — anything excluded only by
+# .gitignore still ships unless it is named here. The .env rules are the load-bearing ones:
+# backend/.env holds the Supabase password, the JWT signing key and the secrets KEK.
+.env
+.env.*
+!.env.example
+
+# Never needed at runtime, and the bulk of the upload.
+tests/
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Local data and artefacts.
+data/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+*.log
+
+# Container path, not the serverless path.
+Dockerfile*
+
+# Vercel's Python builder prefers pyproject.toml over requirements.txt when both are present,
+# and pyproject declares the full container dependency set — Playwright, spaCy and WeasyPrint
+# included, which built an 818 MB bundle against a 500 MB ceiling. Excluding it from the
+# upload (nothing reads it at runtime) makes requirements.txt authoritative for this target.
+# .python-version keeps the interpreter pinned now that pyproject cannot say so.
+pyproject.toml
+alembic.ini
+alembic/

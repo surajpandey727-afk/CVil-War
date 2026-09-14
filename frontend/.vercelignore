@@ -1,0 +1,11 @@
+# Vercel uploads the working directory, not the git index, so secrets must be named here.
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+# NOTE: src/__tests__/ is deliberately NOT excluded. The build runs `tsc` over the whole
+# project and src/setupTests.ts imports the MSW server from there, so removing the tests
+# breaks type-checking. Nothing under it reaches the bundle — Vite only emits what the entry
+# actually imports.
