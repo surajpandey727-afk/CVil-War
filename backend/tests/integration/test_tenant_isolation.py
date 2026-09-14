@@ -4,6 +4,8 @@ Covers plan exit-criteria F2 (row isolation) and F4 (analytics aggregates/GROUP 
 are scoped too).
 """
 
+from unittest.mock import AsyncMock, patch
+
 from sqlalchemy import select
 
 from app.db.tenant import current_user_id
@@ -115,3 +117,52 @@ class TestAggregateIsolation:
             assert total_tokens == 100, f"llm_usage aggregate leaked: {total_tokens}"
         finally:
             current_user_id.reset(token)
+
+
+class TestSessionGetBypassesTenantFilter:
+    """``Session.get()``/``AsyncSession.get()`` is a column/identity-map load, not a
+    SELECT — the ``do_orm_execute`` filter deliberately skips it (see
+    ``app/db/tenant.py``'s module docstring). Empirically confirmed: a plain
+    ``db.get(Job, job_id)`` fed an attacker-reachable path parameter returns another
+    tenant's row even with ``current_user_id`` set to a different user. Every route
+    that resolves a path/query/body ID with ``db.get()`` (rather than a `TenantMixin`
+    FK already reached through an ownership-checked object) must instead run an
+    explicit ``select(Model).where(Model.id == ..., Model.user_id == user.id)``.
+
+    These tests hit the routes over HTTP (the ``client`` fixture authenticates as
+    ``TEST_USER_ID`` from ``tests.conftest``) with a job that belongs to ``USER_B``,
+    seeded directly via ``db_session`` (INSERTs are not tenant-filtered).
+    """
+
+    async def _foreign_job(self, db_session) -> Job:
+        db_session.add(User(id=USER_B, email="dbget-victim@x.com", hashed_password="x"))
+        job = Job(
+            user_id=USER_B, platform="linkedin", platform_job_id="dbget-foreign-1",
+            title="t", company="c", url="https://x",
+        )
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+        return job
+
+    async def test_enrich_rejects_foreign_job(self, client, db_session):
+        foreign = await self._foreign_job(db_session)
+        with (
+            patch(
+                "app.api.v1.jobs.enrich_job",
+                new_callable=AsyncMock,
+                side_effect=lambda db, job, force=False: job,
+            ) as mock_enrich,
+            patch(
+                "app.api.v1.jobs.run_post_enrichment_pipeline", new_callable=AsyncMock
+            ) as mock_pipeline,
+        ):
+            resp = await client.post(f"/api/v1/jobs/{foreign.id}/enrich")
+        assert resp.status_code == 404, "enrich leaked another tenant's job"
+        mock_enrich.assert_not_called()
+        mock_pipeline.assert_not_called()
+
+    async def test_apply_readiness_rejects_foreign_job(self, client, db_session):
+        foreign = await self._foreign_job(db_session)
+        resp = await client.get(f"/api/v1/applications/readiness/{foreign.id}")
+        assert resp.status_code == 404, "apply-readiness leaked another tenant's job"

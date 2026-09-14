@@ -25,6 +25,57 @@ class ApplicationStatus(StrEnum):
     FAILED = "failed"
 
 
+class SponsorConfidence(StrEnum):
+    """How confident the system is that an employer sponsors the Skilled Worker (Tier 2) visa.
+
+    A ranking boost by default, never an automatic hard filter on its own — see
+    ``core.actions``/``services.job_search``. Three signals feed this today, strongest first:
+    a match on the UK Home Office's public register of licensed sponsors
+    (``core.sponsorship.register``), explicit sponsorship language in the posting itself
+    (``core.sponsorship.keywords.detect``), and an explicit *no*-sponsorship statement in the
+    posting (``core.sponsorship.keywords.detect_negation``) — reported as ``NOT_SPONSOR``, not
+    collapsed into ``UNKNOWN``, since "the posting says it won't sponsor" is real, actionable
+    evidence for a candidate who needs one, unlike a posting that simply never mentions it.
+    An operator who specifically needs sponsorship can turn this into a hard exclude via
+    ``AutomationPolicy.exclude_no_sponsorship`` — see ``core.policy.rules``. ``LIKELY`` is
+    reserved for a future, more speculative signal (e.g. industry-level priors) — nothing
+    currently classifies into it, and it is never asserted without real evidence.
+    """
+
+    CONFIRMED_REGISTER = "confirmed_register"
+    KEYWORD_DETECTED = "keyword_detected"
+    LIKELY = "likely"
+    UNKNOWN = "unknown"
+    NOT_SPONSOR = "not_sponsor"
+
+
+class AgentName(StrEnum):
+    """The single-responsibility agents the orchestration layer tracks.
+
+    Each name maps to one existing service boundary — this enum does not invent new
+    responsibilities, it labels ones that already exist so their activity becomes visible:
+    Discovery is ``services.discovery_scheduler``, Eligibility is
+    ``core.sponsorship.classify``, Scoring is ``services.resume_recommendation``, and
+    Application is the apply pipeline in ``workers.tasks``. Tracking (Apollo/Gmail
+    communications) is reserved for when that workstream exists.
+    """
+
+    DISCOVERY = "discovery"
+    ELIGIBILITY = "eligibility"
+    SCORING = "scoring"
+    APPLICATION = "application"
+    TRACKING = "tracking"
+
+
+class AgentRunStatus(StrEnum):
+    """Lifecycle of one agent invocation, recorded in ``AgentRun``."""
+
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+    NEEDS_REVIEW = "needs_review"
+
+
 class JobStatus(StrEnum):
     """Lifecycle of a discovered job listing."""
 
@@ -193,6 +244,10 @@ class ApplicationEventType(StrEnum):
     FOLLOW_UP_SENT = "follow_up_sent"
     NOTE_ADDED = "note_added"
     ERROR = "error"
+    EMAIL_REPLY_RECEIVED = "email_reply_received"
+    EMAIL_REJECTION_DETECTED = "email_rejection_detected"
+    EMAIL_INTERVIEW_INVITE_DETECTED = "email_interview_invite_detected"
+    APOLLO_CONTACT_LOGGED = "apollo_contact_logged"
 
 
 class DocumentType(StrEnum):

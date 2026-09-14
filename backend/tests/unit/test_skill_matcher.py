@@ -142,6 +142,29 @@ class TestNormalizeSkill:
         result = matcher._normalize_skill("obscure_framework")
         assert result == "obscure_framework"
 
+    # Regression tests: skills ultimately come from a stored candidate profile or a job
+    # posting's parsed metadata — loosely-typed JSON, not a validated schema by the time it
+    # reaches here. A `None` (a key present with a null value) or a stray non-string entry
+    # (an int where a skill name was expected) used to crash `.lower()` with an
+    # AttributeError, taking the whole ATS score request down over one bad list item.
+    def test_none_does_not_crash(self, matcher: SkillMatcher) -> None:
+        assert matcher._normalize_skill(None) == ""  # type: ignore[arg-type]
+
+    def test_non_string_does_not_crash(self, matcher: SkillMatcher) -> None:
+        assert matcher._normalize_skill(123) == "123"  # type: ignore[arg-type]
+
+    def test_has_skill_tolerates_a_none_entry_in_the_required_skill_position(
+        self, matcher: SkillMatcher,
+    ) -> None:
+        # Calling code (ResumeScorer._score_skills) filters these out before they arrive, but
+        # the matcher itself must not be the thing that crashes if one ever does.
+        assert matcher.has_skill(["python"], None) is False  # type: ignore[arg-type]
+
+    def test_has_skill_tolerates_a_none_entry_in_the_candidate_skills_list(
+        self, matcher: SkillMatcher,
+    ) -> None:
+        assert matcher.has_skill(["python", None, 123], "python") is True  # type: ignore[list-item]
+
 
 # ---------------------------------------------------------------------------
 # find_similar_skills

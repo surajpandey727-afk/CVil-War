@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import ActionQueue from '@/components/dashboard/ActionQueue';
 import Icon, { type IconName } from '@/components/ui/Icon';
 import { useDashboardStats } from '@/hooks/useAnalytics';
-import { useApplications, useApproveApplication } from '@/hooks/useApplications';
-import { useAppStore } from '@/store/useAppStore';
+import { useApplications } from '@/hooks/useApplications';
 import { useAuthStore } from '@/store/useAuthStore';
-import { statusMeta, atsColor, atsPercent, isApprovable, relativeTime } from '@/lib/status';
+import { atsColor, atsPercent } from '@/lib/status';
 import type { Application } from '@/types/application';
 
 function greeting(): string {
@@ -28,34 +27,33 @@ const card: React.CSSProperties = {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const notify = useAppStore((s) => s.showNotification);
   const { data: stats } = useDashboardStats();
   const { data: apps, isLoading, isError } = useApplications(1, 20);
-  const approve = useApproveApplication();
 
   const items = apps?.items ?? [];
   const live = items.find((a) => a.status === 'applying');
 
-  const onApprove = (a: Application) => {
-    approve.mutate(a.id, {
-      onSuccess: () => notify(`Approved · ${a.job_title ?? 'application'}`, 'success'),
-      onError: () => notify('Could not approve application', 'error'),
-    });
-  };
-
-  const kpis: { label: string; value: string; icon: IconName; color: string }[] = [
-    { label: 'Applications', value: fmt(stats?.total_applications), icon: 'inbox', color: 'var(--text-2)' },
-    { label: 'Applied', value: fmt(stats?.applications_applied), icon: 'check', color: 'var(--applied)' },
+  // Every card links straight to the filtered view backing its number — "History > Interview"
+  // etc. — via ApplicationsPage's URL-synced tab/sub params, rather than to a generic page the
+  // operator then has to re-filter by hand (or, previously, a tab that showed nothing at all
+  // because the sub-filter was local-only state that reset on navigation).
+  const kpis: { label: string; value: string; icon: IconName; color: string; to?: string }[] = [
+    { label: 'Jobs found today', value: fmt(stats?.jobs_found_today), icon: 'search', color: 'var(--text-2)', to: '/jobs' },
+    { label: 'Unique jobs', value: fmt(stats?.unique_jobs), icon: 'briefcase', color: 'var(--text-2)', to: '/jobs' },
+    { label: 'Sponsor confirmed', value: fmt(stats?.sponsor_confirmed_jobs), icon: 'shield', color: 'var(--offer)', to: '/jobs' },
+    { label: 'CVs generated', value: fmt(stats?.cvs_generated), icon: 'file', color: 'var(--text-2)', to: '/resumes' },
+    { label: 'Applications', value: fmt(stats?.total_applications), icon: 'inbox', color: 'var(--text-2)', to: '/applications' },
+    { label: 'Applied', value: fmt(stats?.applications_applied), icon: 'check', color: 'var(--applied)', to: '/applications?tab=history&sub=applied' },
     // Sent today and this week, counted on the submission timestamp rather than on rows
     // created — a queued application is not an application sent, and conflating them
     // flatters the number that matters most.
-    { label: 'Sent today', value: fmt(stats?.submitted_today), icon: 'clock', color: 'var(--text-2)' },
-    { label: 'Sent this week', value: fmt(stats?.submitted_this_week), icon: 'clock', color: 'var(--text-2)' },
-    { label: 'Interviews', value: fmt(stats?.applications_interview), icon: 'activity', color: 'var(--interview)' },
-    { label: 'Offers', value: fmt(stats?.applications_offer), icon: 'target', color: 'var(--offer)' },
-    { label: 'Failed', value: fmt(stats?.applications_failed), icon: 'alert', color: 'var(--failed)' },
-    { label: 'Avg ATS', value: stats ? String(atsPercent(stats.avg_ats_score)) : '—', icon: 'gauge', color: 'var(--accent)' },
-    { label: 'LLM cost', value: stats ? `$${(stats.total_llm_cost_usd ?? 0).toFixed(2)}` : '—', icon: 'dollar', color: 'var(--accent)' },
+    { label: 'Sent today', value: fmt(stats?.submitted_today), icon: 'clock', color: 'var(--text-2)', to: '/applications?tab=history&sub=applied' },
+    { label: 'Sent this week', value: fmt(stats?.submitted_this_week), icon: 'clock', color: 'var(--text-2)', to: '/applications?tab=history&sub=applied' },
+    { label: 'Interviews', value: fmt(stats?.applications_interview), icon: 'activity', color: 'var(--interview)', to: '/applications?tab=history&sub=interview' },
+    { label: 'Offers', value: fmt(stats?.applications_offer), icon: 'target', color: 'var(--offer)', to: '/applications?tab=history&sub=offer' },
+    { label: 'Failed', value: fmt(stats?.applications_failed), icon: 'alert', color: 'var(--failed)', to: '/applications?tab=history&sub=failed' },
+    { label: 'Avg ATS', value: stats ? String(atsPercent(stats.avg_ats_score)) : '—', icon: 'gauge', color: 'var(--accent)', to: '/analytics' },
+    { label: 'LLM cost', value: stats ? `$${(stats.total_llm_cost_usd ?? 0).toFixed(2)}` : '—', icon: 'dollar', color: 'var(--accent)', to: '/analytics' },
   ];
 
   return (
@@ -126,19 +124,28 @@ export default function DashboardPage() {
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(178px,1fr))', gap: 14, marginBottom: 18 }}>
         {kpis.map((k, i) => (
-          <div key={k.label} style={{ ...card, padding: '15px 15px 14px', overflow: 'hidden', animation: 'aaUp .5s var(--ease) both', animationDelay: `${i * 40}ms` }}>
+          <button
+            key={k.label}
+            onClick={k.to ? () => navigate(k.to!) : undefined}
+            style={{
+              ...card, padding: '15px 15px 14px', overflow: 'hidden', animation: 'aaUp .5s var(--ease) both',
+              animationDelay: `${i * 40}ms`, textAlign: 'left',
+              cursor: k.to ? 'pointer' : 'default', font: 'inherit', color: 'inherit',
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ font: '600 11px/1 var(--font)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{k.label}</span>
               <span style={{ display: 'grid', placeItems: 'center', color: k.color }}><Icon name={k.icon} size={16} /></span>
             </div>
             <div style={{ font: '800 27px/1 var(--font)', letterSpacing: '-.03em', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-          </div>
+          </button>
         ))}
       </div>
 
-      {/* Pipeline table */}
+      {/* Pipeline summary — a read-only KPI, not a second interactive table. The row-level
+          view (with approve actions) lives in one place now: /applications. */}
       <div style={{ ...card, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 18px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em' }}>Application pipeline</span>
             <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>{apps ? apps.total : ''}</span>
@@ -147,20 +154,18 @@ export default function DashboardPage() {
             onClick={() => navigate('/applications')}
             style={{ display: 'flex', alignItems: 'center', gap: 6, height: 30, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer' }}
           >
-            View all <Icon name="chevR" size={13} />
+            Open Applications <Icon name="chevR" size={13} />
           </button>
         </div>
 
         {isError ? (
           <Notice icon="alert" text="Couldn't load your pipeline. Retry in a moment." />
         ) : isLoading ? (
-          <div style={{ padding: 8 }}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} style={{ height: 'var(--row-h)', margin: 4, borderRadius: 'var(--r-sm)', background: 'linear-gradient(90deg,var(--surface-2),var(--hover),var(--surface-2))', backgroundSize: '200% 100%', animation: 'aaShimmer 1.3s linear infinite' }} />
-            ))}
+          <div style={{ padding: '0 18px 18px' }}>
+            <div style={{ height: 60, borderRadius: 'var(--r-sm)', background: 'linear-gradient(90deg,var(--surface-2),var(--hover),var(--surface-2))', backgroundSize: '200% 100%', animation: 'aaShimmer 1.3s linear infinite' }} />
           </div>
         ) : items.length === 0 ? (
-          <div style={{ padding: '46px 20px', textAlign: 'center' }}>
+          <div style={{ padding: '0 20px 40px', textAlign: 'center' }}>
             <div style={{ display: 'inline-grid', placeItems: 'center', width: 46, height: 46, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)', marginBottom: 14 }}>
               <Icon name="inbox" size={22} />
             </div>
@@ -174,68 +179,51 @@ export default function DashboardPage() {
             </button>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
-              <thead>
-                <tr>
-                  {['Role', 'Mode', 'Status', 'ATS', 'Applied', ''].map((h, i) => (
-                    <th key={i} style={{ textAlign: i === 3 ? 'center' : 'left', font: '600 10.5px/1 var(--mono)', letterSpacing: '.08em', color: 'var(--text-4)', textTransform: 'uppercase', padding: '11px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((a) => {
-                  const sm = statusMeta(a.status);
-                  return (
-                    <tr
-                      key={a.id}
-                      onClick={() => navigate(`/applications/${a.id}`)}
-                      style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
-                    >
-                      <td style={{ padding: '0 16px', height: 'var(--row-h)' }}>
-                        <div style={{ font: '700 12.5px/1.25 var(--font)', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>{a.job_title ?? 'Untitled role'}</div>
-                        <div style={{ font: '500 11px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>{a.company ?? '—'}</div>
-                      </td>
-                      <td style={{ padding: '0 16px' }}>
-                        <span style={{ font: '600 10.5px/1 var(--mono)', color: 'var(--text-3)', letterSpacing: '.03em', textTransform: 'uppercase' }}>{a.apply_mode}</span>
-                      </td>
-                      <td style={{ padding: '0 16px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: sm.soft, color: sm.color, font: '700 11px/1 var(--font)' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: sm.color }} />
-                          {sm.label}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0 16px', textAlign: 'center' }}>
-                        <span style={{ font: '700 12.5px/1 var(--mono)', color: a.ats_score != null ? atsColor(atsPercent(a.ats_score)) : 'var(--text-4)' }}>
-                          {a.ats_score != null ? atsPercent(a.ats_score) : '—'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0 16px' }}>
-                        <span style={{ font: '500 11.5px/1 var(--mono)', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{relativeTime(a.applied_at ?? a.created_at)}</span>
-                      </td>
-                      <td style={{ padding: '0 16px', textAlign: 'right' }}>
-                        {isApprovable(a.status) ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onApprove(a); }}
-                            disabled={approve.isPending}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', color: 'var(--accent)', font: '700 11.5px/1 var(--font)', cursor: 'pointer' }}
-                          >
-                            <Icon name="check" size={13} sw={2.2} /> Approve
-                          </button>
-                        ) : (
-                          <span style={{ color: 'var(--text-4)', display: 'inline-grid', placeItems: 'center' }}><Icon name="chevR" size={15} /></span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 0, borderTop: '1px solid var(--border)' }}>
+            {pipelineBreakdown(items).map((b) => (
+              <button
+                key={b.status}
+                onClick={() => navigate(pipelineStatusLink(b.status))}
+                style={{
+                  display: 'flex', flexDirection: 'column', gap: 6, padding: '14px 18px',
+                  background: 'transparent', border: 0, borderRight: '1px solid var(--border)',
+                  textAlign: 'left', cursor: 'pointer',
+                }}
+              >
+                <span style={{ font: '600 10.5px/1 var(--mono)', letterSpacing: '.06em', color: 'var(--text-4)', textTransform: 'uppercase' }}>{b.label}</span>
+                <span style={{ font: '800 20px/1 var(--font)', color: b.color }}>{b.count}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/** Where each pipeline status actually lives on /applications — active statuses share the
+ *  Active tab (no sub-filter there), pending_review has its own tab, and every settled status
+ *  is a History sub-tab. Previously every non-review status linked to the same bare
+ *  `/applications`, so "Interview" landed on the Active tab showing queued/applying rows
+ *  instead of any interviews. */
+function pipelineStatusLink(status: string): string {
+  if (status === 'pending_review') return '/applications?tab=needs_action';
+  if (status === 'queued' || status === 'applying') return '/applications';
+  return `/applications?tab=history&sub=${status}`;
+}
+
+/** One glanceable count per status band — click-through to the real (interactive) view at
+ *  /applications rather than duplicating its row rendering and approve actions here. */
+function pipelineBreakdown(items: Application[]): { status: string; label: string; count: number; color: string }[] {
+  const by = (status: string) => items.filter((a) => a.status === status).length;
+  return [
+    { status: 'queued', label: 'Queued', count: by('queued'), color: 'var(--text-2)' },
+    { status: 'pending_review', label: 'Needs review', count: by('pending_review'), color: 'var(--review)' },
+    { status: 'applying', label: 'In flight', count: by('applying'), color: 'var(--accent)' },
+    { status: 'applied', label: 'Applied', count: by('applied'), color: 'var(--applied)' },
+    { status: 'interview', label: 'Interview', count: by('interview'), color: 'var(--interview)' },
+    { status: 'offer', label: 'Offer', count: by('offer'), color: 'var(--offer)' },
+  ];
 }
 
 function fmt(n: number | undefined): string {

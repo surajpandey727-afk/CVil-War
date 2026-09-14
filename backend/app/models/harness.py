@@ -119,4 +119,4 @@ class SystemIssue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     signals: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     diagnosis: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
-    detected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

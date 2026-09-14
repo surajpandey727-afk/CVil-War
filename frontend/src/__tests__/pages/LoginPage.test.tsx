@@ -45,4 +45,38 @@ describe('LoginPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
     expect(await screen.findByText(/invalid credentials/i)).toBeInTheDocument();
   });
+
+  it('sends remember_me=true by default, checked from the start', async () => {
+    let body = '';
+    server.use(
+      http.post('/api/v1/auth/login', async ({ request }) => {
+        body = await request.text();
+        return HttpResponse.json({ access_token: 'test-access-token', token_type: 'bearer' });
+      }),
+    );
+    renderLogin();
+    expect(screen.getByLabelText(/stay signed in/i)).toBeChecked();
+    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
+    await userEvent.type(screen.getByLabelText(/password/i), 'password123');
+    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    await screen.findByText('Dashboard here');
+    expect(body).toContain('remember_me=true');
+  });
+
+  it('sends remember_me=false when "Stay signed in" is unchecked', async () => {
+    let body = '';
+    server.use(
+      http.post('/api/v1/auth/login', async ({ request }) => {
+        body = await request.text();
+        return HttpResponse.json({ access_token: 'test-access-token', token_type: 'bearer' });
+      }),
+    );
+    renderLogin();
+    await userEvent.click(screen.getByLabelText(/stay signed in/i));
+    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
+    await userEvent.type(screen.getByLabelText(/password/i), 'password123');
+    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    await screen.findByText('Dashboard here');
+    expect(body).toContain('remember_me=false');
+  });
 });

@@ -14,6 +14,7 @@ from app.core.exceptions import RecordNotFoundError
 from app.core.ratelimit import rate_limit
 from app.core.storage import StorageService, get_storage
 from app.schemas.resume import (
+    ExtractProfileResponse,
     ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
@@ -111,6 +112,30 @@ async def resume_usage(
     """
     try:
         return await resume_service.resume_usage(db, resume_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Resume not found") from None
+
+
+@router.post(
+    "/{resume_id}/extract-profile",
+    response_model=ExtractProfileResponse,
+    dependencies=[_COSTLY],
+    summary="Fill in your work history and education from this résumé",
+)
+async def extract_profile(
+    resume_id: str,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ExtractProfileResponse:
+    """Read this résumé with an LLM and populate the candidate profile's experience/education.
+
+    The ATS score's experience and education factors need real structured data to score
+    against; without it they default to a neutral score for every job. This is what turns a
+    résumé you already uploaded into that data, instead of hand-typing your whole work history
+    into Settings. A no-op if the profile already has work history — see the service docstring.
+    """
+    try:
+        return await resume_service.extract_candidate_profile_from_resume(db, resume_id, user.id)
     except RecordNotFoundError:
         raise HTTPException(status_code=404, detail="Resume not found") from None
 

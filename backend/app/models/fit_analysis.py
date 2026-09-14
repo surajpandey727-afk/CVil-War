@@ -41,7 +41,7 @@ class FitAnalysisRecord(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     #: ``llm`` or ``keyword`` — a degraded analysis must stay identifiable after storage.
     method: Mapped[str] = mapped_column(String(20), nullable=False, default="keyword")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    analysed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    analysed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return f"<FitAnalysisRecord(job={self.job_id}, resume={self.resume_id}, {self.overall})>"

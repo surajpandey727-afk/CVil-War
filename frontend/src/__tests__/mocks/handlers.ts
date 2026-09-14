@@ -142,6 +142,14 @@ export const handlers = [
     }),
   ),
 
+  // Résumé recommendation (floating ATS widget). Default to "no résumés yet" so a drawer
+  // that opens in a test does not silently render a made-up score no test set up.
+  http.get('/api/v1/jobs/:jobId/resume-recommendation', ({ params }) =>
+    HttpResponse.json({
+      job_id: params.jobId, recommended_resume_id: null, rankings: [], synopsis: '',
+    }),
+  ),
+
   http.delete('/api/v1/jobs/:jobId', () => {
     return new HttpResponse(null, { status: 204 });
   }),
@@ -608,6 +616,48 @@ export const handlers = [
 
   http.delete('/api/v1/platform-sessions/:platform', () => new HttpResponse(null, { status: 204 })),
 
+  // Interactive login capture. The default handler settles immediately as connected; tests
+  // that care about the waiting states override it.
+  http.post('/api/v1/platform-sessions/connect', async ({ request }) => {
+    const body = (await request.json()) as { platform: string };
+    return HttpResponse.json(
+      {
+        id: 'attempt-1',
+        platform: body.platform,
+        state: 'awaiting_login',
+        done: false,
+        instructions: 'Sign in to LinkedIn as you normally would.',
+        detail: '',
+        seconds_remaining: 600,
+      },
+      { status: 202 },
+    );
+  }),
+
+  http.get('/api/v1/platform-sessions/connect/:id', ({ params }) =>
+    HttpResponse.json({
+      id: params['id'],
+      platform: 'linkedin',
+      state: 'connected',
+      done: true,
+      instructions: '',
+      detail: 'Connected. 4 session cookies for linkedin were stored, encrypted.',
+      seconds_remaining: 0,
+    }),
+  ),
+
+  http.delete('/api/v1/platform-sessions/connect/:id', ({ params }) =>
+    HttpResponse.json({
+      id: params['id'],
+      platform: 'linkedin',
+      state: 'cancelled',
+      done: true,
+      instructions: '',
+      detail: 'Cancelled before sign-in completed.',
+      seconds_remaining: 0,
+    }),
+  ),
+
   http.get('/api/v1/settings/ai/catalogue', () => {
     return HttpResponse.json({
       reachable: true,
@@ -663,6 +713,16 @@ export const handlers = [
     ]);
   }),
 
+  http.get('/api/v1/settings/llm-key', () => HttpResponse.json([])),
+  http.put('/api/v1/settings/llm-key', async ({ request }) => {
+    const body = (await request.json()) as { provider: string; default_model?: string };
+    return HttpResponse.json({
+      provider: body.provider, has_key: true, is_active: true,
+      default_model: body.default_model ?? null,
+    });
+  }),
+  http.delete('/api/v1/settings/llm-key/:provider', () => new HttpResponse(null, { status: 204 })),
+
   // Static assets, not API calls. The setup runs MSW with onUnhandledRequest:'error' — a
   // deliberate guard that catches a component quietly calling an endpoint nobody mocked. The
   // logo <img> would otherwise trip it on every page that renders the sidebar or auth shell,
@@ -688,5 +748,25 @@ export const handlers = [
       by_status: {}, by_health: {}, upcoming_interviews: 0,
       pending_assessments: 0, top_actions: [],
     }),
+  ),
+
+  http.get('/api/v1/agent-runs/', () =>
+    HttpResponse.json({
+      items: [],
+      total: 0,
+      nodes: ['discovery', 'eligibility', 'scoring', 'application', 'tracking'].map((agent_name) => ({
+        agent_name, status: null, last_run: null,
+      })),
+    }),
+  ),
+
+  http.get('/api/v1/communications/gmail/status', () =>
+    HttpResponse.json({ configured: false, connected: false, authorize_url: null }),
+  ),
+  http.get('/api/v1/communications/apollo/status', () =>
+    HttpResponse.json({ configured: false }),
+  ),
+  http.get('/api/v1/communications/', () =>
+    HttpResponse.json({ items: [], total: 0, unmatched: 0 }),
   ),
 ];

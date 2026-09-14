@@ -5,9 +5,9 @@ import Toaster from '@/components/ui/Toaster';
 import OfflineBanner from '@/components/ui/OfflineBanner';
 import DashboardPage from '@/pages/DashboardPage';
 import JobSearchPage from '@/pages/JobSearchPage';
-import RunConsolePage from '@/pages/RunConsolePage';
 import ApplicationsPage from '@/pages/ApplicationsPage';
 import AppDetailPage from '@/pages/AppDetailPage';
+import CommunicationsPage from '@/pages/CommunicationsPage';
 import ResumesPage from '@/pages/ResumesPage';
 import RoleTargetsPage from '@/pages/RoleTargetsPage';
 import SourcesPage from '@/pages/SourcesPage';
@@ -15,6 +15,7 @@ import AutomationPage from '@/pages/AutomationPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import AdminPage from '@/pages/AdminPage';
+import ArchitecturePage from '@/pages/ArchitecturePage';
 import OnboardingPage from '@/pages/OnboardingPage';
 import LandingPage from '@/pages/LandingPage';
 import LoginPage from '@/pages/LoginPage';
@@ -48,16 +49,17 @@ function App() {
         >
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/jobs" element={<JobSearchPage />} />
-          <Route path="/run" element={<RunConsolePage />} />
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/applications/:id" element={<AppDetailPage />} />
           <Route path="/resumes" element={<ResumesPage />} />
+          <Route path="/communications" element={<CommunicationsPage />} />
           <Route path="/targets" element={<RoleTargetsPage />} />
           <Route path="/sources" element={<SourcesPage />} />
           <Route path="/automation" element={<AutomationPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/admin" element={<RequireSuperuser><AdminPage /></RequireSuperuser>} />
+          <Route path="/architecture" element={<RequireSuperuser><ArchitecturePage /></RequireSuperuser>} />
           <Route path="*" element={<SystemStatePage code="404" />} />
         </Route>
       </Routes>

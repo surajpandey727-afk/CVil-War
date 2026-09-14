@@ -4,10 +4,14 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_user, require_superuser
 from app.api.v1.admin import router as admin_router
+from app.api.v1.agent_runs import router as agent_runs_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.applications import router as applications_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.command_centre import router as command_centre_router
+from app.api.v1.communications import public_router as communications_public_router
+from app.api.v1.communications import router as communications_router
+from app.api.v1.internal import router as internal_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.platform_sessions import router as platform_sessions_router
 from app.api.v1.resumes import router as resumes_router
@@ -43,6 +47,20 @@ v1_router.include_router(
     tags=["Platform Sessions"],
     dependencies=_auth,
 )
+v1_router.include_router(
+    agent_runs_router, prefix="/agent-runs", tags=["Agent Ops"], dependencies=_auth
+)
+v1_router.include_router(
+    communications_router, prefix="/communications", tags=["Communications"], dependencies=_auth
+)
+# Unguarded: the Gmail OAuth callback is a raw browser redirect from Google with no
+# Authorization header — see api.v1.communications's module docstring.
+v1_router.include_router(
+    communications_public_router, prefix="/communications", tags=["Communications"]
+)
+# Not user-JWT-gated: authenticated by its own static bearer token instead — see
+# api.v1.internal's module docstring.
+v1_router.include_router(internal_router, prefix="/internal", tags=["Internal"])
 
 # Admin/health routes require a superuser.
 v1_router.include_router(

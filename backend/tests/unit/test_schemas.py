@@ -17,11 +17,19 @@ from app.schemas.application import (
 )
 from app.schemas.job import JobListingResponse, JobListResponse, JobSearchRequest
 from app.schemas.resume import (
+    ExtractedProfileData,
     ResumeGenerateRequest,
     ResumeScoreResponse,
     ResumeUploadResponse,
 )
-from app.schemas.settings import LLMProviderStatus, SettingsUpdate
+from app.schemas.settings import (
+    CandidateProfileSchema,
+    LLMProviderStatus,
+    RoleTargetSchema,
+    SettingsResponse,
+    SettingsUpdate,
+    WorkExperienceSchema,
+)
 
 # ---------------------------------------------------------------------------
 # JobSearchRequest
@@ -96,6 +104,25 @@ class TestJobListingResponse:
         assert resp.id == "abc123"
         assert resp.remote is False
         assert resp.salary_range is None
+        # Defaults to unknown, not a false "not sponsor", when the source data has no
+        # sponsorship field at all (e.g. a job row from before sponsor matching existed).
+        assert resp.sponsor_confidence == "unknown"
+        assert resp.sponsor_evidence is None
+
+    def test_sponsor_fields_reach_the_response(self):
+        """Pins a real gap: sponsor_confidence/sponsor_evidence were computed, stored, and
+        used for ranking, but never reached this response — the frontend had no way to
+        show per-job sponsorship status despite the backend already knowing it."""
+        data = {
+            "id": "abc123", "platform": "reed", "platform_job_id": "job-3", "title": "Dev",
+            "company": "Acme", "location": "London", "url": "https://example.com",
+            "description": "desc", "status": "new",
+            "created_at": "2025-01-01T00:00:00", "updated_at": "2025-01-01T00:00:00",
+            "sponsor_confidence": "confirmed_register", "sponsor_evidence": "Acme Ltd",
+        }
+        resp = JobListingResponse.model_validate(data)
+        assert resp.sponsor_confidence == "confirmed_register"
+        assert resp.sponsor_evidence == "Acme Ltd"
 
     def test_optional_fields(self):
         data = {
@@ -384,3 +411,184 @@ class TestLLMProviderStatus:
         assert status.configured is True
         assert status.model == "claude-3"
         assert status.is_primary is True
+
+
+# ---------------------------------------------------------------------------
+# ExtractedProfileData / WorkExperienceSchema alias tolerance
+#
+# Pins a real bug: a live LLM extraction call returned a correct, complete work
+# history under the keys `work_experience`/`job_title`/`employer` instead of the
+# schema's `experience`/`title`/`company`. Pydantic silently falls back to each
+# field's default on an unrecognised key rather than raising, so the call
+# "succeeded" while reporting 0 roles found and discarding a perfect answer.
+# ---------------------------------------------------------------------------
+
+
+class TestWorkExperienceSchemaAliases:
+    def test_primary_field_names_still_work(self):
+        entry = WorkExperienceSchema(title="ML Engineer", company="Acme")
+        assert entry.title == "ML Engineer"
+        assert entry.company == "Acme"
+
+    def test_job_title_and_employer_synonyms_populate_the_same_fields(self):
+        entry = WorkExperienceSchema.model_validate(
+            {"job_title": "ML Engineer", "employer": "Acme"}
+        )
+        assert entry.title == "ML Engineer"
+        assert entry.company == "Acme"
+
+
+class TestExtractedProfileDataAliases:
+    def test_primary_field_names_still_work(self):
+        data = ExtractedProfileData.model_validate(
+            {
+                "experience": [{"title": "Analyst", "company": "Pixis"}],
+                "education": [{"degree": "BSc", "institution": "MIT-WPU"}],
+            }
+        )
+        assert len(data.experience) == 1
+        assert len(data.education) == 1
+
+    def test_work_experience_synonym_does_not_silently_discard_real_data(self):
+        """The exact shape a live LLM call returned for a real résumé.
+
+        Before the AliasChoices fix, this silently validated to an EMPTY
+        experience list instead of raising or preserving the data.
+        """
+        data = ExtractedProfileData.model_validate(
+            {
+                "work_experience": [
+                    {
+                        "job_title": "Data Scientist",
+                        "employer": "SimplyPhi",
+                        "start_date": "June 2024",
+                        "end_date": "Present",
+                    },
+                    {
+                        "job_title": "Technology Analyst",
+                        "employer": "Pixis",
+                        "start_date": "Jan 2021",
+                        "end_date": "July 2023",
+                    },
+                ],
+                "education": [
+                    {"degree": "MSc Business Analytics", "institution": "Warwick"},
+                ],
+            }
+        )
+        assert len(data.experience) == 2
+        assert data.experience[0].title == "Data Scientist"
+        assert data.experience[0].company == "SimplyPhi"
+        assert data.experience[1].title == "Technology Analyst"
+        assert data.experience[1].company == "Pixis"
+        assert len(data.education) == 1
+
+    def test_education_history_synonym_populates_education(self):
+        data = ExtractedProfileData.model_validate(
+            {"education_history": [{"degree": "BSc", "institution": "MIT-WPU"}]}
+        )
+        assert len(data.education) == 1
+        assert data.education[0].degree == "BSc"
+
+    def test_unrecognised_key_with_no_synonym_still_falls_back_to_default(self):
+        """Guards the boundary of the fix: an alias list is not infinite tolerance.
+
+        A genuinely novel key an LLM might invent still defaults quietly rather
+        than raising — documenting the residual risk, not eliminating it.
+        """
+        data = ExtractedProfileData.model_validate({"prior_roles": [{"title": "X"}]})
+        assert data.experience == []
+
+
+# ---------------------------------------------------------------------------
+# CandidateProfileSchema malformed-data tolerance
+#
+# Pins a real, live 500: GET /api/v1/settings/ crashed with an unhandled
+# pydantic ValidationError for an account whose stored candidate_profile had a
+# non-string skill, a bare string in place of an experience dict, and a bare
+# string in place of the education list. One bad list item took the whole
+# settings response down instead of degrading gracefully.
+# ---------------------------------------------------------------------------
+
+
+class TestCandidateProfileSchemaResilience:
+    def test_well_formed_profile_is_unaffected(self):
+        profile = CandidateProfileSchema.model_validate(
+            {
+                "skills": ["python", "sql"],
+                "experience": [{"title": "Eng", "company": "Acme"}],
+                "education": [{"degree": "BSc", "institution": "MIT"}],
+            }
+        )
+        assert profile.skills == ["python", "sql"]
+        assert len(profile.experience) == 1
+        assert len(profile.education) == 1
+
+    def test_non_string_skill_entries_are_dropped_not_crashed_on(self):
+        profile = CandidateProfileSchema.model_validate(
+            {"skills": [123, None, "python"]}
+        )
+        assert profile.skills == ["python"]
+
+    def test_non_dict_experience_entry_is_dropped_not_crashed_on(self):
+        profile = CandidateProfileSchema.model_validate(
+            {"experience": [{"title": "Eng"}, "not a dict"]}
+        )
+        assert len(profile.experience) == 1
+        assert profile.experience[0].title == "Eng"
+
+    def test_education_as_a_bare_string_degrades_to_empty_list(self):
+        profile = CandidateProfileSchema.model_validate(
+            {"education": "BSc Computer Science"}
+        )
+        assert profile.education == []
+
+    def test_the_exact_live_crash_shape_no_longer_raises(self):
+        """The precise stored shape that raised ValidationError out of GET /settings/."""
+        profile = CandidateProfileSchema.model_validate(
+            {
+                "skills": [123, None, "python"],
+                "experience": [{"duration_years": "two", "title": "Eng"}, "not a dict"],
+                "education": "BSc Computer Science",
+            }
+        )
+        assert profile.skills == ["python"]
+        assert len(profile.experience) == 1
+        assert profile.education == []
+
+
+# ---------------------------------------------------------------------------
+# RoleTargetSchema / SettingsResponse.role_targets malformed-data tolerance
+#
+# Same crash class as CandidateProfileSchema, proactively hardened before it
+# became a live incident: role_targets is the same kind of loosely-typed JSON
+# column, so a non-dict entry in the list or a non-string entry in one of its
+# criteria lists would raise the identical unhandled ValidationError out of
+# GET /settings/.
+# ---------------------------------------------------------------------------
+
+
+class TestRoleTargetSchemaResilience:
+    def test_non_string_entries_in_a_criteria_list_are_dropped(self):
+        target = RoleTargetSchema.model_validate(
+            {"title": "Eng", "alternative_titles": [123, None, "SWE"]}
+        )
+        assert target.alternative_titles == ["SWE"]
+
+    def test_a_bare_string_in_place_of_a_criteria_list_degrades_to_empty(self):
+        target = RoleTargetSchema.model_validate({"title": "Eng", "skills": "python"})
+        assert target.skills == []
+
+    def test_settings_response_drops_non_dict_role_target_entries(self):
+        response = SettingsResponse.model_validate(
+            {
+                "role_targets": [
+                    {"title": "Eng", "alternative_titles": [123, None, "SWE"], "skills": "python"},
+                    "not a dict",
+                    None,
+                ],
+            }
+        )
+        assert len(response.role_targets) == 1
+        assert response.role_targets[0].alternative_titles == ["SWE"]
+        assert response.role_targets[0].skills == []

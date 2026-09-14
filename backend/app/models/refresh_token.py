@@ -27,4 +27,4 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     family_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -210,3 +210,49 @@ class TestUpdateApplicationStatus:
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "interview"
+
+
+class TestLogRecruiterContact:
+    """Tests for POST /api/v1/applications/{app_id}/log-recruiter-contact."""
+
+    async def test_404_for_unknown_application(self, client):
+        response = await client.post(
+            f"{API_PREFIX}/nonexistent-id/log-recruiter-contact",
+            json={"email": "hr@techcorp.com"},
+        )
+        assert response.status_code == 404
+
+    async def test_not_configured_returns_400(self, client, sample_application, monkeypatch):
+        from app.services import apollo as apollo_service
+
+        async def _raise(*args, **kwargs):
+            raise apollo_service.ApolloNotConfiguredError("no key")
+
+        monkeypatch.setattr(apollo_service, "log_contact", _raise)
+        response = await client.post(
+            f"{API_PREFIX}/{sample_application.id}/log-recruiter-contact",
+            json={"email": "hr@techcorp.com"},
+        )
+        assert response.status_code == 400
+
+    async def test_logs_contact_and_writes_timeline(self, client, sample_application, monkeypatch):
+        from app.services import apollo as apollo_service
+
+        async def _fake_log_contact(*args, **kwargs):
+            return apollo_service.ApolloContactResult(contact_id="c1", matched_existing=False)
+
+        monkeypatch.setattr(apollo_service, "log_contact", _fake_log_contact)
+        response = await client.post(
+            f"{API_PREFIX}/{sample_application.id}/log-recruiter-contact",
+            json={"email": "hr@techcorp.com", "first_name": "Jane", "last_name": "Doe"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"contact_id": "c1", "matched_existing": False}
+
+        timeline = await client.get(
+            f"/api/v1/command-centre/applications/{sample_application.id}/timeline"
+        )
+        event_types = [e["event_type"] for e in timeline.json()["entries"]]
+        assert "recruiter_contacted" in event_types
+        assert "apollo_contact_logged" in event_types

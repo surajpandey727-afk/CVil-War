@@ -1,8 +1,14 @@
 import api from './api';
 import type { AICatalogue, AIUsagePeriod, AIUsageReport } from '@/types/aiSettings';
-import type { PlatformsResponse } from '@/types/platforms';
+import type {
+  ConnectAttempt,
+  PlatformsResponse,
+  PlatformTestResponse,
+} from '@/types/platforms';
 import type {
   AutomationSettings,
+  BYOLLMKeyStatus,
+  BYOLLMKeyUpdate,
   LLMProviderStatus,
   PolicyCatalogue,
   PolicyPreview,
@@ -26,6 +32,23 @@ export async function updateSettings(update: SettingsUpdate): Promise<Settings> 
 export async function getLLMProviders(): Promise<LLMProviderStatus[]> {
   const { data } = await api.get<LLMProviderStatus[]>('/settings/llm-providers');
   return data;
+}
+
+/** Which providers have a BYO key stored for this account. Never returns the key itself. */
+export async function getBYOLLMKeys(): Promise<BYOLLMKeyStatus[]> {
+  const { data } = await api.get<BYOLLMKeyStatus[]>('/settings/llm-key');
+  return data;
+}
+
+/** Save this account's own API key for one provider. */
+export async function saveBYOLLMKey(update: BYOLLMKeyUpdate): Promise<BYOLLMKeyStatus> {
+  const { data } = await api.put<BYOLLMKeyStatus>('/settings/llm-key', update);
+  return data;
+}
+
+/** Remove a stored BYO key. */
+export async function deleteBYOLLMKey(provider: string): Promise<void> {
+  await api.delete(`/settings/llm-key/${encodeURIComponent(provider)}`);
 }
 
 /**
@@ -73,4 +96,37 @@ export async function getPlatforms(): Promise<PlatformsResponse> {
 /** Disconnect a stored platform session. */
 export async function disconnectPlatform(platform: string): Promise<void> {
   await api.delete(`/platform-sessions/${platform}`);
+}
+
+/** Open a login window so the operator can sign in to a platform themselves. */
+export async function startConnect(platform: string): Promise<ConnectAttempt> {
+  const { data } = await api.post<ConnectAttempt>('/platform-sessions/connect', { platform });
+  return data;
+}
+
+/** Poll an in-flight login capture. */
+export async function getConnectAttempt(id: string): Promise<ConnectAttempt> {
+  const { data } = await api.get<ConnectAttempt>(`/platform-sessions/connect/${id}`);
+  return data;
+}
+
+/** Abandon a login capture and close its window. */
+export async function cancelConnect(id: string): Promise<ConnectAttempt> {
+  const { data } = await api.delete<ConnectAttempt>(`/platform-sessions/connect/${id}`);
+  return data;
+}
+
+/** Probe sources for real. An empty `keys` tests everything with a working adapter. */
+export async function testPlatforms(keys: string[] = []): Promise<PlatformTestResponse> {
+  const { data } = await api.post<PlatformTestResponse>('/settings/platforms/test', { keys });
+  return data;
+}
+
+/** Enable or disable many sources in one write. */
+export async function bulkUpdatePlatforms(
+  keys: string[],
+  enabled: boolean,
+): Promise<PlatformsResponse> {
+  const { data } = await api.put<PlatformsResponse>('/settings/platforms/bulk', { keys, enabled });
+  return data;
 }

@@ -112,4 +112,37 @@ describe('ErrorBoundary', () => {
     expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try Again' })).not.toBeInTheDocument();
   });
+
+  // Regression test for the actual production gap: AppLayout used to have exactly one
+  // ErrorBoundary, wrapping the *entire* app in main.tsx. A crash on any single page (e.g.
+  // Sources) replaced the whole app — sidebar, navigation, everything — with the generic
+  // error screen, leaving no way to even click to a different, working page. AppLayout now
+  // wraps only the routed <Outlet/> in its own ErrorBoundary keyed on the current path, so
+  // navigating away from a broken page gets a fresh boundary instead of the stale error UI
+  // persisting after the route (and therefore the rendered page) has already changed.
+  it('a fresh key (as AppLayout supplies per-route) resets the boundary on navigation, not a stale error screen', () => {
+    function Page({ path }: { path: string }) {
+      if (path === '/broken') throw new Error('This page crashed');
+      return <div>Contents of {path}</div>;
+    }
+
+    const { rerender } = render(
+      <ErrorBoundary key="/broken">
+        <Page path="/broken" />
+      </ErrorBoundary>,
+    );
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+
+    // Simulate navigating to a different, healthy route — AppLayout re-renders with a new
+    // key, which React treats as a brand-new element and remounts rather than reusing the
+    // instance still holding hasError: true.
+    rerender(
+      <ErrorBoundary key="/dashboard">
+        <Page path="/dashboard" />
+      </ErrorBoundary>,
+    );
+
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
+    expect(screen.getByText('Contents of /dashboard')).toBeInTheDocument();
+  });
 });

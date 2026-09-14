@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import { useSources } from '@/hooks/useSources';
-import { useDiscoveryStore } from '@/store/useDiscoveryStore';
+import { useSettings, useUpdateSettings } from '@/hooks/useSettings';
 import { HEALTH_META } from '@/lib/sources';
 import type { SourceRecord } from '@/types/source';
 
@@ -17,15 +17,36 @@ const card: React.CSSProperties = {
  * Sources with no adapter are listed and labelled rather than hidden. That is the point of the
  * screen: the operator needs to know the difference between "no London matches" and "this
  * integration does not exist yet", and only an honest catalogue can tell them apart.
+ *
+ * Toggle state reads and writes the operator's real, backend-stored `platforms_enabled` —
+ * the same field the background discovery worker actually uses — not the separate client-only
+ * `useDiscoveryStore` (that store is Job Search's own manual-search filter rail, a different,
+ * per-device concern). This page used to read the client-only store instead, so a first-time
+ * visitor on any device saw every single source marked "Disabled" and a "0 of N enabled"
+ * count regardless of what was actually configured and actually running in the background —
+ * indistinguishable from the page being broken.
  */
 export default function SourcesPage() {
   const { catalogue, isFallback, isFetching } = useSources();
-  const { enabledSources, toggleSource, setSources } = useDiscoveryStore();
+  const { data: settings } = useSettings();
+  const updateSettings = useUpdateSettings();
 
   const all = catalogue.tiers.flatMap((t) => t.sources);
-  const enabledCount = all.filter((s) => enabledSources.includes(s.key)).length;
+  const allKeys = all.map((s) => s.key);
+  // Empty/unset means "every source" — the same convention `platforms_enabled` already
+  // carries for the discovery worker itself (see `services.discovery_scheduler`) — so an
+  // operator who has never touched this screen sees every source correctly marked on, not off.
+  const enabledList = settings?.platforms_enabled;
+  const isEnabled = (key: string) => !enabledList || enabledList.length === 0 || enabledList.includes(key);
+  const enabledCount = enabledList && enabledList.length > 0 ? all.filter((s) => enabledList.includes(s.key)).length : all.length;
   const liveCount = all.filter((s) => s.health === 'live').length;
   const navigate = useNavigate();
+
+  const setEnabledKeys = (keys: string[]) => updateSettings.mutate({ platforms_enabled: keys });
+  const toggleSource = (key: string) => {
+    const current = enabledList && enabledList.length > 0 ? enabledList : allKeys;
+    setEnabledKeys(current.includes(key) ? current.filter((k) => k !== key) : [...current, key]);
+  };
 
   return (
     <div style={{ animation: 'aaUp .4s var(--ease) both', maxWidth: 1320 }}>
@@ -39,7 +60,7 @@ export default function SourcesPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
-            onClick={() => setSources(catalogue.live_keys)}
+            onClick={() => setEnabledKeys(catalogue.live_keys)}
             style={{ height: 36, padding: '0 15px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
           >
             Enable only working sources
@@ -58,7 +79,7 @@ export default function SourcesPage() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, opacity: isFetching ? 0.7 : 1 }}>
         {catalogue.tiers.map((tier) => {
-          const on = tier.sources.filter((s) => enabledSources.includes(s.key)).length;
+          const on = tier.sources.filter((s) => isEnabled(s.key)).length;
           return (
             <section key={tier.id}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -73,7 +94,7 @@ export default function SourcesPage() {
                 {tier.sources.map((src) => (
                   <SourceCard
                     key={src.key} source={src}
-                    on={enabledSources.includes(src.key)}
+                    on={isEnabled(src.key)}
                     onToggle={() => toggleSource(src.key)}
                   />
                 ))}
@@ -87,7 +108,10 @@ export default function SourcesPage() {
 }
 
 function SourceCard({ source, on, onToggle }: { source: SourceRecord; on: boolean; onToggle: () => void }) {
-  const meta = HEALTH_META[source.health];
+  // Falls back rather than crashing the whole page on a health value this build doesn't know
+  // about yet (a live server can ship a new one before the frontend that reads it does) — see
+  // HEALTH_META's own note on the incident this class of bug already caused once.
+  const meta = HEALTH_META[source.health] ?? { label: source.health, color: 'var(--text-4)' };
   const detail = source.note || meta.label;
   return (
     <div

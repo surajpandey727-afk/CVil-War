@@ -197,6 +197,24 @@ def compute_action(app: Application, *, now: datetime | None = None) -> ActionVe
             base_urgency=BLOCKING_URGENCY,
         )
 
+    # 3b. A CAPTCHA/2FA wall stopped the run mid-apply. Recoverable, and the fastest path
+    #     through is the browser window that hit it, not a fresh review — see
+    #     workers.tasks._mark_needs_verification, which sets this resume_state marker.
+    if (
+        app.status == ApplicationStatus.PENDING_REVIEW
+        and app.resume_state
+        and app.resume_state.get("blocked_reason") == "captcha"
+    ):
+        return verdict(
+            NextAction.COMPLETE_VERIFICATION,
+            ApplicationHealth.BLOCKED,
+            "A verification challenge is blocking this application — complete it in the "
+            "browser window that opened for it, then resume.",
+            2.2,
+            None,
+            base_urgency=BLOCKING_URGENCY,
+        )
+
     # 4. A session went stale mid-flight: reconnect, then resume from the saved position.
     if app.paused_at and app.status == ApplicationStatus.APPLYING:
         idle = _days_since(app.paused_at, now) or 0

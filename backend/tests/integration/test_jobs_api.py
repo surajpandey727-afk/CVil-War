@@ -289,3 +289,51 @@ class TestLocationFilteringEndToEnd:
 
         body = (await client.get("/api/v1/jobs/?page_size=100")).json()
         assert body["total"] == 8
+
+
+class TestResumeRecommendation:
+    """GET /api/v1/jobs/{job_id}/resume-recommendation — backs the floating ATS widget."""
+
+    async def test_404_for_an_unknown_job(self, client):
+        response = await client.get(f"{API_PREFIX}/nonexistent/resume-recommendation")
+        assert response.status_code == 404
+
+    async def test_no_resumes_is_reported_honestly_not_as_an_error(
+        self, client, db_session, job_data
+    ):
+        job = Job(**job_data)
+        db_session.add(job)
+        await db_session.commit()
+
+        response = await client.get(f"{API_PREFIX}/{job.id}/resume-recommendation")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["recommended_resume_id"] is None
+        assert body["rankings"] == []
+
+    async def test_ranks_multiple_resumes_and_names_the_winner(
+        self, client, db_session, job_data
+    ):
+        from app.models.resume import Resume
+        from tests.conftest import TEST_USER_ID
+
+        job = Job(**job_data)
+        db_session.add(job)
+        strong = Resume(
+            user_id=TEST_USER_ID, name="Tailored CV", type="base", template_id="modern",
+            content_text="Experienced Python FastAPI PostgreSQL engineer",
+        )
+        weak = Resume(
+            user_id=TEST_USER_ID, name="Generic CV", type="base", template_id="modern",
+            content_text="Looking for any opportunity",
+        )
+        db_session.add_all([strong, weak])
+        await db_session.commit()
+
+        response = await client.get(f"{API_PREFIX}/{job.id}/resume-recommendation")
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["rankings"]) == 2
+        assert body["recommended_resume_id"] == strong.id
+        assert body["rankings"][0]["resume_id"] == strong.id
+        assert "Tailored CV" in body["synopsis"]

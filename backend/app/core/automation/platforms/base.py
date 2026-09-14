@@ -149,5 +149,18 @@ class JobPlatform(ABC):
         """
         ...
 
+    def capabilities(self) -> dict[str, bool]:
+        """What this platform can do, for ``services.platforms.list_platforms``.
+
+        Every subclass in this hierarchy implements ``login()`` as a required abstract
+        method, so ``needs_credential`` is ``True`` universally here — a concrete override
+        only if a future platform in this hierarchy is genuinely keyless. Without this,
+        ``services.platforms._capabilities``/``_needs_credential`` hit an ``AttributeError``
+        on every browser-use-driven platform (Indeed, Glassdoor, ...) on every settings-page
+        load — caught and logged as a warning there, but a warning on every normal request is
+        exactly the kind of noise that hides a real one when it happens.
+        """
+        return {"needs_credential": True}
+
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} platform={self.name!r}>"

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError as DBIntegrityError
@@ -44,7 +44,9 @@ _REFRESH_PATH = "/api/v1/auth"
 _AUTH_RATE = Depends(rate_limit(5, 60))  # 5 attempts / minute on auth endpoints
 
 
-def _set_refresh_cookie(response: Response, raw_refresh: str) -> None:
+def _set_refresh_cookie(
+    response: Response, raw_refresh: str, *, remember_me: bool = True
+) -> None:
     auth = get_settings().auth
     response.set_cookie(
         _REFRESH_COOKIE,
@@ -55,7 +57,10 @@ def _set_refresh_cookie(response: Response, raw_refresh: str) -> None:
         secure=get_settings().environment != Environment.DEVELOPMENT,
         samesite="strict",
         path=_REFRESH_PATH,
-        max_age=auth.refresh_token_expire_days * 86400,
+        # "Remember me" off: a session cookie (no max_age at all) — the browser drops it the
+        # moment it closes, so the operator is asked to sign in again next time rather than
+        # silently staying signed in on a machine they may not trust indefinitely.
+        max_age=auth.refresh_token_expire_days * 86400 if remember_me else None,
     )
 
 
@@ -64,12 +69,21 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 
 async def _issue_session(
-    db: AsyncSession, user: User, response: Response, *, family_id: str | None = None
+    db: AsyncSession,
+    user: User,
+    response: Response,
+    *,
+    family_id: str | None = None,
+    remember_me: bool = True,
 ) -> str:
     """Mint an access token and a rotating refresh token (set as an httpOnly cookie).
 
     A new ``family_id`` starts a fresh token family; passing an existing one continues
     the family across a rotation (so reuse of a retired token can revoke the whole line).
+
+    ``remember_me`` only changes whether the *cookie* persists across a browser restart
+    (see ``_set_refresh_cookie``); the stored token's own ``expires_at`` is the same either
+    way, since that is a hard cap on the token's lifetime, not the "stay signed in" choice.
     """
     auth = get_settings().auth
     raw_refresh = generate_refresh_token()
@@ -82,7 +96,7 @@ async def _issue_session(
         )
     )
     await db.commit()
-    _set_refresh_cookie(response, raw_refresh)
+    _set_refresh_cookie(response, raw_refresh, remember_me=remember_me)
     return create_access_token(user.id)
 
 
@@ -118,6 +132,11 @@ async def login(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Annotated[AsyncSession, Depends(get_db)],
     response: Response,
+    # A plain bool query/form param, not part of the OAuth2 spec form — added as its own
+    # Form field since OAuth2PasswordRequestForm doesn't carry one. Never touches the
+    # password itself; it only controls whether the refresh cookie survives a browser
+    # restart (see ``_set_refresh_cookie``).
+    remember_me: Annotated[bool, Form()] = True,
 ) -> TokenResponse:
     """Authenticate (OAuth2 password flow) and return an access token."""
     user = (await db.execute(select(User).where(User.email == form.username))).scalar_one_or_none()
@@ -127,8 +146,8 @@ async def login(
     if user is None or not pw_ok or not user.is_active or user.deleted_at is not None:
         raise AuthError("Invalid credentials")
 
-    access = await _issue_session(db, user, response)
-    logger.info("user_login", user_id=user.id)
+    access = await _issue_session(db, user, response, remember_me=remember_me)
+    logger.info("user_login", user_id=user.id, remember_me=remember_me)
     return TokenResponse(access_token=access)
 
 

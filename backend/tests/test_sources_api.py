@@ -33,13 +33,34 @@ def test_unimplemented_sources_report_not_implemented() -> None:
 
 
 def test_known_broken_platforms_report_degraded_not_live() -> None:
-    """The browser-scraped platforms are registered but cannot return results (B14).
+    """A registered platform that cannot return results must not report ``live``.
 
     Reporting them ``live`` is the specific failure this guards: it is what let a dead
     subsystem masquerade as a neutral "no matching roles" result.
+
+    LinkedIn used to be in this list and no longer is — it reads the public job listing now,
+    which needs no account. Indeed and Glassdoor still target the removed browser-use API.
     """
-    for key in ("linkedin", "indeed", "glassdoor"):
+    for key in ("indeed", "glassdoor"):
         assert health_for(BY_KEY[key]) is SourceHealth.DEGRADED
+
+
+def test_linkedin_is_live_through_its_public_listing() -> None:
+    """The counterpart to the test above: LinkedIn is served by a real adapter.
+
+    Worth pinning explicitly rather than leaving as an absence, because the thing that makes
+    it live is a deliberate design choice — discovery reads the signed-out listing, so no
+    account is involved and nothing about it depends on the operator connecting a session.
+    """
+    assert health_for(BY_KEY["linkedin"]) is SourceHealth.LIVE
+    assert BY_KEY["linkedin"].known_broken is None
+
+
+def test_connecting_a_session_is_still_offered_for_linkedin() -> None:
+    """Discovery needs no login; applying does. The ladder has to say both at once."""
+    spec = BY_KEY["linkedin"]
+    assert spec.mechanism(AccessMechanism.PUBLIC_WEBSITE) is MechanismState.AVAILABLE
+    assert spec.mechanism(AccessMechanism.AUTHENTICATED_BROWSER) is MechanismState.AUTH_REQUIRED
 
 
 def test_keyless_api_sources_are_live() -> None:
@@ -58,9 +79,9 @@ def test_usable_keys_drops_everything_that_cannot_answer() -> None:
     requested = [
         "remotive",        # keyless aggregator, live
         "careers:monzo",   # Greenhouse board, live
-        "linkedin",        # registered but degraded
+        "indeed",          # registered but degraded (removed browser-use API)
         "careers:starling",  # catalogued, no public ATS board
-        "tracjobs",        # blocked upstream (403 to automation)
+        "civilservice",    # blocked upstream (bot-verification gate)
         "not-a-source",    # unknown key
     ]
     assert usable_keys(requested) == ["remotive", "careers:monzo"]
@@ -90,29 +111,30 @@ def test_employer_boards_with_a_real_adapter_are_live() -> None:
 
 
 def test_a_server_block_does_not_condemn_the_whole_portal() -> None:
-    """TRAC refuses server-side automation but a candidate can still sign in normally.
+    """Civil Service Jobs refuses server-side automation but a candidate can still sign in
+    normally through a real (headed) browser session.
 
-    Reporting the portal UNAVAILABLE off the back of one 403 conflated a single mechanism
-    with the site, and hid real reachable jobs. The resolution ladder must fall to the
-    browser rung instead.
+    Reporting the portal UNAVAILABLE off the back of one blocked mechanism conflated a
+    single rung with the site, and hid real reachable jobs. The resolution ladder must fall
+    to the browser rung instead.
     """
-    spec = BY_KEY["tracjobs"]
-    assert spec.blocked_reason and "403" in spec.blocked_reason
-    assert spec.mechanism(AccessMechanism.PUBLIC_ENDPOINT) is MechanismState.BLOCKED
+    spec = BY_KEY["civilservice"]
+    assert spec.blocked_reason and "verification gate" in spec.blocked_reason
+    assert spec.mechanism(AccessMechanism.PUBLIC_WEBSITE) is MechanismState.BLOCKED
     assert spec.mechanism(AccessMechanism.INTERACTIVE_BROWSER) is MechanismState.AVAILABLE
     assert health_for(spec) is SourceHealth.INTERACTIVE_AVAILABLE
 
 
 def test_best_mechanism_prefers_the_highest_rung_available() -> None:
     """Escalation must be driven by genuine unavailability, not by a rejected request."""
-    spec = BY_KEY["tracjobs"]
+    spec = BY_KEY["civilservice"]
     # API and public endpoints are out, so the browser rung wins — not HUMAN.
     assert spec.best_mechanism() is AccessMechanism.INTERACTIVE_BROWSER
 
 
 def test_an_unprobed_mechanism_is_unknown_not_unavailable() -> None:
     """"Never checked" and "checked and refused" are different facts."""
-    assert BY_KEY["tracjobs"].mechanism(AccessMechanism.STATUS_SYNC) is MechanismState.UNKNOWN
+    assert BY_KEY["civilservice"].mechanism(AccessMechanism.STATUS_SYNC) is MechanismState.UNKNOWN
     assert BY_KEY["remotive"].mechanism(AccessMechanism.INTERACTIVE_BROWSER) is (
         MechanismState.UNKNOWN
     )
@@ -137,4 +159,6 @@ async def test_catalogue_endpoint_groups_by_tier(client) -> None:  # type: ignor
     all_keys = {s["key"] for t in body["tiers"] for s in t["sources"]}
     assert set(body["live_keys"]) <= all_keys
     assert "remotive" in body["live_keys"]
-    assert "linkedin" not in body["live_keys"]
+    # LinkedIn reads the public listing and is live; Indeed still has no working adapter.
+    assert "linkedin" in body["live_keys"]
+    assert "indeed" not in body["live_keys"]

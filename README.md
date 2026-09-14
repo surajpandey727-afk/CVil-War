@@ -28,7 +28,7 @@ The name is the point — your CV, fighting for every role.
 ## Architecture
 
 ```
-Frontend (React + MUI + Vite)
+Frontend (React + Vite, hand-rolled CSS design system)
   |
   REST API + WebSocket
   |
@@ -37,7 +37,7 @@ Backend (FastAPI)
   |- Service Layer -- orchestration and business logic
   |- Core Modules -- ATS scoring, browser automation, document engine, LLM client
   |- Workers -- Redis-backed async application processing
-  '- Data Layer -- SQLite/PostgreSQL, Redis, FAISS vector indices
+  '- Data Layer -- SQLite/PostgreSQL, Redis
 ```
 
 - **Backend:** FastAPI, SQLAlchemy 2.0 async, Pydantic v2, Redis (arq queue), structlog, Prometheus
@@ -258,7 +258,8 @@ npm run build                       # Production build
 ### Working
 
 - FastAPI backend with versioned API routes and OpenAPI docs
-- React + MUI dashboard with jobs, applications, resumes, analytics, and settings pages
+- React dashboard (hand-rolled CSS design system) with jobs, applications, resumes, analytics,
+  and settings pages
 - Application tracking CRUD with approval flow and status lifecycle
 - Resume upload with real parsing (PDF/DOCX), skill extraction, and ATS scoring
 - Multi-factor ATS scoring engine (skills, keywords, experience, education)

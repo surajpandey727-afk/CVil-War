@@ -5,6 +5,19 @@ import type { PaginatedResponse } from './api';
  * Corresponds to the backend `JobListingResponse` Pydantic schema.
  */
 export interface Job {
+  /** Structured intelligence lifted from the posting; null until it has been fetched. */
+  posting_data?: {
+    criteria?: Record<string, string>;
+    requirements?: string[];
+    benefits?: string[];
+    years_required?: number | null;
+    word_count?: number;
+    requirement_count?: number;
+    benefit_count?: number;
+    source?: string;
+  } | null;
+  /** When the full posting was fetched. Null means never — not "it has no requirements". */
+  enriched_at?: string | null;
   id: string;
   platform: string;
   platform_job_id: string;
@@ -25,7 +38,19 @@ export interface Job {
   status: string;
   created_at: string;
   updated_at: string;
+  /** How confident the system is this employer sponsors the Skilled Worker visa. */
+  sponsor_confidence: SponsorConfidence;
+  /** The matched register entry name, or the posting phrase that triggered detection. */
+  sponsor_evidence: string | null;
 }
+
+/** Mirrors the backend `SponsorConfidence` enum. */
+export type SponsorConfidence =
+  | 'confirmed_register'
+  | 'keyword_detected'
+  | 'likely'
+  | 'unknown'
+  | 'not_sponsor';
 
 /** Alias matching the backend schema name `JobListingResponse`. */
 export type JobListingResponse = Job;

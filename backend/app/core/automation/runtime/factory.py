@@ -65,8 +65,16 @@ def build_apply_agent(
     profile: Any,
     tools: Any | None = None,
     extend_system_message: str = "",
+    should_stop: Any | None = None,
 ) -> Any:
-    """Build the apply ``Agent`` with the typed ``ApplicationResult`` output schema."""
+    """Build the apply ``Agent`` with the typed ``ApplicationResult`` output schema.
+
+    ``should_stop`` (an async, zero-arg callable returning bool) is browser-use's own
+    documented mechanism for actually halting a multi-step run — checked at every step
+    boundary — as opposed to a single action merely failing and leaving the LLM free to try
+    something else. Used by the pre-submit confirmation gate (``runtime.confirmation``) to
+    turn an operator's rejection into the run actually ending.
+    """
     from browser_use import Agent, BrowserSession
 
     settings = get_settings().browser
@@ -79,4 +87,5 @@ def build_apply_agent(
         output_model_schema=ApplicationResult,
         max_failures=settings.max_failures,
         extend_system_message=extend_system_message,
+        register_should_stop_callback=should_stop,
     )

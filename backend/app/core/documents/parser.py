@@ -121,7 +121,51 @@ class DocumentParser:
         return result
 
     def _parse_pdf_sync(self, file_path: Path) -> str:
-        """Synchronous PDF parsing with PyPDF2.
+        """Synchronous PDF parsing, preferring pdfplumber over pypdf.
+
+        A raw PDF-text extractor's ``extract_text()`` can return an empty string (not an
+        error) on PDFs with certain font-embedding/encoding schemes common to
+        Canva/Google-Docs/LaTeX exports — a real CV can produce zero usable text while
+        "succeeding". pdfplumber's layout-aware extraction handles those cases; pypdf remains
+        the fallback for whatever pdfplumber cannot open (encrypted PDFs, some malformed
+        files) so a single library's blind spot no longer determines whether a resume is
+        scoreable at all.
+
+        Args:
+            file_path: Path to the PDF file.
+
+        Returns:
+            Extracted plain text from all pages.
+        """
+        text = self._parse_pdf_with_pdfplumber(file_path)
+        if text:
+            return text
+        return self._parse_pdf_with_pypdf(file_path)
+
+    def _parse_pdf_with_pdfplumber(self, file_path: Path) -> str:
+        """Best-effort pdfplumber extraction. Returns "" on any failure — never raises —
+        so the caller can fall back to pypdf without special-casing pdfplumber's errors."""
+        try:
+            import pdfplumber
+        except ImportError:
+            return ""
+
+        try:
+            with pdfplumber.open(str(file_path)) as pdf:
+                pages = [page.extract_text() or "" for page in pdf.pages]
+        except Exception as exc:
+            logger.debug(
+                "pdfplumber_extraction_failed", file_path=str(file_path), error=str(exc)
+            )
+            return ""
+        return "\n".join(p for p in pages if p)
+
+    def _parse_pdf_with_pypdf(self, file_path: Path) -> str:
+        """Synchronous PDF parsing with pypdf (fallback extractor).
+
+        Uses ``pypdf`` rather than the unmaintained PyPDF2 (merged into pypdf years ago,
+        last released with an unpatched known CVE) — same ``PdfReader``/``extract_text()``
+        API, so this is a drop-in swap, not a rewrite.
 
         Args:
             file_path: Path to the PDF file.
@@ -130,10 +174,10 @@ class DocumentParser:
             Extracted plain text from all pages.
         """
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
         except ImportError as exc:
             raise ParseError(
-                str(file_path), "PyPDF2 is required for PDF parsing"
+                str(file_path), "pypdf is required for PDF parsing"
             ) from exc
 
         reader = PdfReader(str(file_path))
@@ -150,11 +194,16 @@ class DocumentParser:
     def _parse_docx_sync(self, file_path: Path) -> str:
         """Synchronous DOCX parsing with python-docx.
 
+        Reads body paragraphs, table cells, and header/footer paragraphs. Many ATS-styled
+        CV templates (two-column layouts, skills grids) lay out content as a Word table
+        rather than paragraphs — reading only ``doc.paragraphs`` silently dropped that
+        content, which is why table-based resumes could extract to near-empty text.
+
         Args:
             file_path: Path to the DOCX file.
 
         Returns:
-            Extracted plain text from all paragraphs.
+            Extracted plain text from paragraphs, tables, and headers/footers.
         """
         try:
             from docx import Document
@@ -164,11 +213,24 @@ class DocumentParser:
             ) from exc
 
         doc = Document(str(file_path))
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        chunks: list[str] = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
 
-        if not paragraphs:
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if cell_text:
+                        chunks.append(cell_text)
+
+        for section in doc.sections:
+            for part in (section.header, section.footer):
+                for p in part.paragraphs:
+                    if p.text.strip():
+                        chunks.append(p.text.strip())
+
+        if not chunks:
             raise ParseError(str(file_path), "No text content found in DOCX")
-        return "\n".join(paragraphs)
+        return "\n".join(chunks)
 
     def _extract_sections(self, text: str) -> dict[str, str]:
         """Extract resume sections by matching known header patterns.

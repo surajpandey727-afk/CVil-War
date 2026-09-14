@@ -6,9 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# WeasyPrint + spaCy runtime libraries.
+# WeasyPrint + spaCy runtime libraries. libgdk-pixbuf2.0-0 was renamed libgdk-pixbuf-2.0-0
+# upstream — confirmed live, python:3.11-slim now tracks Debian trixie, where the old name
+# has no installation candidate and `docker build` fails outright.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev libcairo2 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 

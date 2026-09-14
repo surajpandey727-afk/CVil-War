@@ -13,16 +13,33 @@ useful than a button that silently does nothing.
 
 from __future__ import annotations
 
+import asyncio
+import re
+from collections.abc import Sequence
+from time import perf_counter
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.automation.platforms.registry import platform_registry
-from app.core.job_discovery.source_registry import ALL_SOURCES, SourceHealth, health_for
+from app.core.job_discovery.source_registry import (
+    ALL_SOURCES,
+    BY_KEY,
+    SourceHealth,
+    SourceSpec,
+    health_for,
+)
 from app.models.enums import SessionState
 from app.models.platform_session import PlatformSession
 from app.models.user_settings import UserSettings
-from app.schemas.platforms import PlatformAction, PlatformsResponse, PlatformStatus
+from app.schemas.platforms import (
+    PlatformAction,
+    PlatformsResponse,
+    PlatformStatus,
+    PlatformTestResponse,
+    PlatformTestResult,
+)
 from app.services.evidence import mask_account
 
 logger = structlog.get_logger(__name__)
@@ -54,6 +71,20 @@ def _capabilities(key: str) -> list[str]:
 
 
 def _needs_credential(key: str) -> bool:
+    """Whether a login/session is the right next step for this source.
+
+    Checked two ways, because either one alone missed real cases: the adapter's own
+    declared capability answers for sources that already have one, but a source the
+    registry has confirmed needs a browser session (``civilservice``, ``ukvisajobs`` —
+    verified live, not guessed) has no adapter yet precisely *because* nothing can be
+    built until that session exists. Asking only the adapter reported "no login needed"
+    for exactly the two sources sitting behind a login page — the Connect button never
+    appeared, so there was no way to take the one human step that unblocks them.
+    """
+    from app.core.automation.connect import connectable
+
+    if connectable(key):
+        return True
     if not platform_registry.has(key):
         return False
     try:
@@ -164,4 +195,74 @@ async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
         total=len(statuses),
         usable=sum(1 for s in statuses if s.implemented),
         connected=sum(1 for s in statuses if s.connected),
+    )
+
+
+#: Cap on concurrent probes. Each one is a real upstream request; running fifty at once would
+#: be indistinguishable from an attack and would earn a rate limit from several of them.
+_TEST_CONCURRENCY = 6
+#: Per-probe ceiling. A source that has not answered in this long has answered the question.
+_TEST_TIMEOUT = 25.0
+
+
+async def test_platforms(
+    db: AsyncSession, user_id: str, keys: Sequence[str] | None = None
+) -> PlatformTestResponse:
+    """Probe each source for real and report what actually happened.
+
+    The Settings screen has always rendered a "Test" control that no endpoint served, so the
+    operator could see a catalogue of fifty-five sources and had no way to establish whether
+    any of them worked. This runs each adapter's own ``health_check`` — a live request, not a
+    reading of the catalogue — so "live" means it answered a moment ago.
+
+    Probes are bounded and run in parallel; one hanging source must not hold up the sweep.
+    """
+    started = perf_counter()
+    registry = platform_registry
+    available = {
+        key: spec for key, spec in BY_KEY.items()
+        if registry.has(key) and (not keys or key in set(keys))
+    }
+    semaphore = asyncio.Semaphore(_TEST_CONCURRENCY)
+
+    async def probe(key: str, spec: SourceSpec) -> PlatformTestResult:
+        began = perf_counter()
+        async with semaphore:
+            try:
+                # ``create`` instantiates; ``get`` returns the class, which has no
+                # bound health_check to await.
+                adapter = registry.create(key)
+                state, detail = await asyncio.wait_for(
+                    adapter.health_check(), timeout=_TEST_TIMEOUT
+                )
+            except TimeoutError:
+                state, detail = "unavailable", f"No answer within {_TEST_TIMEOUT:.0f}s"
+            except Exception as exc:
+                state, detail = "unavailable", str(exc)[:200] or exc.__class__.__name__
+        # "N returned" is health_check's own phrasing; pull the count back out for the UI.
+        count = 0
+        if match := re.match(r"(\d+)\s+returned", detail):
+            count = int(match.group(1))
+        return PlatformTestResult(
+            key=key,
+            label=spec.label,
+            state=state,
+            detail=detail,
+            results=count,
+            elapsed_ms=int((perf_counter() - began) * 1000),
+            ok=state == "live",
+        )
+
+    results = await asyncio.gather(*(probe(k, s) for k, s in available.items()))
+    ordered = sorted(results, key=lambda r: (r.ok is False, r.label.lower()))
+    logger.info(
+        "platforms_tested", user_id=user_id, tested=len(ordered),
+        passed=sum(1 for r in ordered if r.ok),
+    )
+    return PlatformTestResponse(
+        results=ordered,
+        tested=len(ordered),
+        passed=sum(1 for r in ordered if r.ok),
+        failed=sum(1 for r in ordered if not r.ok),
+        elapsed_ms=int((perf_counter() - started) * 1000),
     )

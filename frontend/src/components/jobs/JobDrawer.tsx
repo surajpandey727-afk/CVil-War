@@ -1,10 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
 import CompanyPanel from '@/components/jobs/CompanyPanel';
+import PostingPanel from '@/components/jobs/PostingPanel';
 import FitPanel from '@/components/jobs/FitPanel';
 import Icon from '@/components/ui/Icon';
-import { useAnalyseFit, useCompanyProfile, useStoredFit } from '@/hooks/useJobs';
+import {
+  useAnalyseFit, useCompanyProfile, useEnrichJob, useResumeRecommendation, useStoredFit,
+} from '@/hooks/useJobs';
 import { useAppStore } from '@/store/useAppStore';
+import { useFocusStore } from '@/store/useFocusStore';
+import { sponsorMeta } from '@/lib/status';
 import type { Job } from '@/types/job';
 import type { Resume } from '@/types/resume';
 
@@ -13,7 +18,7 @@ const PLAT_COLOR: Record<string, string> = {
   glassdoor: 'var(--applied)', exa: 'var(--accent)',
 };
 
-type Tab = 'fit' | 'company' | 'description';
+type Tab = 'fit' | 'posting' | 'company' | 'description';
 
 interface JobDrawerProps {
   job: Job;
@@ -43,20 +48,35 @@ export default function JobDrawer({
   job, resumes, onClose, onApplyWithAgent, applying, onApplyManually, onOpenJobId,
 }: JobDrawerProps) {
   const notify = useAppStore((s) => s.showNotification);
+  const setFocusedJob = useFocusStore((s) => s.setFocusedJob);
   const [tab, setTab] = useState<Tab>('fit');
   const [resumeId, setResumeId] = useState<string>('');
 
-  // Default to the base CV, which is the one most likely to be assessed first. The operator
-  // changes it here rather than on another screen.
+  // The floating ATS widget (mounted at the app shell) reads this to know which job's
+  // recommendation to show, independent of whether this drawer stays open.
+  useEffect(() => {
+    setFocusedJob(job.id, job.title);
+  }, [job.id, job.title, setFocusedJob]);
+
+  const { data: recommendation } = useResumeRecommendation(job.id);
+
+  // Default to whichever CV the recommendation engine ranks highest for this job; fall back
+  // to the base CV (then any CV) only while that call hasn't returned yet. The operator can
+  // always change it here.
   useEffect(() => {
     if (resumeId) return;
-    const base = resumes.find((r) => r.type === 'base') ?? resumes[0];
-    if (base) setResumeId(base.id);
-  }, [resumes, resumeId]);
+    const recommended = recommendation?.recommended_resume_id
+      ? resumes.find((r) => r.id === recommendation.recommended_resume_id)
+      : undefined;
+    const fallback = resumes.find((r) => r.type === 'base') ?? resumes[0];
+    const pick = recommended ?? fallback;
+    if (pick) setResumeId(pick.id);
+  }, [resumes, resumeId, recommendation]);
 
   const { data: stored } = useStoredFit(job.id, resumeId || undefined);
   const { data: company, isLoading: companyLoading } = useCompanyProfile(job.id);
   const analyse = useAnalyseFit();
+  const enrich = useEnrichJob();
 
   // The freshly computed result wins over the stored one for this render; both are the same
   // shape, so the panel does not care which it got.
@@ -110,6 +130,36 @@ export default function JobDrawer({
               </span>
               {job.remote && <Tag>Remote</Tag>}
               {job.job_type && <Tag>{job.job_type}</Tag>}
+              {(() => {
+                const sm = sponsorMeta(job.sponsor_confidence);
+                return (
+                  <span
+                    title={job.sponsor_evidence ?? undefined}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 6, background: sm.soft, color: sm.color, font: '700 11px/1 var(--font)' }}
+                  >
+                    <Icon name="shield" size={11} /> {sm.label}
+                  </span>
+                );
+              })()}
+              {/* The same destination as "Apply manually" at the foot of the drawer, repeated
+                  here because that one sits below the fold — the operator's first question on
+                  opening a job is often just "show me the actual posting". */}
+              {applyUrl && (
+                <a
+                  href={applyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => onApplyManually(applyUrl)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
+                    borderRadius: 6, background: 'var(--accent-soft)',
+                    border: '1px solid var(--accent-line)', color: 'var(--accent)',
+                    font: '600 10.5px/1.5 var(--font)', textDecoration: 'none',
+                  }}
+                >
+                  Open posting <Icon name="ext" size={12} />
+                </a>
+              )}
             </div>
           </div>
           <button onClick={onClose} aria-label="Close" style={{ flex: '0 0 auto', width: 32, height: 32, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', cursor: 'pointer', display: 'grid', placeItems: 'center', font: '400 18px/1 var(--font)' }}>×</button>
@@ -148,7 +198,7 @@ export default function JobDrawer({
         </div>
 
         <div style={{ flex: '0 0 auto', display: 'flex', gap: 5, padding: '12px 22px 0' }}>
-          {([['fit', 'Fit'], ['company', 'Company'], ['description', 'Description']] as const).map(
+          {([['fit', 'Fit'], ['posting', 'Posting'], ['company', 'Company'], ['description', 'Description']] as const).map(
             ([key, label]) => (
               <button
                 key={key}
@@ -181,6 +231,14 @@ export default function JobDrawer({
                   : 'Choose a CV above and analyse your fit against this job.'}
               </Centered>
             )
+          )}
+
+          {tab === 'posting' && (
+            <PostingPanel
+              job={job}
+              enriching={enrich.isPending}
+              onEnrich={() => enrich.mutate({ jobId: job.id, force: Boolean(job.enriched_at) })}
+            />
           )}
 
           {tab === 'company' && (

@@ -15,8 +15,11 @@ from app.models import Base
 config = context.config
 
 # Use the application's configured database URL (respects the DATABASE_URL env var),
-# so migrations target the same DB the app uses on both SQLite and Postgres.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# so migrations target the same DB the app uses on both SQLite and Postgres. configparser
+# treats a bare "%" as the start of its own interpolation syntax (e.g. a percent-encoded
+# character in the password, "%40"), so it must be escaped as "%%" before going through
+# set_main_option — this is a configparser quirk, not a URL-encoding error.
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

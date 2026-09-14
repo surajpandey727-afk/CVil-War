@@ -79,7 +79,7 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     )
     ats_score: Mapped[float | None] = mapped_column(nullable=True)
     created_reason: Mapped[str] = mapped_column(String(120), nullable=False, default="upload")
-    superseded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     document: Mapped["Document"] = relationship(back_populates="versions")
 

@@ -1,5 +1,6 @@
 """FastAPI application factory and lifespan management."""
 
+import asyncio
 import hmac
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -167,14 +168,18 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check(response: Response) -> dict[str, object]:
-        """Readiness probe: verifies DB connectivity (hard) and reports Redis (soft).
+        """Readiness probe: verifies DB connectivity (hard) and reports everything else (soft).
 
         A dead database means the instance cannot serve, so it returns 503 — which lets a
-        container healthcheck / uptime monitor detect it. Redis degrades gracefully (WS + queue
-        only), so it is reported but does not fail the check.
+        container healthcheck / uptime monitor detect it. Everything else (Redis, the LLM
+        gateway, external job/comms APIs) degrades gracefully rather than failing the whole
+        probe, but is still reported: a health check that only ever says "db: true" leaves an
+        operator no way to tell "the app is up" from "the app is up and its actual
+        dependencies — the LLM gateway, Reed, Adzuna — are configured and reachable".
         """
         from sqlalchemy import text
 
+        from app.core.llm.discovery import discover as discover_llm_gateway
         from app.db.redis import is_redis_available
         from app.db.session import engine
 
@@ -187,6 +192,43 @@ def create_app() -> FastAPI:
             logger.error("health_db_unavailable", error=str(exc))
         redis_ok = await is_redis_available()
 
+        # `discover()` is cached (see core.llm.discovery) but a cold/expired cache means a
+        # real network call with its own 8s budget — fine for a human clicking "Refresh
+        # models", fatal for a machine-polled readiness probe: a slow gateway would make
+        # /health itself slow, and a container orchestrator reading that as "unhealthy"
+        # would restart a backend that was otherwise working fine. A short, health-specific
+        # timeout bounds the worst case without touching discover()'s own contract. Skipped
+        # entirely once the DB is already down — the probe is already failing; there is
+        # nothing to gain from also waiting out a gateway check before returning 503.
+        if db_ok:
+            try:
+                catalogue = await asyncio.wait_for(discover_llm_gateway(), timeout=2.0)
+                llm_gateway = {"reachable": catalogue.reachable, "error": catalogue.error}
+            except TimeoutError:
+                llm_gateway = {"reachable": False, "error": "Gateway check timed out"}
+        else:
+            llm_gateway = {"reachable": False, "error": "Skipped — database is unavailable"}
+
+        # Credential presence only, not a live probe — an external-API health check must not
+        # itself become a source of flakiness (a slow or rate-limited third party would make
+        # every readiness probe slow or fail) or leak whether a key happens to be valid right
+        # now. "configured" is what an operator actually needs to diagnose "why is Reed not
+        # returning results" without adding another network dependency to /health itself.
+        settings = get_settings()
+        external_apis = {
+            "reed": bool(settings.reed_api_key.get_secret_value()),
+            "adzuna": bool(
+                settings.adzuna_app_id.get_secret_value()
+                and settings.adzuna_app_key.get_secret_value()
+            ),
+            "exa": bool(settings.exa_api_key.get_secret_value()),
+            "gmail": bool(
+                settings.gmail_client_id.get_secret_value()
+                and settings.gmail_client_secret.get_secret_value()
+            ),
+            "apollo": bool(settings.apollo_api_key.get_secret_value()),
+        }
+
         if not db_ok:
             response.status_code = 503
         return {
@@ -194,6 +236,8 @@ def create_app() -> FastAPI:
             "version": APP_VERSION,
             "db": db_ok,
             "redis": redis_ok,
+            "llm_gateway": llm_gateway,
+            "external_apis": external_apis,
         }
 
     return app

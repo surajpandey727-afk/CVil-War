@@ -5,8 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from arq import Retry
 
+from sqlalchemy import select
+
+from app.models.agent_run import AgentRun
 from app.models.application import Application
-from app.models.enums import ApplicationStatus, ApplyMode
+from app.models.application_event import ApplicationEvent
+from app.models.enums import AgentName, AgentRunStatus, ApplicationEventType, ApplicationStatus, ApplyMode
 from app.models.job import Job
 from app.models.user_settings import UserSettings
 from app.workers import tasks
@@ -101,6 +105,37 @@ class TestApplyPipeline:
         assert app.status == ApplicationStatus.FAILED
         assert "boom" in (app.notes or "")
 
+    async def test_successful_apply_leaves_a_timeline_row(self, db_session, sample_job_data):
+        """Pins a real gap: a clean submission committed the status change directly and
+        skipped the timeline entirely — CAPTCHA pauses got a row, failures now do too
+        (below), but the single most common outcome left no record of when or how the
+        application was actually submitted."""
+        app = await _seed_app(db_session, sample_job_data)
+        await tasks._apply(db_session, CTX, app.id)
+        events = (
+            await db_session.execute(
+                select(ApplicationEvent).where(ApplicationEvent.application_id == app.id)
+            )
+        ).scalars().all()
+        submitted = [e for e in events if e.event_type == ApplicationEventType.APPLICATION_SUBMITTED]
+        assert len(submitted) == 1
+        assert submitted[0].actor == "system"
+
+    async def test_permanent_failure_leaves_a_timeline_row(self, db_session, sample_job_data):
+        app = await _seed_app(db_session, sample_job_data)
+        with patch.object(
+            tasks, "_submit_application", new=AsyncMock(side_effect=ValueError("boom"))
+        ):
+            await tasks._apply(db_session, CTX, app.id)
+        events = (
+            await db_session.execute(
+                select(ApplicationEvent).where(ApplicationEvent.application_id == app.id)
+            )
+        ).scalars().all()
+        errors = [e for e in events if e.event_type == ApplicationEventType.ERROR]
+        assert len(errors) == 1
+        assert "boom" in (errors[0].detail or "")
+
     async def test_missing_application_is_noop(self, db_session):
         await tasks._apply(db_session, CTX, "nonexistent-id")  # must not raise
 
@@ -119,6 +154,73 @@ class TestApplyPipeline:
         await db_session.refresh(app)
         assert app.status == ApplicationStatus.FAILED
         assert "attempts" in (app.notes or "")
+
+
+class TestHumanVerificationRequiredError:
+    """A CAPTCHA/2FA wall pauses the application for the operator — it is not a failure,
+    and the original run must not be treated as one."""
+
+    async def test_pauses_for_review_instead_of_failing(self, db_session, sample_job_data):
+        from app.core.automation.runtime.apply import HumanVerificationRequiredError
+
+        app = await _seed_app(db_session, sample_job_data)
+        with patch.object(
+            tasks, "_submit_application",
+            new=AsyncMock(
+                side_effect=HumanVerificationRequiredError(
+                    "CAPTCHA challenge before submit", url="https://example.com/apply/1"
+                )
+            ),
+        ):
+            await tasks._apply(db_session, CTX, app.id)  # must NOT raise
+
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.PENDING_REVIEW
+        assert app.application_url == "https://example.com/apply/1"
+        assert app.resume_state == {"blocked_reason": "captcha"}
+        assert app.paused_at is not None
+
+    async def test_recomputes_next_action_to_complete_verification(
+        self, db_session, sample_job_data
+    ):
+        from app.core.automation.runtime.apply import HumanVerificationRequiredError
+        from app.models.enums import ApplicationHealth, NextAction
+
+        app = await _seed_app(db_session, sample_job_data)
+        with patch.object(
+            tasks, "_submit_application",
+            new=AsyncMock(side_effect=HumanVerificationRequiredError("2FA prompt")),
+        ):
+            await tasks._apply(db_session, CTX, app.id)
+
+        await db_session.refresh(app)
+        assert app.next_action == NextAction.COMPLETE_VERIFICATION
+        assert app.health == ApplicationHealth.BLOCKED
+
+    async def test_publishes_an_intervention_required_event_with_the_url(
+        self, db_session, sample_job_data
+    ):
+        from app.core.automation.runtime.apply import HumanVerificationRequiredError
+
+        app = await _seed_app(db_session, sample_job_data)
+        pool = _fake_pool()
+        with patch.object(
+            tasks, "_submit_application",
+            new=AsyncMock(
+                side_effect=HumanVerificationRequiredError("CAPTCHA", url="https://x.com/apply")
+            ),
+        ), patch("app.workers.tasks.publish_progress", new=AsyncMock()) as published:
+            await tasks._apply(db_session, {"job_try": 1, "redis": pool}, app.id)
+
+        # Two distinct events: a generic status update (refreshes the applications list) and
+        # the specific intervention_required event (opens the modal) — find the latter.
+        events = [call.args[2] for call in published.await_args_list]
+        intervention_events = [e for e in events if e["type"] == "intervention_required"]
+        assert len(intervention_events) == 1
+        payload = intervention_events[0]["payload"]
+        assert payload["kind"] == "captcha"
+        assert payload["url"] == "https://x.com/apply"
+        assert payload["application_id"] == app.id
 
 
 class TestTransientClassification:
@@ -228,6 +330,32 @@ class TestPolicyGateRouting:
         await db_session.refresh(app)
         assert app.status == ApplicationStatus.PENDING_REVIEW
         assert "180" in (app.notes or ""), "the reason quotes the top of the band"
+
+    async def test_an_escalation_is_visible_on_the_live_agent_graph(
+        self, db_session, sample_job_data
+    ):
+        """A policy escalation is a real agent outcome, not a silent early return — before
+        this, only runs that reached submission wrote an AgentRun, so the (common,
+        review-mode) escalate/hold/block outcomes never showed up on the Agent Ops view."""
+        sample_job_data = {**sample_job_data, "salary_range": "£150,000 - £180,000"}
+        app = await _seed_app(
+            db_session,
+            sample_job_data,
+            policy={**PERMISSIVE_POLICY, "require_review_above_salary_k": 120},
+        )
+        with patch.object(tasks, "_submit_application", new=AsyncMock()):
+            await tasks._apply(db_session, CTX, app.id)
+
+        run = (
+            await db_session.execute(
+                select(AgentRun).where(
+                    AgentRun.linked_entity_id == app.id, AgentRun.agent_name == AgentName.APPLICATION
+                )
+            )
+        ).scalar_one()
+        assert run.status == AgentRunStatus.NEEDS_REVIEW
+        assert "180" in (run.output_summary or "")
+        assert run.finished_at is not None
 
     async def test_a_block_is_terminal_and_says_which_rule_stopped_it(
         self, db_session, sample_job_data

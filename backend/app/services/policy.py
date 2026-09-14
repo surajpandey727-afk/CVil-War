@@ -177,6 +177,7 @@ async def build_context(
         salary_max_k=parse_salary_k(job.salary_range if job else None),
         seniority=(job.experience_level or "") if job else "",
         ats_score=ats_score,
+        sponsor_confidence=str(job.sponsor_confidence or "") if job else "",
         submitted_today=submitted_today,
         submitted_this_hour=submitted_hour,
         submitted_to_company_this_week=company_week,

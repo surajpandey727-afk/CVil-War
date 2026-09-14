@@ -54,7 +54,7 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     #: into a dangling id. Archiving hides it from every picker and from the résumés list while
     #: keeping the record intact. Unused CVs are still deleted outright — there is nothing to
     #: preserve.
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     base_resume: Mapped["Resume | None"] = relationship(

@@ -10,6 +10,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -18,7 +19,7 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const { access_token } = await authService.login(email, password);
+      const { access_token } = await authService.login(email, password, rememberMe);
       useAuthStore.setState({ token: access_token });
       const user = await authService.me();
       useAuthStore.getState().setAuth(access_token, user);
@@ -42,7 +43,17 @@ export default function LoginPage() {
     >
       <AuthField id="email" label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
       <AuthField id="password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
-      <div style={{ textAlign: 'right', margin: '-4px 0 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '-4px 0 10px' }}>
+        <label htmlFor="remember-me" style={{ display: 'flex', alignItems: 'center', gap: 7, font: '500 12px/1 var(--font)', color: 'var(--text-3)', cursor: 'pointer' }}>
+          <input
+            id="remember-me"
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            style={{ margin: 0, cursor: 'pointer' }}
+          />
+          Stay signed in
+        </label>
         <Link to="/forgot-password" style={{ font: '600 12px/1 var(--font)', color: 'var(--accent)', textDecoration: 'none' }}>Forgot password?</Link>
       </div>
     </AuthShell>

@@ -46,6 +46,25 @@ class TestAuthFlow:
         r = await anon_client.get(f"{API}/me", headers={"Authorization": "Bearer garbage"})
         assert r.status_code == 401
 
+    async def test_login_remembers_by_default_with_a_persistent_cookie(self, anon_client):
+        await anon_client.post(f"{API}/register", json=CREDS)
+        r = await anon_client.post(f"{API}/login", data=FORM)
+        cookie = r.headers.get("set-cookie", "")
+        assert "refresh_token=" in cookie
+        assert "max-age" in cookie.lower()
+
+    async def test_login_with_remember_me_off_sets_a_session_cookie(self, anon_client):
+        """No max-age at all — the browser drops it the moment it closes, rather than
+        silently keeping the operator signed in on a machine they didn't ask to trust."""
+        await anon_client.post(f"{API}/register", json=CREDS)
+        r = await anon_client.post(f"{API}/login", data={**FORM, "remember_me": "false"})
+        cookie = r.headers.get("set-cookie", "")
+        assert "refresh_token=" in cookie
+        assert "max-age" not in cookie.lower()
+        # Still fully logged in — remember_me only affects cookie persistence, not the login.
+        assert r.status_code == 200
+        assert r.json()["access_token"]
+
 
 class TestRouterGuard:
     async def test_unauthenticated_request_rejected(self, anon_client):

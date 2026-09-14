@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as settingsService from '@/services/settingsService';
 import type { AIUsagePeriod } from '@/types/aiSettings';
-import type { AutomationSettings, SettingsUpdate } from '@/types/settings';
+import type { AutomationSettings, BYOLLMKeyUpdate, SettingsUpdate } from '@/types/settings';
 
 const SETTINGS_KEY = ['settings'] as const;
 
@@ -29,6 +29,36 @@ export function useLLMProviders() {
   return useQuery({
     queryKey: [...SETTINGS_KEY, 'llm-providers'],
     queryFn: () => settingsService.getLLMProviders(),
+  });
+}
+
+/** Which providers have a BYO key saved for this account. Never the key value. */
+export function useBYOLLMKeys() {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'byo-llm-keys'],
+    queryFn: () => settingsService.getBYOLLMKeys(),
+  });
+}
+
+/** Save (or replace) this account's own API key for a provider. */
+export function useSaveBYOLLMKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: BYOLLMKeyUpdate) => settingsService.saveBYOLLMKey(update),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'byo-llm-keys'] });
+    },
+  });
+}
+
+/** Remove a stored BYO key. */
+export function useDeleteBYOLLMKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: string) => settingsService.deleteBYOLLMKey(provider),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'byo-llm-keys'] });
+    },
   });
 }
 

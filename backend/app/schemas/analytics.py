@@ -1,6 +1,6 @@
 """Pydantic schemas for analytics and dashboard API responses."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DashboardStats(BaseModel):
@@ -23,6 +23,28 @@ class DashboardStats(BaseModel):
     submitted_this_week: int = 0
     avg_ats_score: float = 0.0
     total_llm_cost_usd: float = 0.0
+    #: Jobs first seen since local midnight, vs. ``total_jobs_found``'s all-time total —
+    #: the two answer different questions ("is discovery running today" vs. "how big is
+    #: the cache").
+    jobs_found_today: int = 0
+    #: Distinct vacancies after cross-source dedup (``Job.canonical_job_id``) — the number
+    #: that matters to a candidate, who does not care that one role is stored as three rows
+    #: because three boards carried it.
+    unique_jobs: int = 0
+    #: Counted, not source_registry's whole catalogue — an unimplemented or credential-
+    #: gated source has zero jobs and does not belong on a chart about what is actually
+    #: returning results.
+    jobs_by_source: dict[str, int] = Field(default_factory=dict)
+    #: Register-confirmed only (SponsorConfidence.CONFIRMED_REGISTER) — the strongest tier,
+    #: not "any positive signal", so this number can be quoted without a caveat.
+    sponsor_confirmed_jobs: int = 0
+    #: Résumés the agent produced (tailored or ATS-optimized) — excludes the operator's own
+    #: uploaded base CV, which was written by them, not generated.
+    cvs_generated: int = 0
+    #: ``None`` when the register has never been fetched — see
+    #: ``core.sponsorship.register.status()``, the same source of truth the Settings screen
+    #: uses, so the two can never disagree about freshness.
+    sponsor_register_last_refreshed: str | None = None
 
 
 class ApplicationFunnelData(BaseModel):

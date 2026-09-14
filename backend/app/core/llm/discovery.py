@@ -235,10 +235,11 @@ async def discover(*, force: bool = False) -> Catalogue:
         return _cache
 
     url = f"{base}/models"
-    headers: dict[str, str] = {}
-    key = llm.openai_api_key.get_secret_value()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+    # Match the actual completion client's auth field (see core.llm.client), not
+    # ``openai_api_key`` — that field is unrelated to gateway auth, so this previously sent
+    # no Authorization header at all and reported a configured, working gateway as down.
+    key = llm.api_base_key.get_secret_value() or "local-gateway"
+    headers: dict[str, str] = {"Authorization": f"Bearer {key}"}
 
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:

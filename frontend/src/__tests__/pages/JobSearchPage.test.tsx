@@ -88,14 +88,36 @@ describe('JobSearchPage', () => {
       platforms = ((await request.json()) as { platforms: string[] }).platforms;
       return HttpResponse.json(listOf());
     }));
-    useDiscoveryStore.setState({ enabledSources: [...WORKING_SOURCE_KEYS, 'reed', 'careers:monzo'] });
+    // ukvisajobs/otta have no adapter yet (both confirmed unimplemented — see lib/sources.ts);
+    // reed and careers:monzo were the same kind of example until their adapters shipped,
+    // which is exactly the staleness this file's own cleanup comment now warns about.
+    useDiscoveryStore.setState({ enabledSources: [...WORKING_SOURCE_KEYS, 'ukvisajobs', 'otta'] });
     renderJobs();
     await userEvent.type(screen.getByLabelText(/job title or keywords/i), 'ml engineer');
     await userEvent.click(screen.getByRole('button', { name: /^search$/i }));
     await waitFor(() => expect(platforms.length).toBeGreaterThan(0));
-    expect(platforms).not.toContain('reed');
-    expect(platforms).not.toContain('careers:monzo');
+    expect(platforms).not.toContain('ukvisajobs');
+    expect(platforms).not.toContain('otta');
     expect(platforms).toContain('remotive');
+  });
+
+  it('searches every live source rather than blocking, for a visitor who has never touched the source filter', async () => {
+    // Regression test for a real bug: enabledSources defaults to [] for anyone who has
+    // never opened the per-device source filter, and this used to hard-block the search
+    // with "None of the enabled sources have a working adapter yet" — discovery, the
+    // screen's one job, refused to run at all on a first visit.
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf())));
+    let platforms: string[] = [];
+    server.use(http.post('/api/v1/jobs/search', async ({ request }) => {
+      platforms = ((await request.json()) as { platforms: string[] }).platforms;
+      return HttpResponse.json(listOf());
+    }));
+    useDiscoveryStore.setState({ enabledSources: [] });
+    renderJobs();
+    await userEvent.type(screen.getByLabelText(/job title or keywords/i), 'ml engineer');
+    await userEvent.click(screen.getByRole('button', { name: /^search$/i }));
+    await waitFor(() => expect(platforms.length).toBeGreaterThan(0));
+    expect(platforms).toEqual(['remotive', 'adzuna']); // the mocked catalogue's live_keys
   });
 
   it('excludes jobs from a source the operator switched off', async () => {
@@ -188,5 +210,164 @@ describe('JobSearchPage', () => {
     expect(await screen.findByLabelText('CV')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /analyse my fit/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /apply with agent/i })).toBeInTheDocument();
+  });
+
+  describe('jobs are not hidden by a stale source catalogue', () => {
+    // The defect these pin: the static catalogue in lib/sources marks every `careers:*`
+    // entry not_implemented, which was false for nine of them. The page filtered against
+    // that list, so 28 of 55 real London jobs vanished with no message — the operator saw an
+    // empty screen and concluded search was broken. Every existing test passed because the
+    // fixtures all used `platform: 'linkedin'`, which happens to be in the stale list.
+
+    it('shows a job from a career-page source', async () => {
+      useDiscoveryStore.setState({ enabledSources: [] });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(job({ id: 'c1', platform: 'careers:wise', title: 'Product Owner' }))),
+        ),
+      );
+      renderJobs();
+
+      expect(await screen.findByRole('button', { name: 'Product Owner' })).toBeInTheDocument();
+    });
+
+    it('shows a job whose source the frontend catalogue has never heard of', async () => {
+      // A source added to the backend must appear immediately, not after a frontend release.
+      useDiscoveryStore.setState({ enabledSources: [] });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(job({ id: 'n1', platform: 'brand-new-board', title: 'Fresh Role' }))),
+        ),
+      );
+      renderJobs();
+
+      expect(await screen.findByRole('button', { name: 'Fresh Role' })).toBeInTheDocument();
+    });
+
+    it('an empty selection means every source, not no sources', async () => {
+      useDiscoveryStore.setState({ enabledSources: [] });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(
+            job({ id: 'a', platform: 'arbeitnow', title: 'Role A' }),
+            job({ id: 'b', platform: 'careers:monzo', title: 'Role B' }),
+          )),
+        ),
+      );
+      renderJobs();
+
+      expect(await screen.findByRole('button', { name: 'Role A' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Role B' })).toBeInTheDocument();
+    });
+
+    it('still honours a source the operator has explicitly switched off', async () => {
+      // The filter must keep working — the fix is that it only applies the operator's own
+      // choices, not a stale guess about what exists.
+      useDiscoveryStore.setState({ enabledSources: ['remotive'] });
+      // The registry has to know about linkedin for "known and switched off" to be the case
+      // under test — an unrecognised source is deliberately kept.
+      server.use(
+        http.get('/api/v1/sources/', () =>
+          HttpResponse.json({
+            total: 2,
+            live_keys: ['remotive'],
+            tiers: [{
+              id: 'aggregator', label: 'Aggregators', name: 'Aggregators', note: '',
+              sources: [
+                { key: 'remotive', label: 'Remotive', health: 'live', implemented: true },
+                { key: 'linkedin', label: 'LinkedIn', health: 'degraded', implemented: true },
+              ],
+            }],
+          }),
+        ),
+      );
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(
+            job({ id: 'a', platform: 'remotive', title: 'Kept Role' }),
+            job({ id: 'b', platform: 'linkedin', title: 'Excluded Role' }),
+          )),
+        ),
+      );
+      renderJobs();
+
+      expect(await screen.findByRole('button', { name: 'Kept Role' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Excluded Role' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('naming the filter that is hiding the jobs', () => {
+    // The screen said "23 stored roles were filtered out" and left the operator to guess which
+    // of eight controls did it. It was a remote-only toggle set days earlier and forgotten.
+    //
+    // These assert through the Clear button rather than the filter's name: the sidebar carries
+    // the same words as a checkbox label, so matching on text alone passes even when the
+    // diagnostic panel is absent — which is exactly how the first version of these tests
+    // fooled itself.
+    const pristine = useDiscoveryStore.getState().filters;
+    beforeEach(() => {
+      useDiscoveryStore.setState({
+        filters: { ...pristine }, activeFamilies: [], enabledSources: [],
+      });
+    });
+
+    it('names the filter and how many roles it removed', async () => {
+      useDiscoveryStore.setState({ filters: { ...pristine, remoteOnly: true } });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(
+            job({ id: 'a', title: 'Onsite One', remote: false }),
+            job({ id: 'b', title: 'Onsite Two', remote: false }),
+          )),
+        ),
+      );
+      renderJobs();
+
+      const clear = await screen.findByRole('button', { name: 'Clear' });
+      const row = clear.parentElement!;
+      expect(row).toHaveTextContent('Remote or hybrid only');
+      expect(row).toHaveTextContent('2 hidden');
+    });
+
+    it('clearing the named filter brings the jobs back', async () => {
+      useDiscoveryStore.setState({ filters: { ...pristine, remoteOnly: true } });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(job({ id: 'a', title: 'Onsite One', remote: false }))),
+        ),
+      );
+      renderJobs();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Clear' }));
+
+      expect(await screen.findByRole('button', { name: 'Onsite One' })).toBeInTheDocument();
+    });
+
+    it('charges each hidden role to exactly one filter', async () => {
+      // Two filters can both reject the same role; counting it twice would report more hidden
+      // roles than exist and make every number on the panel untrustworthy.
+      useDiscoveryStore.setState({
+        filters: { ...pristine, remoteOnly: true, publishedSalaryOnly: true },
+      });
+      server.use(
+        http.get('/api/v1/jobs/', () =>
+          HttpResponse.json(listOf(
+            job({ id: 'a', title: 'A', remote: false, salary_range: null }),
+          )),
+        ),
+      );
+      renderJobs();
+
+      await screen.findByRole('button', { name: 'Clear' });
+      expect(screen.getAllByRole('button', { name: 'Clear' })).toHaveLength(1);
+    });
+
+    it('offers no diagnostic when nothing is stored to hide', async () => {
+      server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf())));
+      renderJobs();
+
+      expect(await screen.findByText(/no jobs yet/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
+    });
   });
 });

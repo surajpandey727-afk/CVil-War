@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import time
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import structlog
 from arq import Retry, cron
@@ -29,10 +29,14 @@ from app.core.harness.anomaly import detect_anomalies
 from app.core.harness.review import review_run
 from app.core.harness.skills import add_feedback
 from app.core.llm.factory import build_llm_client_for_user
+from app.core.orchestration.recorder import record_agent_run
 from app.db.session import async_session_factory
 from app.db.tenant import current_user_id
+from app.models.agent_run import AgentRun
 from app.models.application import Application
 from app.models.enums import (
+    AgentName,
+    AgentRunStatus,
     ApplicationStatus,
     ConfirmationState,
     RunVerdictResult,
@@ -45,6 +49,11 @@ from app.observability.metrics import (
     queue_depth,
     queue_processing_duration_seconds,
 )
+from app.services.discovery_scheduler import run_discovery_for_all_users
+from app.services.inbox_sync import run_inbox_sync_for_all_users
+
+if TYPE_CHECKING:
+    from app.core.automation.runtime.apply import HumanVerificationRequiredError
 
 logger = structlog.get_logger(__name__)
 
@@ -110,12 +119,21 @@ async def _submit_application(
         )
         return ""
 
-    from app.core.automation.runtime.apply import ApplyPrerequisiteError, run_apply
+    from app.core.automation.runtime.apply import (
+        ApplyPrerequisiteError,
+        HumanVerificationRequiredError,
+        run_apply,
+    )
+    from app.core.automation.runtime.confirmation import SubmissionNotApprovedError
 
     try:
         result = await run_apply(db, app, redis=redis)
     except ApplyPrerequisiteError:
         raise  # missing session/key/resume — retrying won't help; let it be terminal
+    except HumanVerificationRequiredError:
+        raise  # handled distinctly by _apply() — a pause, not a failure
+    except SubmissionNotApprovedError:
+        raise  # handled distinctly by _apply() — a human decision, not a technical failure
     except Exception as exc:
         # Reclassify retryable infra failures so Arq's retry/backoff is actually used.
         if _is_transient(exc):
@@ -165,7 +183,7 @@ async def _ats_score(db: AsyncSession, app: Application) -> float | None:
 
 
 async def _enforce_policy(
-    db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str
+    db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, run: AgentRun
 ) -> bool:
     """Run the automation policy gate. Returns True only if the submission may proceed.
 
@@ -173,6 +191,11 @@ async def _enforce_policy(
     ends: a HOLD goes back on the queue with a wake-up time, an ESCALATE lands in the review
     queue for a human, a BLOCK is terminal. Every one of them is already on the timeline with
     its reasons by the time this returns — see ``services.policy.gate``.
+
+    ``run`` is the in-flight Agent Ops record for this attempt: a non-ALLOW verdict is just as
+    much "the agent did something" as a real submission, so it is reflected on ``run`` too —
+    otherwise every policy-gated hold/escalate/block (the common case under review-mode) was
+    invisible on the live agent graph, which only ever saw runs that reached submission.
     """
     from app.core.policy import Verdict
     from app.services.dispatch import enqueue_apply
@@ -204,6 +227,7 @@ async def _enforce_policy(
         )
         await _publish(ctx, app.user_id, app.id, ApplicationStatus.QUEUED.value, reason)
         logger.info("apply.policy_hold", application_id=app.id, delay=delay, reason=reason)
+        run.output_summary = f"Held: {reason}"[:300]
         return False
 
     if decision.verdict is Verdict.ESCALATE:
@@ -214,9 +238,13 @@ async def _enforce_policy(
             ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, reason
         )
         logger.info("apply.policy_escalate", application_id=app.id, reason=reason)
+        run.status = AgentRunStatus.NEEDS_REVIEW
+        run.output_summary = f"Escalated: {reason}"[:300]
         return False
 
     await _mark_failed(db, ctx, app, platform, reason)
+    run.status = AgentRunStatus.ERROR
+    run.output_summary = f"Blocked: {reason}"[:300]
     return False
 
 
@@ -224,15 +252,79 @@ async def _mark_failed(
     db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, note: str
 ) -> None:
     """Transition an application to terminal FAILED + emit the metric and progress event."""
+    from app.models.enums import ApplicationEventType
+    from app.services.timeline import record_event
+
     app.status = ApplicationStatus.FAILED
     app.notes = note
     # A failed attempt never reached the employer; leaving confirmation_state at PENDING
     # would let the evidence panel imply a submission was still in flight.
     app.confirmation_state = ConfirmationState.FAILED
+    await record_event(
+        db, app, ApplicationEventType.ERROR, f"Apply failed on {platform}",
+        detail=note, actor="system",
+    )
     await db.commit()
     applications_total.labels(status="failed", platform=platform).inc()
     await _publish(ctx, app.user_id, app.id, ApplicationStatus.FAILED.value, note)
     logger.error("apply.permanent_failure", application_id=app.id, note=note)
+
+
+async def _mark_needs_verification(
+    db: AsyncSession,
+    ctx: dict[str, Any],
+    app: Application,
+    platform: str,
+    exc: HumanVerificationRequiredError,
+) -> None:
+    """A CAPTCHA/2FA/login wall stopped the run — pause for the operator, not a failure.
+
+    ``resume_state``'s ``blocked_reason`` marker is what ``core.actions.engine`` reads to
+    surface this as ``NextAction.COMPLETE_VERIFICATION`` on the command-centre queue; the WS
+    event is what gets the operator's attention the moment it happens rather than on their
+    next visit to the dashboard. ``POST /applications/{id}/resolve-blocker`` re-queues a
+    fresh, headed attempt once they have cleared the challenge themselves.
+    """
+    from app.core.automation.intervention import needs_intervention_event
+    from app.models.enums import ApplicationEventType
+    from app.services.timeline import record_event
+
+    app.status = ApplicationStatus.PENDING_REVIEW
+    app.application_url = exc.url or app.application_url
+    app.resume_state = {**(app.resume_state or {}), "blocked_reason": "captcha"}
+    app.paused_at = datetime.now(UTC)
+    await record_event(
+        db, app, ApplicationEventType.USER_ACTION_REQUIRED,
+        f"Verification required on {platform}", detail=exc.reason, actor="system",
+    )
+    await db.commit()
+    await _publish(ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, exc.reason)
+    redis = ctx.get("redis")
+    if redis is not None:
+        await publish_progress(
+            redis, app.user_id,
+            needs_intervention_event(app.id, "captcha", exc.reason, url=exc.url),
+        )
+    logger.info(
+        "apply.needs_verification", application_id=app.id, url=exc.url, reason=exc.reason,
+    )
+
+
+async def _mark_submission_not_approved(
+    db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, reason: str
+) -> None:
+    """The agent reached the point of submitting and the operator declined (or never
+    answered) the confirmation gate — see ``AutomationPolicy.require_submission_confirmation``.
+
+    Terminal, like ``_mark_failed``: the form was never sent, so nothing was submitted and
+    there is nothing here to resume. Kept as a distinct function (rather than just calling
+    ``_mark_failed`` at the call site) so this is logged and read back as what it actually
+    was — a deliberate human decision, not a crash — without inventing a new status value
+    the rest of the app would need to learn about.
+    """
+    note = f"Not submitted — {reason}"
+    await _mark_failed(db, ctx, app, platform, note)
+    logger.info("apply.submission_not_approved", application_id=app.id, reason=reason)
 
 
 async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> None:
@@ -261,44 +353,80 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         job = await db.get(Job, app.job_id)
         platform = job.platform if job else "unknown"
 
-        # The automation policy gate — the one place submission is permitted or refused.
-        if not await _enforce_policy(db, ctx, app, platform):
-            return
+        from app.core.automation.runtime.apply import HumanVerificationRequiredError
+        from app.core.automation.runtime.confirmation import SubmissionNotApprovedError
 
-        # In-flight marker, committed before the (non-transactional) submit.
-        app.status = ApplicationStatus.APPLYING
-        await db.commit()
-        await _publish(ctx, app.user_id, application_id, ApplicationStatus.APPLYING.value)
-
-        try:
-            confirmation = await _submit_application(db, app, ctx.get("redis"))
-        except TransientApplyError as exc:
-            if job_try >= MAX_TRIES:
-                # Retries exhausted — transition to terminal FAILED rather than leaving
-                # the row stuck in APPLYING forever (Arq won't re-invoke after this).
-                await _mark_failed(
-                    db, ctx, app, platform, f"Apply failed after {job_try} attempts: {exc}"
-                )
+        async with record_agent_run(
+            db, app.user_id, AgentName.APPLICATION,
+            input_summary=f"Submit application to {platform} for job {app.job_id}",
+            linked_entity_type="application", linked_entity_id=app.id, redis=ctx.get("redis"),
+        ) as run:
+            # The automation policy gate — the one place submission is permitted or refused.
+            # A hold/escalate/block is a real, visible agent outcome too (see _enforce_policy),
+            # not just a silent early return — the common case under review-mode apply_mode.
+            if not await _enforce_policy(db, ctx, app, platform, run):
                 return
-            logger.warning(
-                "apply.transient_failure",
-                application_id=application_id,
-                job_try=job_try,
-                error=str(exc),
-            )
-            raise Retry(defer=job_try * 30) from exc
-        except asyncio.CancelledError:
-            # job_timeout cancels the coroutine (CancelledError is not an Exception) —
-            # record the terminal failure best-effort, then let the cancellation propagate.
-            with contextlib.suppress(Exception):
-                await _mark_failed(db, ctx, app, platform, "Apply cancelled (timeout)")
-            raise
-        except Exception as exc:  # any non-transient failure is terminal
-            await _mark_failed(db, ctx, app, platform, f"Apply failed: {exc}")
-            return
+
+            # In-flight marker, committed before the (non-transactional) submit.
+            app.status = ApplicationStatus.APPLYING
+            await db.commit()
+            await _publish(ctx, app.user_id, application_id, ApplicationStatus.APPLYING.value)
+
+            try:
+                confirmation = await _submit_application(db, app, ctx.get("redis"))
+            except HumanVerificationRequiredError as exc:
+                run.status = AgentRunStatus.NEEDS_REVIEW
+                run.output_summary = "Blocked: human verification required"
+                await _mark_needs_verification(db, ctx, app, platform, exc)
+                return
+            except SubmissionNotApprovedError as exc:
+                run.status = AgentRunStatus.NEEDS_REVIEW
+                run.output_summary = f"Not submitted: {exc.reason}"[:300]
+                await _mark_submission_not_approved(db, ctx, app, platform, exc.reason)
+                return
+            except TransientApplyError as exc:
+                if job_try >= MAX_TRIES:
+                    # Retries exhausted — transition to terminal FAILED rather than leaving
+                    # the row stuck in APPLYING forever (Arq won't re-invoke after this).
+                    run.status = AgentRunStatus.ERROR
+                    run.output_summary = f"Failed after {job_try} attempts"
+                    await _mark_failed(
+                        db, ctx, app, platform, f"Apply failed after {job_try} attempts: {exc}"
+                    )
+                    return
+                logger.warning(
+                    "apply.transient_failure",
+                    application_id=application_id,
+                    job_try=job_try,
+                    error=str(exc),
+                )
+                raise Retry(defer=job_try * 30) from exc
+            except asyncio.CancelledError:
+                # job_timeout cancels the coroutine (CancelledError is not an Exception) —
+                # record the terminal failure best-effort, then let the cancellation propagate.
+                with contextlib.suppress(Exception):
+                    await _mark_failed(db, ctx, app, platform, "Apply cancelled (timeout)")
+                raise
+            except Exception as exc:  # any non-transient failure is terminal
+                run.status = AgentRunStatus.ERROR
+                run.output_summary = f"Apply failed: {exc}"[:300]
+                await _mark_failed(db, ctx, app, platform, f"Apply failed: {exc}")
+                return
+
+            run.output_summary = f"Submitted via {platform} ({confirmation})"[:300]
+
+        from app.models.enums import ApplicationEventType
+        from app.services.timeline import record_event
 
         app.status = ApplicationStatus.APPLIED
         app.applied_at = datetime.now(UTC)
+        # The most common outcome, and — until now — the one path that left no timeline
+        # row: CAPTCHA pauses and (as of the fix above) failures both recorded one, but a
+        # clean submission committed the status change directly and skipped it.
+        await record_event(
+            db, app, ApplicationEventType.APPLICATION_SUBMITTED,
+            f"Submitted via {platform}", detail=confirmation, actor="system",
+        )
         await db.commit()
         applications_total.labels(status="applied", platform=platform).inc()
         await _publish(ctx, app.user_id, application_id, ApplicationStatus.APPLIED.value)
@@ -411,6 +539,34 @@ async def purge_deleted_accounts(ctx: dict[str, Any]) -> None:
     logger.info("purge.run_complete", purged=purged, candidates=len(user_ids))
 
 
+def _discovery_cron_minutes(interval_minutes: int) -> set[int]:
+    """Minute-of-hour set for an "every N minutes" Arq cron.
+
+    Arq's ``cron()`` schedules by wall-clock minute-of-hour, not a rolling interval, so a
+    configurable interval has to be expanded into the matching minute set here. Clamped to
+    5-60 so a misconfigured value cannot produce a cron that never fires (0) or fires every
+    minute (an unbounded scrape hammering every source).
+    """
+    interval = max(5, min(60, interval_minutes))
+    return set(range(0, 60, interval))
+
+
+async def refresh_sponsor_register(ctx: dict[str, Any]) -> None:
+    """Scheduled (Arq cron, weekly): keep the cached UK sponsor register from going stale.
+
+    ``refresh()`` is itself a no-op when the cached copy is under a week old, so a more
+    frequent cron tick here would cost nothing extra — weekly is simply enough given how
+    rarely the register's content-relevant shape changes for any one employer.
+    """
+    from app.core.sponsorship import register
+
+    try:
+        rows = await register.refresh()
+        logger.info("sponsor_register.cron_refreshed", rows=rows)
+    except Exception as exc:
+        logger.warning("sponsor_register.cron_refresh_failed", error=str(exc))
+
+
 async def _on_startup(ctx: dict[str, Any]) -> None:
     from app.observability.sentry import init_sentry
 
@@ -426,10 +582,24 @@ class WorkerSettings:
     """Arq worker configuration."""
 
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
-    functions: ClassVar = [apply_to_job, review_application_run]
+    # run_discovery_for_all_users and run_inbox_sync_for_all_users are cron-scheduled below
+    # AND listed here, so the internal webhook (api.v1.internal) can also enqueue either one
+    # on demand — an n8n workflow triggering "sync now" reuses the exact same code path as
+    # the schedule, never a second implementation that could drift from it.
+    functions: ClassVar = [
+        apply_to_job, review_application_run,
+        run_discovery_for_all_users, run_inbox_sync_for_all_users,
+    ]
     cron_jobs: ClassVar = [
         cron(monitor_system_health, minute={0, 15, 30, 45}),
         cron(purge_deleted_accounts, hour={3}, minute={30}),  # daily 03:30
+        # The scheduler that was missing entirely — see services.discovery_scheduler.
+        cron(
+            run_discovery_for_all_users,
+            minute=_discovery_cron_minutes(get_settings().discovery_interval_minutes),
+        ),
+        cron(refresh_sponsor_register, hour={4}, minute={0}, weekday={0}),  # Monday 04:00
+        cron(run_inbox_sync_for_all_users, minute={0}),  # hourly
     ]
     max_jobs = get_settings().browser.max_parallel
     job_timeout = 600

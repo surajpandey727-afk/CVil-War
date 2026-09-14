@@ -1,9 +1,16 @@
 import { useMemo, useState } from 'react';
 
 import Icon from '@/components/ui/Icon';
-import { useAICatalogue, useAIUsage } from '@/hooks/useSettings';
+import {
+  useAICatalogue, useAIUsage, useBYOLLMKeys, useDeleteBYOLLMKey, useSaveBYOLLMKey,
+} from '@/hooks/useSettings';
+import { useAppStore } from '@/store/useAppStore';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AIUsagePeriod } from '@/types/aiSettings';
+
+const KNOWN_PROVIDERS = [
+  'openai', 'anthropic', 'gemini', 'groq', 'openrouter', 'azure', 'bedrock', 'vertex_ai',
+];
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -44,6 +51,13 @@ const fmt = (n: number) =>
 export default function AISettingsPanel() {
   const queryClient = useQueryClient();
   const { data: catalogue, isLoading, isError } = useAICatalogue();
+  const notify = useAppStore((s) => s.showNotification);
+  const { data: byoKeys } = useBYOLLMKeys();
+  const saveKey = useSaveBYOLLMKey();
+  const deleteKey = useDeleteBYOLLMKey();
+  const [newProvider, setNewProvider] = useState('openai');
+  const [newKey, setNewKey] = useState('');
+  const [newModel, setNewModel] = useState('');
   const [period, setPeriod] = useState<AIUsagePeriod>('7d');
   const [expanded, setExpanded] = useState<string | null>(null);
   const { data: usage } = useAIUsage(period);
@@ -68,8 +82,97 @@ export default function AISettingsPanel() {
     [catalogue],
   );
 
+  const submitKey = () => {
+    if (!newKey.trim()) {
+      notify('Enter an API key first', 'warning');
+      return;
+    }
+    saveKey.mutate(
+      { provider: newProvider, api_key: newKey.trim(), default_model: newModel.trim() || undefined },
+      {
+        onSuccess: () => {
+          notify(`Saved your ${newProvider} key`, 'success');
+          setNewKey('');
+          setNewModel('');
+        },
+        onError: () => notify('Could not save the key — try again', 'error'),
+      },
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <section style={card}>
+        <div style={{ font: '700 13.5px/1 var(--font)', marginBottom: 4 }}>Your own API key</div>
+        <p style={{ margin: '0 0 12px', font: '500 12px/1.5 var(--font)', color: 'var(--text-3)' }}>
+          Bring your own key: stored encrypted, used only for your calls, never shown again once
+          saved. Without one, the account falls back to the shared gateway above (when it's
+          reachable).
+        </p>
+
+        {byoKeys && byoKeys.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+            {byoKeys.map((k) => (
+              <div
+                key={k.provider}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: `1px solid ${k.is_active ? 'var(--accent-line)' : 'var(--border)'}` }}
+              >
+                <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--text)' }}>{k.provider}</span>
+                {k.is_active && (
+                  <span style={{ font: '700 10px/1 var(--font)', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--accent)', background: 'var(--accent-soft)', padding: '3px 7px', borderRadius: 999 }}>
+                    Active
+                  </span>
+                )}
+                {k.default_model && (
+                  <span style={{ font: '500 11px/1.4 var(--mono)', color: 'var(--text-4)' }}>{k.default_model}</span>
+                )}
+                <button
+                  onClick={() => deleteKey.mutate(k.provider, {
+                    onSuccess: () => notify(`Removed the ${k.provider} key`, 'info'),
+                  })}
+                  disabled={deleteKey.isPending}
+                  style={{ marginLeft: 'auto', height: 26, padding: '0 9px', borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 11px/1 var(--font)', cursor: 'pointer' }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={newProvider}
+            onChange={(e) => setNewProvider(e.target.value)}
+            style={{ height: 32, padding: '0 8px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)' }}
+          >
+            {KNOWN_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder="API key"
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            style={{ flex: '1 1 200px', minWidth: 160, height: 32, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '500 12px/1 var(--mono)' }}
+          />
+          <input
+            type="text"
+            placeholder="Default model (optional)"
+            value={newModel}
+            onChange={(e) => setNewModel(e.target.value)}
+            style={{ flex: '1 1 160px', minWidth: 140, height: 32, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '500 12px/1 var(--mono)' }}
+          />
+          <button
+            onClick={submitKey}
+            disabled={saveKey.isPending}
+            style={{ height: 32, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: saveKey.isPending ? 'default' : 'pointer' }}
+          >
+            {saveKey.isPending ? 'Saving…' : 'Save key'}
+          </button>
+        </div>
+      </section>
+
       <section style={card}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
           <div style={{ font: '700 13.5px/1 var(--font)' }}>AI providers &amp; models</div>

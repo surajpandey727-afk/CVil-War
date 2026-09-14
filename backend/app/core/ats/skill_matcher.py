@@ -223,7 +223,14 @@ class SkillMatcher:
         return index
 
     def _normalize_skill(self, skill: str) -> str:
-        """Normalise a skill string to its canonical form."""
+        """Normalise a skill string to its canonical form.
+
+        Skills ultimately come from loosely-typed JSON columns (a stored candidate profile,
+        a job posting's parsed metadata); a `None` or non-string entry must degrade to "no
+        match" rather than crash the whole scoring request over one bad list item.
+        """
+        if not isinstance(skill, str):
+            skill = "" if skill is None else str(skill)
         cleaned = re.sub(r"[^\w\s/#+.]", "", skill.lower()).strip()
         return self._variation_index.get(cleaned, cleaned)
 

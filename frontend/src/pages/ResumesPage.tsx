@@ -4,7 +4,7 @@ import Icon from '@/components/ui/Icon';
 import DeleteResumeDialog from '@/components/resumes/DeleteResumeDialog';
 import ResumeCard from '@/components/resumes/ResumeCard';
 import ResumePreviewPanel from '@/components/resumes/ResumePreviewPanel';
-import { useResumes, useUploadResume, useOptimizeResume, useGenerateResume, useScoreResume, useDeleteResume } from '@/hooks/useResumes';
+import { useResumes, useUploadResume, useOptimizeResume, useGenerateResume, useScoreResume, useDeleteResume, useExtractProfile } from '@/hooks/useResumes';
 import { useJobs } from '@/hooks/useJobs';
 import { downloadResumeFile } from '@/services/resumeService';
 import { useAppStore } from '@/store/useAppStore';
@@ -24,6 +24,7 @@ export default function ResumesPage() {
   const generate = useGenerateResume();
   const score = useScoreResume();
   const remove = useDeleteResume();
+  const extractProfile = useExtractProfile();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [targetJobId, setTargetJobId] = useState('');
@@ -74,6 +75,21 @@ export default function ResumesPage() {
       },
       onError: () => notify(`Could not remove ${r.name}`, 'error'),
     });
+
+  const onExtractProfile = () => {
+    if (!selected) return;
+    extractProfile.mutate(selected.id, {
+      onSuccess: (res) => {
+        notify(
+          res.profile_updated
+            ? `Added ${res.experience_found} role(s) and ${res.education_found} qualification(s) to your profile`
+            : res.detail,
+          res.profile_updated ? 'success' : 'info',
+        );
+      },
+      onError: () => notify('Could not read this résumé', 'error'),
+    });
+  };
 
   const onScore = () => {
     if (!selected || !targetJobId) return;
@@ -199,6 +215,8 @@ export default function ResumesPage() {
               onSelectJob={setTargetJobId}
               onScore={onScore}
               onDownload={(fmt) => onDownload(selected, fmt)}
+              onExtractProfile={onExtractProfile}
+              extractingProfile={extractProfile.isPending}
             />
           )}
         </div>

@@ -33,9 +33,18 @@ from app.core.job_discovery.sources.boards import (
     RemoteOkSource,
     RemotiveSource,
 )
+from app.core.job_discovery.sources.linkedin import LinkedInSource
 from app.core.job_discovery.sources.uk_boards import UK_SOURCES, AdzunaSource, ReedSource
+from app.core.job_discovery.sources.uk_visa_boards import (
+    UK_VISA_SOURCES,
+    MoveJobsSource,
+    TarveSource,
+)
 
-for _source in (*ALL_SOURCES, *UK_SOURCES):
+#: Portals with their own module, registered alongside the grouped families.
+STANDALONE_SOURCES = (LinkedInSource,)
+
+for _source in (*ALL_SOURCES, *UK_SOURCES, *UK_VISA_SOURCES, *STANDALONE_SOURCES):
     platform_registry.register(_source.source_name, _source)
 
 #: ``careers:<slug> -> adapter class``, built once at import.
@@ -45,7 +54,8 @@ for _key, _cls in CAREER_SOURCES.items():
 
 #: Every source key this package can actually serve.
 IMPLEMENTED_KEYS: frozenset[str] = frozenset(
-    [s.source_name for s in (*ALL_SOURCES, *UK_SOURCES)] + list(CAREER_SOURCES)
+    [s.source_name for s in (*ALL_SOURCES, *UK_SOURCES, *UK_VISA_SOURCES, *STANDALONE_SOURCES)]
+    + list(CAREER_SOURCES)
 )
 
 __all__ = [
@@ -53,7 +63,9 @@ __all__ = [
     "CAREER_SOURCES",
     "COMPANY_BOARDS",
     "IMPLEMENTED_KEYS",
+    "STANDALONE_SOURCES",
     "UK_SOURCES",
+    "UK_VISA_SOURCES",
     "AdzunaSource",
     "ApiJobSource",
     "ArbeitnowSource",
@@ -63,9 +75,12 @@ __all__ = [
     "GreenhouseSource",
     "JobicySource",
     "LeverSource",
+    "LinkedInSource",
+    "MoveJobsSource",
     "ReedSource",
     "RemoteOkSource",
     "RemotiveSource",
     "SmartRecruitersSource",
     "SourceUnavailableError",
+    "TarveSource",
 ]

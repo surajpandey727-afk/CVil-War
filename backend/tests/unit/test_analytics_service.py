@@ -1,8 +1,9 @@
 """Unit tests for the analytics service."""
 
 from app.models.application import Application
-from app.models.enums import ApplicationStatus
+from app.models.enums import ApplicationStatus, ResumeType, SponsorConfidence
 from app.models.job import Job
+from app.models.resume import Resume
 from app.services import analytics
 from tests.conftest import TEST_USER_ID
 
@@ -63,6 +64,42 @@ class TestGetDashboardStats:
         assert stats.applications_interview == 1
         assert stats.applications_rejected == 1
         assert stats.applications_offer == 0
+
+    async def test_new_observability_fields_are_real_not_placeholders(
+        self, db_session, sample_job_data,
+    ):
+        """Pins real gaps found in the platform audit: jobs-by-source, sponsor-confirmed
+        count, unique (deduped) job count, and CVs-generated all reported nothing before —
+        not because they were hard to compute, but because nobody had wired them yet."""
+        j1 = await _create_job(db_session, {**sample_job_data, "platform": "reed"}, suffix="1")
+        j1.sponsor_confidence = SponsorConfidence.CONFIRMED_REGISTER
+        j2 = await _create_job(db_session, {**sample_job_data, "platform": "reed"}, suffix="2")
+        j3 = await _create_job(
+            db_session, {**sample_job_data, "platform": "adzuna"}, suffix="3",
+        )
+        # j3 is a duplicate of j2 on another board — same canonical vacancy.
+        j3.canonical_job_id = j2.id
+        db_session.add_all([
+            Resume(
+                user_id=TEST_USER_ID, name="base", type=ResumeType.BASE,
+                template_id="modern",
+            ),
+            Resume(
+                user_id=TEST_USER_ID, name="tailored", type=ResumeType.TAILORED,
+                template_id="modern",
+            ),
+            Resume(
+                user_id=TEST_USER_ID, name="optimized", type=ResumeType.OPTIMIZED,
+                template_id="modern",
+            ),
+        ])
+        await db_session.commit()
+
+        stats = await analytics.get_dashboard_stats(db_session)
+        assert stats.jobs_by_source == {"reed": 2, "adzuna": 1}
+        assert stats.sponsor_confirmed_jobs == 1
+        assert stats.unique_jobs == 2  # j1, and {j2, j3} collapsed to one
+        assert stats.cvs_generated == 2  # base excluded
 
 
 class TestGetFunnel:

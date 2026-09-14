@@ -43,3 +43,39 @@ class PlatformSessionResponse(BaseModel):
     connected: bool = True
     last_verified_at: datetime | None = None
     expires_at: datetime | None = None
+
+
+class ConnectStart(BaseModel):
+    """Request to open a login window for a platform."""
+
+    platform: str
+
+    @field_validator("platform")
+    @classmethod
+    def _connectable(cls, v: str) -> str:
+        # Validated against the source registry rather than a hand-kept constant, so a portal
+        # added to the catalogue is connectable immediately instead of after someone
+        # remembers to extend a second list.
+        from app.core.automation.connect import connectable
+
+        normalized = v.strip().lower()
+        if not connectable(normalized):
+            raise ValueError(
+                f"'{v}' is not a portal a browser session can be connected for. "
+                "Only portals with an authenticated-browser mechanism can be connected."
+            )
+        return normalized
+
+
+class ConnectAttemptResponse(BaseModel):
+    """Progress of an interactive login capture. Never carries cookies or credentials."""
+
+    id: str
+    platform: str
+    state: str
+    #: True once the session is stored; the UI stops polling here.
+    done: bool
+    #: What the operator should do right now, or what happened.
+    instructions: str = ""
+    detail: str = ""
+    seconds_remaining: int = 0

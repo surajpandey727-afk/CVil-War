@@ -35,7 +35,7 @@ class ApplicationEvent(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     )
     #: When the thing happened, which is not always when the row was written — an imported
     #: application backfills historical events with their real dates.
-    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     summary: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Free-form payload: previous/next status, document id, deadline, source of a change.

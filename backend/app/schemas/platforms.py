@@ -76,3 +76,41 @@ class PlatformsResponse(BaseModel):
     #: Sources with a working adapter — the number that actually matters for discovery.
     usable: int = 0
     connected: int = 0
+
+
+class PlatformTestRequest(BaseModel):
+    """Which platforms to probe. Empty means every source with a working adapter."""
+
+    keys: list[str] = Field(default_factory=list)
+
+
+class PlatformTestResult(BaseModel):
+    """The outcome of one live probe — what happened just now, not what the catalogue claims."""
+
+    key: str
+    label: str
+    #: live / degraded / unavailable / rate_limited / not_implemented
+    state: str
+    #: The upstream's own words. "Something went wrong" is not debuggable.
+    detail: str
+    #: How many listings came back, when the probe searched.
+    results: int = 0
+    elapsed_ms: int = 0
+    ok: bool = False
+
+
+class PlatformTestResponse(BaseModel):
+    """A whole verification sweep, so the operator can see the system prove itself."""
+
+    results: list[PlatformTestResult] = Field(default_factory=list)
+    tested: int = 0
+    passed: int = 0
+    failed: int = 0
+    elapsed_ms: int = 0
+
+
+class PlatformBulkUpdate(BaseModel):
+    """Enable or disable many sources in one action."""
+
+    keys: list[str]
+    enabled: bool

@@ -171,11 +171,17 @@ it is simply not auto-applied to.
 Blocked employers `BLOCK`; the other two `HOLD`, since a posting can be re-evaluated when the
 policy changes.
 
+**5.5 Exclude postings that explicitly rule out visa sponsorship.** Off by default. Only fires
+when the posting's own text states it will not sponsor a visa — never on a posting that simply
+never mentions sponsorship, which is far more common and would wrongly exclude most of the
+market for an operator who does not even need one. An operator who does need sponsorship can
+turn this on to `BLOCK` those postings outright rather than merely rank them lower.
+
 An unscoreable posting (no CV text, scorer unavailable) does not silently pass the gate. It
 escalates — see §0 on failing closed.
 
 *Rules:* `match.min_ats_score`, `match.salary_floor`, `match.seniority`,
-`match.blocked_employer`.
+`match.blocked_employer`, `match.exclude_no_sponsorship`.
 
 ---
 

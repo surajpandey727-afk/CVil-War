@@ -38,12 +38,25 @@ describe('buildAppTimeline', () => {
       .toMatch(/by you/i);
   });
 
-  it('marks the applying step "failed" with a diagnosis and drops later steps for a failed run', () => {
+  it('marks the applying step "failed" and drops later steps for a failed run', () => {
     const steps = buildAppTimeline('autonomous', 'failed');
     const applying = steps.find((s) => s.key === 'applying');
     expect(applying?.state).toBe('failed');
-    expect(applying?.diag).toBeTruthy();
     expect(steps.some((s) => s.key === 'applied')).toBe(false);
+  });
+
+  it('does not fabricate a diagnosis when the caller has no real one', () => {
+    // Regression test: this used to hard-code "the agent couldn't locate the submit
+    // button" for EVERY failure regardless of actual cause — a fake diagnosis shown
+    // right next to the real one on AppDetailPage. No diagnosis argument means no
+    // callout, not a guess.
+    const steps = buildAppTimeline('autonomous', 'failed');
+    expect(steps.find((s) => s.key === 'applying')?.diag).toBeUndefined();
+  });
+
+  it('surfaces the real diagnosis when the caller provides one', () => {
+    const steps = buildAppTimeline('autonomous', 'failed', 'The LLM gateway timed out mid-run.');
+    expect(steps.find((s) => s.key === 'applying')?.diag).toBe('The LLM gateway timed out mid-run.');
   });
 
   it('appends a terminal "Rejected" step after the reached progress for a rejected run', () => {

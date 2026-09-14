@@ -32,11 +32,17 @@ from app.config.settings import get_settings
 
 
 class SourceTier(StrEnum):
-    """Grouping used by the UI's source rail and Sources screen."""
+    """Grouping used by the UI's source rail and Sources screen.
+
+    No TIER3: removed by explicit operator request (2026-08-30) along with every catalogue
+    entry that was in it (Civil Service Jobs and UK Visa Jobs moved to TIER2 — they are two
+    of the operator's own explicitly-requested sources; NHS Jobs, TRAC and Digital & Data
+    Jobs were dropped outright, having no adapter and no path to one). Kept as a documented
+    gap rather than renumbering TIER4/5, which would silently reclassify every source in them.
+    """
 
     TIER1 = "tier1"
     TIER2 = "tier2"
-    TIER3 = "tier3"
     TIER4 = "tier4"
     TIER5 = "tier5"
     CAREERS = "careers"
@@ -45,10 +51,6 @@ class SourceTier(StrEnum):
 TIER_LABELS: dict[SourceTier, tuple[str, str]] = {
     SourceTier.TIER1: ("Tier 1 — Must use", "Highest volume for London AI/ML and product roles"),
     SourceTier.TIER2: ("Tier 2 — UK job boards", "Consultancies, traditional business, contract"),
-    SourceTier.TIER3: (
-        "Tier 3 — Government & public sector",
-        "Statistical Scientist, Operational Research, AI Specialist",
-    ),
     SourceTier.TIER4: ("Tier 4 — Tech & startup", "AI-first companies and scale-ups"),
     SourceTier.TIER5: ("Tier 5 — Specialist recruiters", "Registered agencies"),
     SourceTier.CAREERS: ("Company career pages", "Monitored directly, checked hourly"),
@@ -143,9 +145,15 @@ _BROKEN_SCRAPER = "Browser scraper offline — targets a removed browser-use API
 
 CATALOGUE: tuple[SourceSpec, ...] = (
     # Tier 1 — registered browser platforms, currently non-functional.
+    # Discovery reads the public listing, which needs no account and puts nothing at risk;
+    # the connected session is reserved for applying, where it is genuinely required.
     SourceSpec(
         "linkedin", "LinkedIn Jobs", "linkedin.com", SourceTier.TIER1, True,
-        known_broken=_BROKEN_SCRAPER,
+        mechanisms={
+            AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE,
+            AccessMechanism.AUTHENTICATED_BROWSER: MechanismState.AUTH_REQUIRED,
+        },
+        note="Public listing for discovery; a connected session is needed only to apply.",
     ),
     SourceSpec(
         "indeed", "Indeed UK", "indeed.co.uk", SourceTier.TIER1, True, known_broken=_BROKEN_SCRAPER
@@ -165,61 +173,106 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         "exa", "Exa semantic search", "exa.ai", SourceTier.TIER4, True, api_key_field="exa_api_key"
     ),
 
-    SourceSpec("reed", "Reed", "reed.co.uk", SourceTier.TIER2, note="Needs a Reed API key"),
-    SourceSpec("totaljobs", "Totaljobs", "totaljobs.com", SourceTier.TIER2),
-    SourceSpec("cvlibrary", "CV-Library", "cv-library.co.uk", SourceTier.TIER2),
-    SourceSpec("cwjobs", "CWJobs", "cwjobs.co.uk", SourceTier.TIER2),
-    SourceSpec("jobsite", "Jobsite", "jobsite.co.uk", SourceTier.TIER2),
-    SourceSpec("adzuna", "Adzuna", "adzuna.co.uk", SourceTier.TIER2, note="Needs an Adzuna app id"),
-    SourceSpec("jobserve", "JobServe", "jobserve.com", SourceTier.TIER2),
-    SourceSpec("guardianjobs", "The Guardian Jobs", "jobs.theguardian.com", SourceTier.TIER2),
-
     SourceSpec(
-        "civilservice", "Civil Service Jobs", "civilservicejobs.service.gov.uk", SourceTier.TIER3
-    ),
-    SourceSpec("findajob", "Find a job — GOV.UK", "gov.uk", SourceTier.TIER3),
-    SourceSpec(
-        "nhsjobs", "NHS Jobs", "jobs.nhs.uk", SourceTier.TIER3,
-        note="No candidate search API. NHSBSA's API is for employers publishing their own "
-             "vacancies and needs eligibility approval. NHS roles are reachable via Reed/"
-             "Adzuna syndication; apply on jobs.nhs.uk.",
+        "reed", "Reed", "reed.co.uk", SourceTier.TIER2, True, api_key_field="reed_api_key",
     ),
     SourceSpec(
-        "tracjobs", "TRAC (NHS recruitment)", "apps.trac.jobs", SourceTier.TIER3,
+        "movejobs", "MoveJobs", "movejobs.uk", SourceTier.TIER2, True,
+        mechanisms={AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE},
+        note="Visa-sponsorship-framed UK board; server-side keyword search confirmed live.",
+    ),
+    SourceSpec(
+        "tarve", "Tarve", "tarve.co.uk", SourceTier.TIER2, True,
+        mechanisms={AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE},
+        note=(
+            "UK board that cross-checks postings against the Home Office Skilled Worker "
+            "sponsor register itself — a second, independent signal alongside this system's "
+            "own core.sponsorship check."
+        ),
+    ),
+    SourceSpec(
+        "workinstartups", "WorkInStartups", "workinstartups.com", SourceTier.TIER2,
+        mechanisms={
+            AccessMechanism.PUBLIC_WEBSITE: MechanismState.BLOCKED,
+        },
         blocked_reason=(
-            "Server-side automation refused: HTTP 403 to non-browser clients, with a "
-            "'Site unavailable' page served in place of robots.txt (verified 2026-08-13)."
+            "Confirmed (its own footer) to be part of the Adzuna network, and Cloudflare-"
+            "protected against direct HTTP scraping (verified 2026-08-29)."
+        ),
+        note=(
+            "Covered via the Adzuna source instead — same data, already a working keyed "
+            "adapter (confirmed live 2026-08-30: a real Adzuna API call with the configured "
+            "key returned real UK results)."
+        ),
+    ),
+    SourceSpec(
+        "adzuna", "Adzuna", "adzuna.co.uk", SourceTier.TIER2, True,
+        api_key_field="adzuna_app_key", note="Live — app id configured.",
+    ),
+    SourceSpec(
+        "findajob", "Work Hub — GOV.UK", "jobs.service.gov.uk", SourceTier.TIER2,
+        blocked_reason=(
+            "DWP's jobseeker service moved to a new platform (jobs.service.gov.uk, "
+            "'Work Hub' — replaces the old findajob.dwp.gov.uk) sometime before "
+            "2026-08-30; it is new enough that its own banner still says 'This is a new "
+            "service'. Live reconnaissance of its job-search page structure was attempted "
+            "but blocked by a tooling/network issue this session (not a site-side block) — "
+            "the homepage itself loaded fine in a real browser, so this is likely buildable, "
+            "just not yet verified."
+        ),
+        note="Follow-up: retry reconnaissance, then adapt if the listings are keylessly reachable.",
+    ),
+
+    # Tier 2 entries that need the operator's own one-time login before anything can be
+    # built against them — the Connect flow (core.automation.connect) already supports both;
+    # what's missing is the discovery adapter that would consume the resulting session, which
+    # cannot be written correctly before that session exists to inspect.
+    SourceSpec(
+        "civilservice", "Civil Service Jobs", "civilservicejobs.service.gov.uk", SourceTier.TIER2,
+        blocked_reason=(
+            "Every page — including the base domain — serves a \"Quick check needed\" "
+            "bot-verification gate before any content, confirmed live in a real browser "
+            "(not just a scripted request). robots.txt allows crawling, but the gate itself "
+            "cannot be automated through (verified 2026-08-29)."
         ),
         mechanisms={
-            # Blocked at the server rungs...
             AccessMechanism.API: MechanismState.UNSUPPORTED,
-            AccessMechanism.PUBLIC_ENDPOINT: MechanismState.BLOCKED,
+            AccessMechanism.PUBLIC_ENDPOINT: MechanismState.UNSUPPORTED,
             AccessMechanism.PUBLIC_WEBSITE: MechanismState.BLOCKED,
-            # ...but a candidate may sign in normally, so the browser rungs stand. TRAC is a
-            # candidate-facing NHS portal: an authorised session is ordinary permitted use,
-            # not an evasion. Marking the whole portal "unavailable" off the back of the 403
-            # confused one mechanism with the site.
+            # A human passes the one-time check normally; the resulting session cookie can
+            # then be reused for server-side requests — the same "assisted, then automated"
+            # pattern already used for LinkedIn/Indeed's saved session.
             AccessMechanism.AUTHENTICATED_BROWSER: MechanismState.AUTH_REQUIRED,
             AccessMechanism.INTERACTIVE_BROWSER: MechanismState.AVAILABLE,
-            AccessMechanism.APPLICATION_URL: MechanismState.AVAILABLE,
-            AccessMechanism.STATUS_SYNC: MechanismState.UNKNOWN,
         },
-        note="Apply through an authorised browser session; server-side discovery is refused.",
+        note="Connect this in Settings (the one-time human check), then discovery can be built.",
     ),
-    SourceSpec("ddat", "Digital & Data Jobs", "ddat.gov.uk", SourceTier.TIER3),
-
-    SourceSpec("otta", "Otta / Welcome to the Jungle", "otta.com", SourceTier.TIER4),
-    SourceSpec("hired", "Hired", "hired.com", SourceTier.TIER4),
-    SourceSpec("builtin", "Built In", "builtin.com", SourceTier.TIER4),
-    SourceSpec("technojobs", "Technojobs", "technojobs.co.uk", SourceTier.TIER4),
-
-    SourceSpec("devsdata", "DevsData LLC", "devsdata.com", SourceTier.TIER5),
-    SourceSpec("proactive", "Proactive IT Appointments", "proactive.uk.com", SourceTier.TIER5),
-    SourceSpec("ashdown", "Ashdown Group", "ashdowngroup.com", SourceTier.TIER5),
-    SourceSpec("datalogic", "DataLogic", "datalogic-recruitment.co.uk", SourceTier.TIER5),
+    SourceSpec(
+        "ukvisajobs", "UK Visa Jobs", "ukvisajobs.com", SourceTier.TIER2,
+        mechanisms={
+            # The public homepage's "Featured Jobs" carry no real per-job URL (every link is
+            # a client-side-routed placeholder) — nothing worth adapting sits on this rung.
+            AccessMechanism.PUBLIC_WEBSITE: MechanismState.BLOCKED,
+            AccessMechanism.AUTHENTICATED_BROWSER: MechanismState.AUTH_REQUIRED,
+        },
+        blocked_reason=(
+            "The public homepage's job cards have no real per-job URL (placeholder "
+            "href=\"/\", routed client-side) — the working catalogue with real links lives "
+            "behind login on my.ukvisajobs.com (verified 2026-08-29)."
+        ),
+        note="Connect this in Settings (the one-time human login), then discovery can be built.",
+    ),
 )
 
 #: Employers whose career pages are polled directly. Key format: ``careers:<slug>``.
+#:
+#: Every entry with a live board (see ``sources.ats.COMPANY_BOARDS``) was verified by calling
+#: its actual Greenhouse/Lever/Ashby/SmartRecruiters endpoint, not guessed — a wrong token
+#: silently returns zero jobs forever, so nothing here is assumed. Entries with no adapter yet
+#: (NVIDIA, C3 AI, LSEG, Bloomberg, Capital One, Just Eat, Booking.com, Expedia, King) were
+#: probed across all four providers and genuinely have none — see
+#: ``sources.ats.NO_PUBLIC_BOARD`` — they stay listed, honestly labelled unimplemented, rather
+#: than silently disappearing.
 CAREER_PAGES: tuple[tuple[str, str, str], ...] = (
     ("deepmind", "DeepMind", "deepmind.google"),
     ("anthropic", "Anthropic", "anthropic.com"),
@@ -246,6 +299,54 @@ CAREER_PAGES: tuple[tuple[str, str, str], ...] = (
     ("expedia", "Expedia", "expedia.com"),
     ("trainline", "Trainline", "thetrainline.com"),
     ("king", "King", "king.com"),
+
+    # Added 2026-08-30 — UK-headquartered and UK-hiring AI/data/fintech/product employers,
+    # each with a live-verified board (see the date-stamped block in COMPANY_BOARDS above).
+    ("quantexa", "Quantexa", "quantexa.com"),
+    ("synthesia", "Synthesia", "synthesia.io"),
+    ("speechmatics", "Speechmatics", "speechmatics.com"),
+    ("faculty", "Faculty AI", "faculty.ai"),
+    ("tractable", "Tractable", "tractable.ai"),
+    ("graphcore", "Graphcore", "graphcore.ai"),
+    ("improbable", "Improbable", "improbable.io"),
+    ("gocardless", "GoCardless", "gocardless.com"),
+    ("zopa", "Zopa", "zopa.com"),
+    ("truelayer", "TrueLayer", "truelayer.com"),
+    ("clearbank", "ClearBank", "clearbank.co.uk"),
+    ("marshmallow", "Marshmallow", "marshmallow.com"),
+    ("cleo", "Cleo", "cleo.com"),
+
+    # Global remote-friendly AI/data/product employers that also hire UK-based roles.
+    ("snowflake", "Snowflake", "snowflake.com"),
+    ("databricks", "Databricks", "databricks.com"),
+    ("datadog", "Datadog", "datadoghq.com"),
+    ("fivetran", "Fivetran", "fivetran.com"),
+    ("similarweb", "Similarweb", "similarweb.com"),
+    ("contentsquare", "Contentsquare", "contentsquare.com"),
+    ("alphasense", "AlphaSense", "alpha-sense.com"),
+    ("stripe", "Stripe", "stripe.com"),
+    ("notion", "Notion", "notion.so"),
+    ("figma", "Figma", "figma.com"),
+    ("canva", "Canva", "canva.com"),
+    ("airtable", "Airtable", "airtable.com"),
+    ("asana", "Asana", "asana.com"),
+    ("miro", "Miro", "miro.com"),
+    ("linear", "Linear", "linear.app"),
+    ("vercel", "Vercel", "vercel.com"),
+    ("gitlab", "GitLab", "gitlab.com"),
+    ("thoughtworks", "Thoughtworks", "thoughtworks.com"),
+    ("cohere", "Cohere", "cohere.com"),
+    ("stabilityai", "Stability AI", "stability.ai"),
+    ("elevenlabs", "ElevenLabs", "elevenlabs.io"),
+    ("runwayml", "Runway", "runwayml.com"),
+    ("perplexity", "Perplexity", "perplexity.ai"),
+    ("scale", "Scale AI", "scale.com"),
+    ("together", "Together AI", "together.ai"),
+    ("harvey", "Harvey", "harvey.ai"),
+    ("glean", "Glean", "glean.com"),
+    ("ramp", "Ramp", "ramp.com"),
+    ("brex", "Brex", "brex.com"),
+    ("remote", "Remote", "remote.com"),
 )
 
 ALL_SOURCES: tuple[SourceSpec, ...] = CATALOGUE + tuple(

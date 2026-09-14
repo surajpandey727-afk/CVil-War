@@ -46,7 +46,11 @@ dependencies = [
     "weasyprint>=62.0",
     "python-docx>=1.1.0",
     "jinja2>=3.1.0",
-    "PyPDF2>=3.0.0",
+    "pypdf>=4.0.0",
+    # Primary PDF text extractor (see core/documents/parser.py) — pypdf remains the
+    # fallback for whatever pdfplumber cannot open. (PyPDF2 was replaced with its
+    # actively-maintained successor, pypdf, to drop an unpatched known CVE.)
+    "pdfplumber>=0.11.0",
 
     # ML / NLP
     # spaCy is the only one of these actually imported (core/ats/nlp.py). It needs the
@@ -66,6 +70,11 @@ dependencies = [
     "httpx>=0.27.0",
     "aiofiles>=24.1.0",
 
+    # HTML parsing for the server-rendered PUBLIC_WEBSITE job-board adapters (movejobs.uk,
+    # tarve.co.uk, ukvisajobs.com) — was previously only a transitive dependency (pulled in by
+    # weasyprint/spacy), which is not a guarantee it stays installed.
+    "beautifulsoup4>=4.12.0",
+
     # Observability
     "structlog>=24.1.0",
     "prometheus-client>=0.20.0",
@@ -73,8 +82,21 @@ dependencies = [
     # Resilience
     "tenacity>=8.3.0",
 
+    # Windows ships no IANA time zone database at all, so any zoneinfo.ZoneInfo() lookup
+    # (the automation policy's run-window rule, in particular) raises ZoneInfoNotFoundError
+    # on every platform except Windows without this — not a hypothetical, it fails 100% of
+    # policy-gated applies on a clean Windows checkout.
+    "tzdata; sys_platform == 'win32'",
+
     # Job discovery
     "exa-py>=1.1.0",
+
+    # Multi-agent orchestration (core.orchestration) — a real, compiled state graph wiring
+    # the single-responsibility agents (eligibility, scoring, ...) together per job, not a
+    # hand-rolled substitute. Version-pinned low: verified installing cleanly against this
+    # project's existing dependency set at pin time (see litellm's own comment above about
+    # unpinned ranges backtracking into unbuildable releases).
+    "langgraph>=1.2,<2",
 
     # Auth & secrets
     "PyJWT>=2.8.0",

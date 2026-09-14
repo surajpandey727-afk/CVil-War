@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 import { server } from '@/__tests__/mocks/server';
 import AppDetailPage from '@/pages/AppDetailPage';
+import { useAppStore } from '@/store/useAppStore';
 
 function fullApp(overrides: Record<string, unknown> = {}) {
   return {
@@ -78,5 +79,26 @@ describe('AppDetailPage', () => {
 
     await screen.findByRole('heading', { name: 'Senior Product Manager' });
     expect(screen.queryByRole('button', { name: /view job/i })).not.toBeInTheDocument();
+  });
+
+  it('shows live fill activity streamed in over the websocket while a run is in progress', async () => {
+    server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp({ status: 'applying' }))));
+    useAppStore.getState().appendFillStep('app-1', 'step 1: click_apply_button');
+    useAppStore.getState().appendFillStep('app-1', 'step 2: fill_text_field(email)');
+    renderDetail();
+
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
+    expect(await screen.findByText('Filling the form, live')).toBeInTheDocument();
+    expect(screen.getByText('step 1: click_apply_button')).toBeInTheDocument();
+    expect(screen.getByText('step 2: fill_text_field(email)')).toBeInTheDocument();
+    useAppStore.getState().clearFillActivity('app-1'); // this store is a module-level singleton
+  });
+
+  it('does not show a fill activity panel for an application with no recorded steps', async () => {
+    server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp({ id: 'app-no-steps' }))));
+    renderDetail('app-no-steps');
+
+    await screen.findByRole('heading', { name: 'Senior Product Manager' });
+    expect(screen.queryByText(/fill activity/i)).not.toBeInTheDocument();
   });
 });

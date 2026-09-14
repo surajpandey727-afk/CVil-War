@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 import { server } from '@/__tests__/mocks/server';
 import AutomationPage from '@/pages/AutomationPage';
@@ -11,7 +12,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <AutomationPage />
+      <MemoryRouter>
+        <AutomationPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

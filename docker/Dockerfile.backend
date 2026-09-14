@@ -1,8 +1,11 @@
 FROM python:3.11-slim
 
-# WeasyPrint system dependencies
+# WeasyPrint system dependencies. libgdk-pixbuf2.0-0 was renamed libgdk-pixbuf-2.0-0
+# upstream (confirmed live: python:3.11-slim now tracks Debian trixie, where the old name
+# has no installation candidate at all — this broke `docker build` outright, not just a
+# deprecation warning).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev libcairo2 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 

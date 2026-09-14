@@ -4,6 +4,7 @@ from app.core.policy import RULES
 from app.models.application import Application
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
+from app.models.user_settings import UserSettings
 from tests.conftest import TEST_USER_ID
 
 API_PREFIX = "/api/v1/settings"
@@ -20,8 +21,39 @@ class TestGetSettings:
         assert body["apply_mode"] == "review"
         assert body["min_ats_score"] == 0.75
         assert body["max_parallel"] == 3
-        assert isinstance(body["platforms_enabled"], list)
-        assert "linkedin" in body["platforms_enabled"]
+        # Empty, not a fixed list — empty means "every genuinely usable source" (see
+        # UserSettings.platforms_enabled). A non-empty default would pin every new
+        # account to whatever this list said, permanently excluding sources added later.
+        assert body["platforms_enabled"] == []
+
+    async def test_malformed_stored_candidate_profile_does_not_500(self, client, db_session):
+        """Pins a real, live crash.
+
+        A stored ``candidate_profile`` with a non-string skill, a bare string in
+        place of an experience dict, and a bare string in place of the education
+        list raised an unhandled ``ValidationError`` straight out of this route —
+        confirmed live against a real account. One bad list item took the whole
+        settings response down instead of degrading gracefully.
+        """
+        db_session.add(
+            UserSettings(
+                user_id=TEST_USER_ID,
+                candidate_profile={
+                    "skills": [123, None, "python"],
+                    "experience": [{"duration_years": "two", "title": "Eng"}, "not a dict"],
+                    "education": "BSc Computer Science",
+                },
+            )
+        )
+        await db_session.commit()
+
+        response = await client.get(f"{API_PREFIX}/")
+
+        assert response.status_code == 200
+        profile = response.json()["candidate_profile"]
+        assert profile["skills"] == ["python"]
+        assert len(profile["experience"]) == 1
+        assert profile["education"] == []
 
 
 class TestUpdateSettings:
@@ -95,8 +127,9 @@ class TestListLLMProviders:
     async def test_an_unreachable_gateway_reports_no_providers_rather_than_five_fake_ones(
         self, client
     ):
-        import httpx
         from unittest.mock import patch
+
+        import httpx
 
         from app.core.llm.discovery import reset_cache
 
@@ -108,6 +141,95 @@ class TestListLLMProviders:
             reset_cache()
 
         assert body == []
+
+
+class TestBYOLLMKey:
+    """Tests for PUT/GET/DELETE /api/v1/settings/llm-key.
+
+    Pins a real, previously-missing feature: CredentialStore.put_llm_key/get_llm_key and
+    the consuming side (build_llm_client_for_user) were fully implemented, but no route
+    anywhere exposed the write path — "Bring your own key" is the product's own headline
+    landing-page claim, with real encrypted storage built for it and no way to reach it.
+    """
+
+    async def test_saving_a_key_makes_it_active_by_default(self, client):
+        response = await client.put(
+            f"{API_PREFIX}/llm-key",
+            json={"provider": "openai", "api_key": "sk-real-test-key", "default_model": "gpt-4o"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {
+            "provider": "openai", "has_key": True, "is_active": True, "default_model": "gpt-4o",
+        }
+
+    async def test_the_key_itself_never_reaches_any_response(self, client):
+        response = await client.put(
+            f"{API_PREFIX}/llm-key",
+            json={"provider": "anthropic", "api_key": "sk-ant-super-secret-value"},
+        )
+        assert "sk-ant-super-secret-value" not in response.text
+
+    async def test_saving_a_second_key_without_make_active_does_not_switch_providers(
+        self, client,
+    ):
+        await client.put(
+            f"{API_PREFIX}/llm-key", json={"provider": "openai", "api_key": "sk-first"},
+        )
+        response = await client.put(
+            f"{API_PREFIX}/llm-key",
+            json={"provider": "groq", "api_key": "gsk-second", "make_active": False},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "groq"
+        assert body["is_active"] is False
+
+    async def test_list_reports_stored_providers_without_leaking_keys(self, client):
+        await client.put(
+            f"{API_PREFIX}/llm-key", json={"provider": "openai", "api_key": "sk-abc"},
+        )
+        await client.put(
+            f"{API_PREFIX}/llm-key",
+            json={"provider": "groq", "api_key": "gsk-xyz", "make_active": False},
+        )
+        response = await client.get(f"{API_PREFIX}/llm-key")
+        assert response.status_code == 200
+        assert "sk-abc" not in response.text
+        assert "gsk-xyz" not in response.text
+        by_provider = {item["provider"]: item for item in response.json()}
+        assert by_provider["openai"]["has_key"] is True
+        assert by_provider["openai"]["is_active"] is True
+        assert by_provider["groq"]["is_active"] is False
+
+    async def test_a_saved_key_is_actually_usable_by_the_real_consumer(self, client, db_session):
+        """The end-to-end proof: what the apply pipeline's own build_llm_client_for_user
+        reads back out matches exactly what was saved through this route."""
+        from app.core.llm.factory import build_llm_client_for_user
+        from tests.conftest import TEST_USER_ID
+
+        await client.put(
+            f"{API_PREFIX}/llm-key",
+            json={"provider": "openai", "api_key": "sk-round-trip-proof", "default_model": "gpt-4o-mini"},
+        )
+        llm = await build_llm_client_for_user(db_session, TEST_USER_ID)
+        # No public accessor for this — asserting on the private attribute is the only way
+        # to prove the actual resolved credentials, not just that construction succeeded.
+        creds = llm._credentials
+        assert creds is not None
+        assert creds.api_key == "sk-round-trip-proof"
+        assert creds.provider == "openai"
+        assert creds.default_model == "gpt-4o-mini"
+
+    async def test_delete_removes_the_key(self, client):
+        await client.put(
+            f"{API_PREFIX}/llm-key", json={"provider": "openai", "api_key": "sk-to-delete"},
+        )
+        delete_response = await client.delete(f"{API_PREFIX}/llm-key/openai")
+        assert delete_response.status_code == 204
+
+        listed = (await client.get(f"{API_PREFIX}/llm-key")).json()
+        assert not any(item["provider"] == "openai" for item in listed)
 
 
 class TestAutomationPolicyCatalogue:
@@ -313,6 +435,65 @@ class TestAIUsageIsRealTelemetry:
         assert (await anon_client.get(f"{API_PREFIX}/ai/usage")).status_code in (401, 403)
 
 
+class TestSponsorshipRegister:
+    """GET/POST /api/v1/settings/sponsorship-register/{status,refresh}."""
+
+    async def test_status_with_no_cached_file_is_honest_about_it(
+        self, client, monkeypatch, tmp_path
+    ):
+        from app.core.sponsorship import register
+
+        monkeypatch.setattr(register, "_META_PATH", tmp_path / "missing.meta.json")
+        body = (await client.get(f"{API_PREFIX}/sponsorship-register/status")).json()
+        assert body == {"fetched_at": None, "row_count": 0, "stale": True}
+
+    async def test_status_needs_authentication(self, anon_client):
+        resp = await anon_client.get(f"{API_PREFIX}/sponsorship-register/status")
+        assert resp.status_code in (401, 403)
+
+    async def test_refresh_reports_failure_without_a_500(self, client, monkeypatch):
+        """A failed download (network, or gov.uk changing its page layout) must not 500 —
+        a stale-but-present register is still useful, so the endpoint reports and moves on."""
+        from app.core.sponsorship import register
+
+        async def _boom(*, force: bool = False):
+            raise RuntimeError("Could not find the sponsor register CSV link")
+
+        monkeypatch.setattr(register, "refresh", _boom)
+        response = await client.post(f"{API_PREFIX}/sponsorship-register/refresh")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["refreshed"] is False
+        assert "Could not find" in body["error"]
+
+    async def test_refresh_reports_success(self, client, monkeypatch):
+        from datetime import UTC, datetime
+
+        from app.core.sponsorship import register
+
+        async def _fake_refresh(*, force: bool = False) -> int:
+            return 140000
+
+        monkeypatch.setattr(register, "refresh", _fake_refresh)
+        monkeypatch.setattr(
+            register,
+            "status",
+            lambda: {
+                "fetched_at": datetime.now(UTC).isoformat(),
+                "row_count": 140000,
+                "stale": False,
+            },
+        )
+        response = await client.post(f"{API_PREFIX}/sponsorship-register/refresh")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["refreshed"] is True
+        assert body["row_count"] == 140000
+        assert body["error"] is None
+
+
 class TestAICatalogueIsDiscovered:
     """The list this replaced was five hard-coded providers with model names the configured
     gateway does not offer."""
@@ -353,8 +534,9 @@ class TestAICatalogueIsDiscovered:
         assert combo["models"][0]["context_length"] == 128000
 
     async def test_an_unreachable_gateway_reports_the_reason(self, client, current_user):
-        import httpx
         from unittest.mock import patch
+
+        import httpx
 
         from app.core.llm.discovery import reset_cache
 
@@ -485,8 +667,8 @@ class TestPlatformManagement:
 
     async def test_a_blocked_portal_reports_the_reason_rather_than_a_blank(self, client):
         body = (await client.get(f"{API_PREFIX}/platforms")).json()
-        trac = next(p for p in body["platforms"] if p["key"] == "tracjobs")
-        assert trac["last_error"] and "403" in trac["last_error"]
+        civilservice = next(p for p in body["platforms"] if p["key"] == "civilservice")
+        assert civilservice["last_error"] and "verification gate" in civilservice["last_error"]
 
     async def test_nothing_is_connected_for_a_user_with_no_sessions(self, client):
         body = (await client.get(f"{API_PREFIX}/platforms")).json()

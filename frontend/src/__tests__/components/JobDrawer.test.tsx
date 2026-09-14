@@ -60,6 +60,23 @@ describe('JobDrawer as the decision centre', () => {
     expect(screen.getByText(/£75,000 - £95,000/)).toBeInTheDocument();
   });
 
+  it('shows the sponsor status, distinguishing confirmed from merely likely', () => {
+    renderDrawer({
+      job: job({ sponsor_confidence: 'confirmed_register', sponsor_evidence: 'Zartis Ltd' }),
+    });
+    expect(screen.getByText('Sponsor confirmed')).toBeInTheDocument();
+  });
+
+  it('shows a distinct label when a posting explicitly states it will not sponsor', () => {
+    renderDrawer({ job: job({ sponsor_confidence: 'not_sponsor' }) });
+    expect(screen.getByText('Does not sponsor')).toBeInTheDocument();
+  });
+
+  it('says "unknown" rather than a false negative when there is no signal either way', () => {
+    renderDrawer({ job: job({ sponsor_confidence: 'unknown' }) });
+    expect(screen.getByText('Sponsorship unknown')).toBeInTheDocument();
+  });
+
   it('selects the CV here, against this job, rather than on another screen', () => {
     // The whole point of the job-first flow: opening a job establishes the context and the
     // CV is the variable. The opposite order is what this replaces.

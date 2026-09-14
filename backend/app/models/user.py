@@ -19,7 +19,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Soft-delete (D9): hidden immediately, purged after a grace period in Phase 4.
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email='{self.email}')>"

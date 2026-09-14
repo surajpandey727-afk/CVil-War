@@ -196,6 +196,32 @@ class TestMatchRules:
         assert evaluate(policy, ctx()).verdict is Verdict.ALLOW
 
 
+class TestExcludeNoSponsorship:
+    """Off by default; only fires on an explicit refusal (``not_sponsor``), never on the far
+    more common ``unknown`` (a posting that simply never mentions sponsorship)."""
+
+    def test_off_by_default_even_on_an_explicit_refusal(self) -> None:
+        decision = evaluate(AutomationPolicy(), ctx(sponsor_confidence="not_sponsor"))
+        assert decision.verdict is Verdict.ALLOW
+
+    def test_blocks_an_explicit_refusal_when_turned_on(self) -> None:
+        policy = AutomationPolicy(exclude_no_sponsorship=True)
+        decision = evaluate(policy, ctx(sponsor_confidence="not_sponsor"))
+        assert decision.verdict is Verdict.BLOCK
+
+    def test_never_fires_on_plain_unknown_even_when_turned_on(self) -> None:
+        """The posting that never mentions sponsorship at all — the common case — must never
+        be treated the same as one that explicitly refuses."""
+        policy = AutomationPolicy(exclude_no_sponsorship=True)
+        decision = evaluate(policy, ctx(sponsor_confidence="unknown"))
+        assert decision.verdict is Verdict.ALLOW
+
+    def test_confirmed_sponsor_is_unaffected_when_turned_on(self) -> None:
+        policy = AutomationPolicy(exclude_no_sponsorship=True)
+        decision = evaluate(policy, ctx(sponsor_confidence="confirmed_register"))
+        assert decision.verdict is Verdict.ALLOW
+
+
 class TestRunWindow:
     def test_an_overnight_window_is_not_read_as_an_empty_one(self) -> None:
         """22:00-04:00 wraps midnight. A naive ``start <= now < end`` makes it always false,
@@ -332,6 +358,22 @@ class TestStoredPolicyCompatibility:
         load the policy at all would leave the operator with no rules whatsoever."""
         policy = AutomationPolicy.model_validate({"max_per_day": 5, "not_a_clause_yet": 99})
         assert policy.max_per_day == 5
+
+    def test_malformed_stored_string_list_entries_are_dropped_not_fatal(self) -> None:
+        """Same crash class confirmed live for candidate_profile and role_targets: a
+        malformed entry in a stored list clause must degrade, not 500 the whole
+        settings response."""
+        policy = AutomationPolicy.model_validate(
+            {
+                "seniority": [123, None, "senior"],
+                "blocked_companies": "not a list",
+                "resume_rules": [{"title_pattern": "x"}, "not a dict", None],
+            }
+        )
+        assert policy.seniority == ["senior"]
+        assert policy.blocked_companies == []
+        assert len(policy.resume_rules) == 1
+        assert policy.resume_rules[0].title_pattern == "x"
 
 
 @pytest.mark.parametrize("rule", GATES, ids=lambda r: r.id)

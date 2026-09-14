@@ -30,7 +30,10 @@ from app.models.application import Application
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
 from app.models.resume import Resume
+from app.models.user_settings import UserSettings
 from app.schemas.resume import (
+    ExtractedProfileData,
+    ExtractProfileResponse,
     ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
@@ -163,7 +166,10 @@ async def upload_resume(
         template_id="modern",
         file_path_pdf=upload_key if file_ext == ".pdf" else None,
         file_path_docx=upload_key if file_ext == ".docx" else None,
-        content_text=parsed_text[:5000],
+        # Full extracted text, not a truncated prefix: a 5000-char cap silently dropped
+        # anything past ~1.5 pages, so every later score/tailor operation worked from a
+        # partial resume without any indication that content was missing.
+        content_text=parsed_text,
     )
     db.add(resume)
     await db.commit()
@@ -476,6 +482,19 @@ async def score_resume(
             suggestions=["Re-upload your resume to enable parsing"],
         )
 
+    # The candidate's structured work history/education — set up once in Settings, not
+    # re-derived from the resume file each time. Without this, experience_score and
+    # education_score were computed against permanently-empty lists (see the two bugs this
+    # replaces below): every résumé scored a flat 0.0 on experience and an arbitrary 0.2/1.0
+    # on education, regardless of which job or which résumé — the "multi-factor" score's other
+    # two factors, 50% of the total weight, were pure noise.
+    settings_row = (
+        await db.execute(select(UserSettings).where(UserSettings.user_id == resume.user_id))
+    ).scalar_one_or_none()
+    profile = (settings_row.candidate_profile or {}) if settings_row else {}
+    candidate_experience = _experience_entries_for_scoring(profile.get("experience") or [])
+    candidate_education = _education_entries_for_scoring(profile.get("education") or [])
+
     try:
         # Offload the synchronous, CPU-bound spaCy scoring to a thread so it never blocks the
         # event loop (the cached model in core.ats.nlp keeps the load cost one-time).
@@ -488,6 +507,8 @@ async def score_resume(
             resume_text,
             job_description,
             job,
+            candidate_experience,
+            candidate_education,
         )
     except Exception as exc:
         logger.warning(
@@ -499,12 +520,134 @@ async def score_resume(
         )
 
 
+def _parse_year(date_text: str) -> int | None:
+    """Best-effort 4-digit year out of a free-text date field ("Jan 2020", "2020-01")."""
+    match = re.search(r"(19|20)\d{2}", date_text or "")
+    return int(match.group(0)) if match else None
+
+
+def _experience_entries_for_scoring(raw: list[dict]) -> list[dict[str, object]]:
+    """Convert stored ``WorkExperienceSchema`` entries into what ExperienceAnalyzer expects.
+
+    ``duration_years`` is not stored directly — the schema records ``start_date``/``end_date``
+    as free text (whatever the operator typed) — so it is derived here from whichever 4-digit
+    year each field contains. An open-ended entry ("Present", blank) counts through the
+    current year rather than being dropped, since ongoing roles are exactly the ones that
+    should count most toward total experience.
+    """
+    entries: list[dict[str, object]] = []
+    current_year = datetime.now(UTC).year
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        start_year = _parse_year(str(item.get("start_date", "")))
+        if start_year is None:
+            continue  # no usable start date — cannot derive a duration for this entry
+        end_text = str(item.get("end_date", "")).strip().lower()
+        end_year = current_year if end_text in ("", "present", "current", "ongoing") else (
+            _parse_year(end_text) or current_year
+        )
+        entries.append({
+            "title": item.get("title", ""),
+            "company": item.get("company", ""),
+            "description": item.get("description", ""),
+            "responsibilities": item.get("responsibilities") or [],
+            "duration_years": max(0.0, end_year - start_year),
+        })
+    return entries
+
+
+def _education_entries_for_scoring(raw: list[dict]) -> list[dict[str, object]]:
+    """Convert stored ``EducationSchema`` entries into what ``_score_education`` expects."""
+    return [
+        {"degree": item.get("degree", ""), "institution": item.get("institution", "")}
+        for item in raw
+        if isinstance(item, dict)
+    ]
+
+
+async def extract_candidate_profile_from_resume(
+    db: AsyncSession, resume_id: str, user_id: str,
+) -> ExtractProfileResponse:
+    """Read one résumé's text with an LLM and fill in the account's work history/education.
+
+    Built because the ATS score's experience and education factors need real structured data
+    to score against, and nothing populated it — a résumé upload only ever extracted plain
+    text (see ``core.documents.parser``), so every score computed those two factors against a
+    permanently empty list until the operator hand-typed their entire career history into
+    Settings. This reads a résumé they already uploaded instead.
+
+    Never overwrites an existing profile: if ``candidate_profile.experience`` already has
+    entries, this is a no-op (``profile_updated=False``) — a second résumé should not silently
+    replace history the operator (or an earlier extraction) already established. Delete the
+    stored entries in Settings first to re-run this against a different résumé.
+    """
+    resume = await get_resume(db, resume_id)
+    resume_text = resume.content_text or ""
+    if not resume_text.strip():
+        return ExtractProfileResponse(
+            resume_id=resume_id, experience_found=0, education_found=0,
+            profile_updated=False, detail="Résumé has no parsed text content.",
+        )
+
+    settings_row = (
+        await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    ).scalar_one_or_none()
+    if settings_row is None:
+        settings_row = UserSettings(user_id=user_id)
+        db.add(settings_row)
+        await db.flush()
+
+    existing_profile = settings_row.candidate_profile or {}
+    if existing_profile.get("experience"):
+        return ExtractProfileResponse(
+            resume_id=resume_id,
+            experience_found=len(existing_profile["experience"]),
+            education_found=len(existing_profile.get("education") or []),
+            profile_updated=False,
+            detail="Candidate profile already has work history — left unchanged.",
+        )
+
+    from app.core.llm.prompts.profile_extract import (
+        PROFILE_EXTRACT_SYSTEM_PROMPT,
+        render_profile_extract_prompt,
+    )
+
+    llm = await build_llm_client_for_user(db, user_id)
+    extracted = await llm.complete_with_structured_output(
+        prompt=render_profile_extract_prompt(resume_text),
+        output_schema=ExtractedProfileData,
+        system_prompt=PROFILE_EXTRACT_SYSTEM_PROMPT,
+        purpose="profile_extract",
+    )
+
+    settings_row.candidate_profile = {
+        **existing_profile,
+        "experience": [e.model_dump() for e in extracted.experience],
+        "education": [e.model_dump() for e in extracted.education],
+    }
+    await db.commit()
+    logger.info(
+        "profile_extracted_from_resume", resume_id=resume_id, user_id=user_id,
+        experience_found=len(extracted.experience), education_found=len(extracted.education),
+    )
+    return ExtractProfileResponse(
+        resume_id=resume_id,
+        experience_found=len(extracted.experience),
+        education_found=len(extracted.education),
+        profile_updated=True,
+        detail="Candidate profile updated from this résumé.",
+    )
+
+
 def _score_with_full_engine(
     resume_id: str,
     job_id: str,
     resume_text: str,
     job_description: str,
     job: Job,
+    candidate_experience: list[dict[str, object]],
+    candidate_education: list[dict[str, object]],
 ) -> ResumeScoreResponse:
     """Score using the full ResumeScorer with spaCy."""
     from app.core.ats.experience_analyzer import ExperienceAnalyzer
@@ -519,12 +662,14 @@ def _score_with_full_engine(
     experience_analyzer = ExperienceAnalyzer(nlp)
     scorer = ResumeScorer(skill_matcher, keyword_analyzer, experience_analyzer)
 
-    # Build candidate profile from resume text
+    # Build candidate profile from resume text plus the operator's own structured profile
+    # (Settings > Candidate profile) for the two dimensions a resume file alone cannot supply
+    # reliable structured data for.
     candidate_skills = sorted(skill_matcher.extract_skills(resume_text))
     candidate_profile = {
         "skills": candidate_skills,
-        "experience": [],
-        "education": [],
+        "experience": candidate_experience,
+        "education": candidate_education,
     }
 
     # Build job metadata from the Job model

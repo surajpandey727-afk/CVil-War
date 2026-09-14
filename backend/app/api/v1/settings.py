@@ -2,20 +2,30 @@
 
 import structlog
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_tenant_db
 from app.config.settings import get_settings as get_app_settings
 from app.core.policy import POLICY_VERSION, RULES, TAG_TITLES, AutomationPolicy, evaluate
+from app.core.secrets import CredentialStore
 from app.models.application import Application
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
+from app.models.user_credential import UserCredential
+from app.models.user_llm_config import UserLLMConfig
 from app.models.user_settings import UserSettings
 from app.schemas.ai_settings import AICatalogue, AIUsageReport
-from app.schemas.platforms import PlatformsResponse
+from app.schemas.platforms import (
+    PlatformBulkUpdate,
+    PlatformsResponse,
+    PlatformTestRequest,
+    PlatformTestResponse,
+)
 from app.schemas.settings import (
+    BYOLLMKeyStatus,
+    BYOLLMKeyUpdate,
     LLMProviderStatus,
     PolicyCatalogue,
     PolicyControl,
@@ -25,6 +35,8 @@ from app.schemas.settings import (
     PolicyRuleInfo,
     SettingsResponse,
     SettingsUpdate,
+    SponsorshipRegisterRefreshResult,
+    SponsorshipRegisterStatus,
 )
 from app.services import platforms as platform_service
 from app.services.ai_settings import build_catalogue, build_usage
@@ -281,3 +293,192 @@ async def list_llm_providers() -> list[LLMProviderStatus]:
         )
         for provider in catalogue.providers
     ]
+
+
+@router.put(
+    "/llm-key",
+    response_model=BYOLLMKeyStatus,
+    summary="Save a BYO LLM provider API key",
+)
+async def save_llm_key(
+    body: BYOLLMKeyUpdate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> BYOLLMKeyStatus:
+    """Encrypt and store the key; the value itself is never returned by any endpoint.
+
+    ``build_llm_client_for_user`` (the actual consumer, in ``core.llm.factory``) already
+    reads exactly this storage — the missing piece was a way for the operator to write to
+    it at all. Every generation path (résumé tailoring, cover letters, fit analysis) was
+    already wired to a feature the product's own landing page advertises as a headline
+    capability, but which had no route and no UI.
+    """
+    await CredentialStore().put_llm_key(db, user.id, body.provider, body.api_key)
+
+    config = (
+        await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == user.id))
+    ).scalar_one_or_none()
+    if config is None:
+        config = UserLLMConfig(user_id=user.id)
+        db.add(config)
+    if body.make_active:
+        config.preferred_provider = body.provider
+        if body.default_model:
+            config.default_model = body.default_model
+    await db.commit()
+    await db.refresh(config)
+
+    return BYOLLMKeyStatus(
+        provider=body.provider,
+        has_key=True,
+        is_active=config.preferred_provider == body.provider,
+        default_model=config.default_model if config.preferred_provider == body.provider else None,
+    )
+
+
+@router.get(
+    "/llm-key",
+    response_model=list[BYOLLMKeyStatus],
+    summary="List which providers have a BYO key stored",
+)
+async def list_llm_keys(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> list[BYOLLMKeyStatus]:
+    """Never returns a key value — only whether one exists, per provider."""
+    config = (
+        await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == user.id))
+    ).scalar_one_or_none()
+    rows = (
+        await db.execute(
+            select(UserCredential.provider).where(
+                UserCredential.user_id == user.id, UserCredential.kind == "llm_key",
+            )
+        )
+    ).scalars().all()
+    results = []
+    for provider in rows:
+        is_active = bool(config and config.preferred_provider == provider)
+        results.append(
+            BYOLLMKeyStatus(
+                provider=provider,
+                has_key=True,
+                is_active=is_active,
+                default_model=config.default_model if is_active and config else None,
+            )
+        )
+    return results
+
+
+@router.delete(
+    "/llm-key/{provider}",
+    status_code=204,
+    summary="Remove a stored BYO LLM provider key",
+)
+async def delete_llm_key(
+    provider: str,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> None:
+    await db.execute(
+        delete(UserCredential).where(
+            UserCredential.user_id == user.id,
+            UserCredential.kind == "llm_key",
+            UserCredential.provider == provider,
+        )
+    )
+    await db.commit()
+
+
+@router.post(
+    "/platforms/test",
+    response_model=PlatformTestResponse,
+    summary="Probe sources for real and report what actually answered",
+)
+async def test_platforms(
+    request: PlatformTestRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> PlatformTestResponse:
+    """Run every selected adapter's live health check and return the results.
+
+    The Settings screen rendered a "Test" control that no endpoint served, so an operator
+    looking at fifty-five catalogued sources had no way to establish that any of them worked —
+    "Settings shows them but nothing works, how can I verify?" was the entirely reasonable
+    conclusion. Each result here is a request made moments ago, carrying the upstream's own
+    words on failure rather than a generic message.
+
+    An empty ``keys`` list probes everything with a working adapter.
+    """
+    return await platform_service.test_platforms(db, user.id, request.keys or None)
+
+
+@router.put(
+    "/platforms/bulk",
+    response_model=PlatformsResponse,
+    summary="Enable or disable many sources at once",
+)
+async def bulk_update_platforms(
+    update: PlatformBulkUpdate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> PlatformsResponse:
+    """Switch a set of sources on or off in one write.
+
+    Toggling fifty-five sources one request at a time is the kind of thing software should do
+    for you. Applied as a single update so a partial failure cannot leave the selection half
+    applied, and the refreshed platform list comes back so the screen needs no second call.
+    """
+    settings = await _get_or_create_settings(db, user.id)
+    current = set(settings.platforms_enabled or [])
+    requested = {k.strip().lower() for k in update.keys if k.strip()}
+
+    settings.platforms_enabled = sorted(
+        current | requested if update.enabled else current - requested
+    )
+    await db.commit()
+    logger.info(
+        "platforms_bulk_updated",
+        user_id=user.id, count=len(requested), enabled=update.enabled,
+    )
+    return await platform_service.list_platforms(db, user.id)
+
+
+@router.get(
+    "/sponsorship-register/status",
+    response_model=SponsorshipRegisterStatus,
+    summary="Cached status of the UK sponsor register",
+)
+async def sponsorship_register_status(user: CurrentUser) -> SponsorshipRegisterStatus:
+    """Last refresh time and row count of the cached register. Never triggers a download —
+    use the refresh endpoint for that. ``stale`` reflects the same 7-day window the weekly
+    background refresh (``workers.tasks.refresh_sponsor_register``) is meant to keep ahead of."""
+    from app.core.sponsorship import register
+
+    return SponsorshipRegisterStatus(**register.status())
+
+
+@router.post(
+    "/sponsorship-register/refresh",
+    response_model=SponsorshipRegisterRefreshResult,
+    summary="Download the current UK sponsor register",
+)
+async def sponsorship_register_refresh(
+    user: CurrentUser, force: bool = False
+) -> SponsorshipRegisterRefreshResult:
+    """Manually trigger a download, e.g. right after setup or if the weekly cron missed a run.
+
+    Failure (network, or the gov.uk page layout changing) is reported in the response rather
+    than raised as a 500 — a stale-but-present register is still useful, so this never wipes
+    a working cache on a failed attempt.
+    """
+    from app.core.sponsorship import register
+
+    try:
+        await register.refresh(force=force)
+    except Exception as exc:
+        logger.warning("sponsorship_register.refresh_failed", error=str(exc))
+        return SponsorshipRegisterRefreshResult(
+            **register.status(), refreshed=False, error=str(exc)
+        )
+    return SponsorshipRegisterRefreshResult(**register.status(), refreshed=True)

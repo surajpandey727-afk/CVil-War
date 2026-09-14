@@ -25,7 +25,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Bumped when a stored policy needs migrating rather than merely defaulting.
 POLICY_VERSION = 1
@@ -148,6 +148,13 @@ class AutomationPolicy(BaseModel):
     require_review_above_salary_k: int = Field(default=120, ge=0, le=1000)
     review_first_run_per_source: bool = True
     pause_on_captcha: bool = True
+    #: The browser window is visible while the agent works, not headless — so you can watch
+    #: an application happen in real time instead of only ever seeing its result afterwards.
+    run_headed: bool = True
+    #: The agent fills the form, then stops and waits for your explicit go-ahead before
+    #: clicking the final submit control. Off means it submits the moment it decides the form
+    #: is complete, with no human in that last step.
+    require_submission_confirmation: bool = True
 
     # -- §5 match and eligibility -------------------------------------------------------
     #: 0-1, mirroring ``UserSettings.min_ats_score``. Below this, never auto-applied.
@@ -156,8 +163,18 @@ class AutomationPolicy(BaseModel):
     min_salary_k: int = Field(default=0, ge=0, le=1000)
     #: Empty means any seniority.
     seniority: list[str] = Field(default_factory=list)
+    #: Job.job_type values excluded from search results outright (not just from auto-apply) —
+    #: see services.job_search.list_jobs. Matched case-insensitively against the raw string a
+    #: board supplied, since employment type is free text, not a closed enum, across sources.
+    exclude_employment_types: list[str] = Field(
+        default_factory=lambda: ["contract", "part-time", "part_time", "internship"]
+    )
     #: Employers never applied to, matched case-insensitively on the company name.
     blocked_companies: list[str] = Field(default_factory=list)
+    #: Off by default. When on, a posting whose own text explicitly states it does not sponsor
+    #: a visa (``SponsorConfidence.NOT_SPONSOR``) is blocked outright rather than merely ranked
+    #: lower. Never fires on a posting that simply doesn't mention sponsorship either way.
+    exclude_no_sponsorship: bool = False
 
     # -- §2 volume and rate -------------------------------------------------------------
     max_per_day: int = Field(default=20, ge=0, le=200)
@@ -194,6 +211,29 @@ class AutomationPolicy(BaseModel):
     #: Source keys the operator has enabled. Empty means "every implemented source".
     enabled_sources: list[str] = Field(default_factory=list)
 
+    @field_validator(
+        "seniority", "exclude_employment_types", "blocked_companies", "enabled_sources",
+        mode="before",
+    )
+    @classmethod
+    def _drop_non_string_entries(cls, v: object) -> list[object]:
+        """Degrade, don't 500 — same tolerance as ``CandidateProfileSchema``.
+
+        This is stored JSON like any other operator setting; a malformed entry here
+        would raise the same unhandled ``ValidationError`` out of ``GET /settings/``
+        already confirmed live for the candidate profile and role-target lists.
+        """
+        if not isinstance(v, list):
+            return []
+        return [s for s in v if isinstance(s, str)]
+
+    @field_validator("resume_rules", mode="before")
+    @classmethod
+    def _drop_non_dict_resume_rules(cls, v: object) -> list[object]:
+        if not isinstance(v, list):
+            return []
+        return [r for r in v if isinstance(r, dict)]
+
 
 class PolicyContext(BaseModel):
     """Everything a rule may consult about one candidate submission.
@@ -219,6 +259,10 @@ class PolicyContext(BaseModel):
 
     #: 0-1. ``None`` means scoring did not run or could not run — not "scored zero".
     ats_score: float | None = None
+    #: The raw ``SponsorConfidence`` string value (e.g. ``"not_sponsor"``), or ``""`` when
+    #: unknown/unclassified. Kept as a plain string, not the enum, so this module stays free
+    #: of any import beyond Pydantic.
+    sponsor_confidence: str = ""
 
     # Facts about the operator's recent behaviour, counted over the tenant's own rows.
     submitted_today: int = 0

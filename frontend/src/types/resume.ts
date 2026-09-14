@@ -58,6 +58,16 @@ export interface ResumeDeleteResponse {
   detail: string;
 }
 
+/** What "fill in my profile from this résumé" found and did. */
+export interface ExtractProfileResponse {
+  resume_id: string;
+  experience_found: number;
+  education_found: number;
+  /** False when the profile already had work history and was left unchanged. */
+  profile_updated: boolean;
+  detail: string;
+}
+
 /** Response after uploading a resume file. */
 export interface ResumeUploadResponse {
   id: string;

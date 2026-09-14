@@ -32,10 +32,17 @@ class UserSettings(TimestampMixin, Base):
     preferred_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="openai")
 
     # Platform config
+    # Empty means "every genuinely usable source" — see SourcesPage.tsx and
+    # discovery_scheduler.py, which both already carry this convention. A non-empty default
+    # here would defeat it: a brand-new user would be pinned to whatever this list said
+    # forever (or until they visit Settings), even after better sources land. This was
+    # previously ["linkedin", "indeed", "glassdoor"] — two of which are a known-dead scraper
+    # (see SourceHealth.known_broken) — so every unconfigured account's background discovery
+    # ran against one working source while Reed, Adzuna, and 60+ other live adapters sat idle.
     platforms_enabled: Mapped[list[str]] = mapped_column(
         JSON,
         nullable=False,
-        default=lambda: ["linkedin", "indeed", "glassdoor"],
+        default=list,
     )
 
     # Candidate profile

@@ -52,6 +52,10 @@ env/
 !**/data/uploads/.gitkeep
 **/data/storage/*
 !**/data/storage/.gitkeep
+# Downloaded reference datasets (e.g. the ~11MB UK sponsor register CSV) — re-fetched by
+# core.sponsorship.register / the weekly refresh cron, never hand-authored, never small.
+**/data/reference/*
+!**/data/reference/.gitkeep
 
 # Never commit real secrets or credential material
 *.pem

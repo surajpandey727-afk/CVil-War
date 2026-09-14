@@ -8,11 +8,17 @@ export const authService = {
     return res.data;
   },
 
-  /** Log in via the OAuth2 password flow (form-encoded username/password). */
-  async login(email: string, password: string): Promise<TokenResponse> {
+  /** Log in via the OAuth2 password flow (form-encoded username/password).
+   *
+   *  `rememberMe` (default true) only changes whether the refresh cookie survives a browser
+   *  restart — see the backend's `_set_refresh_cookie`. Off signs the operator out the moment
+   *  they close the browser, on a shared or borrowed machine they'd rather not stay signed
+   *  into indefinitely. */
+  async login(email: string, password: string, rememberMe = true): Promise<TokenResponse> {
     const form = new URLSearchParams();
     form.append('username', email);
     form.append('password', password);
+    form.append('remember_me', String(rememberMe));
     const res = await api.post<TokenResponse>('/auth/login', form, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });

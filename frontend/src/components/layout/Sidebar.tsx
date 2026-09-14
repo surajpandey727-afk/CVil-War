@@ -20,9 +20,9 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'grid' },
   { to: '/jobs', label: 'Jobs', icon: 'briefcase' },
-  { to: '/run', label: 'Run console', icon: 'activity' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },
   { to: '/resumes', label: 'Résumés', icon: 'file' },
+  { to: '/communications', label: 'Communications', icon: 'mail' },
   { to: '/analytics', label: 'Insights', icon: 'chart' },
 ];
 
@@ -54,7 +54,11 @@ export default function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const expanded = !collapsed;
   const configNav = user?.is_superuser
-    ? [...CONFIG_NAV, { to: '/admin', label: 'System health', icon: 'shield' as const }]
+    ? [
+      ...CONFIG_NAV,
+      { to: '/admin', label: 'System health', icon: 'shield' as const },
+      { to: '/architecture', label: 'Architecture', icon: 'server' as const },
+    ]
     : CONFIG_NAV;
 
   const signOut = () => {
@@ -159,7 +163,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div style={{ borderTop: '1px solid var(--border)', padding: 12 }}>
         <button
-          onClick={() => navigate('/run')}
+          onClick={() => navigate('/applications')}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px',
             borderRadius: 'var(--r-md)', background: 'var(--surface)', border: '1px solid var(--border)',
@@ -173,7 +177,7 @@ export default function Sidebar() {
           {expanded && (
             <span style={{ flex: '1 1 auto', minWidth: 0 }}>
               <span style={{ display: 'block', font: '700 11.5px/1.2 var(--font)', color: 'var(--text)' }}>Agent active</span>
-              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>Open the run console</span>
+              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>View active applications</span>
             </span>
           )}
           {expanded && <span style={{ color: 'var(--text-4)', flex: '0 0 auto' }}><Icon name="chevR" size={15} /></span>}

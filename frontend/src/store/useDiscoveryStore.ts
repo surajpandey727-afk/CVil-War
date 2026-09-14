@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import { DEFAULT_ACTIVE_TITLES, type RoleFamily } from '@/lib/roleTargets';
-import { WORKING_SOURCE_KEYS } from '@/lib/sources';
 
 export type SortKey = 'match' | 'newest' | 'salary';
 export type PostedWithin = '24h' | '7d' | '30d' | 'any';
@@ -83,7 +82,10 @@ export const useDiscoveryStore = create<DiscoveryState>()(
     (set) => ({
       activeTitles: DEFAULT_ACTIVE_TITLES,
       activeFamilies: [],
-      enabledSources: WORKING_SOURCE_KEYS,
+      // Empty means "every source the registry reports". Seeding from the static catalogue
+      // is what hid the career-page sources: that file marks every `careers:*` entry
+      // not_implemented, which was false for nine of them.
+      enabledSources: [],
       filters: DEFAULT_FILTERS,
       selectedJobIds: [],
       location: 'London, UK',
@@ -107,6 +109,15 @@ export const useDiscoveryStore = create<DiscoveryState>()(
     }),
     {
       name: 'cvil-war-discovery',
+      // v2 clears a selection seeded from the stale static catalogue. Anyone who had it
+      // persisted was silently missing every career-page job — 28 of 55 London roles in the
+      // reference cache — with no way to tell from the screen.
+      version: 2,
+      migrate: (persisted: unknown, from: number) => {
+        const state = (persisted ?? {}) as Record<string, unknown>;
+        if (from < 2) state['enabledSources'] = [];
+        return state;
+      },
       partialize: (s) => ({
         activeTitles: s.activeTitles,
         activeFamilies: s.activeFamilies,

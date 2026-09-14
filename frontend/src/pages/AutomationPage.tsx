@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
+import AgentGraphView from '@/components/agents/AgentGraphView';
 import Icon from '@/components/ui/Icon';
 import { usePolicyCatalogue, usePolicyPreview, useSettings, useUpdateSettings } from '@/hooks/useSettings';
 import { useResumes } from '@/hooks/useResumes';
@@ -36,7 +38,14 @@ const HOURS = ['00:00', '06:00', '07:00', '08:00', '09:00', '10:00', '12:00', '1
  * wrong shape here: dragging the ATS threshold past 90 for a moment would otherwise be a
  * live rule change against a run already in flight.
  */
+type Tab = 'policy' | 'ops';
+
 export default function AutomationPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const tab: Tab = tabParam === 'ops' ? 'ops' : 'policy';
+  const setTab = (next: Tab) => setSearchParams(next === 'policy' ? {} : { tab: next });
+
   const notify = useAppStore((s) => s.showNotification);
   const { data: settings } = useSettings();
   const { data: catalogue, isLoading, isError, refetch } = usePolicyCatalogue();
@@ -96,6 +105,28 @@ export default function AutomationPage() {
   const updateRule = (i: number, p: Partial<ResumeRule>) =>
     setField('resume_rules', draft.resume_rules.map((r, n) => (n === i ? { ...r, ...p } : r)));
 
+  const tabBar = (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+      <TabButton active={tab === 'policy'} onClick={() => setTab('policy')}>Policy</TabButton>
+      <TabButton active={tab === 'ops'} onClick={() => setTab('ops')}>Agent ops</TabButton>
+    </div>
+  );
+
+  if (tab === 'ops') {
+    return (
+      <div style={{ animation: 'aaUp .4s var(--ease) both', maxWidth: 1000 }}>
+        <div style={{ marginBottom: 18 }}>
+          <h1 style={{ margin: 0, font: '800 24px/1.1 var(--font)', letterSpacing: '-.03em' }}>Automation</h1>
+          <p style={{ margin: '6px 0 0', font: '500 13px/1.4 var(--font)', color: 'var(--text-3)' }}>
+            The rules the agent runs under, and the agents that carry them out.
+          </p>
+        </div>
+        {tabBar}
+        <AgentGraphView />
+      </div>
+    );
+  }
+
   if (isLoading) {
     return <div style={{ ...card, color: 'var(--text-3)', font: '500 13px/1.4 var(--font)' }}>Loading the automation policy…</div>;
   }
@@ -151,6 +182,8 @@ export default function AutomationPage() {
           {update.isPending ? 'Saving…' : dirty ? 'Save policy' : 'Saved'}
         </button>
       </div>
+
+      {tabBar}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <section
@@ -569,6 +602,24 @@ function Badge({ tone, children }: { tone: string; children: React.ReactNode }) 
     }}>
       {children}
     </span>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        height: 34, padding: '0 14px', borderRadius: 'var(--r-md)',
+        border: `1px solid ${active ? 'var(--accent-line)' : 'var(--border)'}`,
+        background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
+        color: active ? 'var(--accent)' : 'var(--text-3)', font: '700 12.5px/1 var(--font)', cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

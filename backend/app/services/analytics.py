@@ -11,10 +11,12 @@ from sqlalchemy import String as SAString
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.sponsorship import register as sponsor_register
 from app.models.application import Application
-from app.models.enums import ApplicationStatus
+from app.models.enums import ApplicationStatus, ResumeType, SponsorConfidence
 from app.models.job import Job
 from app.models.llm_usage import LLMUsage
+from app.models.resume import Resume
 from app.schemas.analytics import (
     ApplicationFunnelData,
     ATSScoreDistribution,
@@ -98,6 +100,48 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
     )
     total_llm_cost = llm_cost_result.scalar() or 0.0
 
+    # Local midnight, not a rolling 24h window — "today" on a dashboard means the
+    # calendar day, matching how an operator reads "jobs found today" at a glance.
+    today_start = datetime.now(UTC).replace(
+        hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
+    )
+    jobs_found_today = (
+        await db.execute(
+            select(func.count(Job.id)).where(Job.created_at >= today_start)
+        )
+    ).scalar() or 0
+
+    # A job with no canonical_job_id is its own canonical representative — one row is
+    # one distinct vacancy — so COALESCE onto its own id before counting DISTINCT.
+    unique_jobs = (
+        await db.execute(
+            select(func.count(func.distinct(func.coalesce(Job.canonical_job_id, Job.id))))
+        )
+    ).scalar() or 0
+
+    jobs_by_source_rows = (
+        await db.execute(select(Job.platform, func.count(Job.id)).group_by(Job.platform))
+    ).all()
+    jobs_by_source = {platform: count for platform, count in jobs_by_source_rows}
+
+    sponsor_confirmed = (
+        await db.execute(
+            select(func.count(Job.id)).where(
+                Job.sponsor_confidence == SponsorConfidence.CONFIRMED_REGISTER,
+            )
+        )
+    ).scalar() or 0
+
+    cvs_generated = (
+        await db.execute(
+            select(func.count(Resume.id)).where(
+                Resume.type.in_([ResumeType.TAILORED, ResumeType.OPTIMIZED]),
+            )
+        )
+    ).scalar() or 0
+
+    sponsor_register_status = sponsor_register.status()
+
     return DashboardStats(
         total_jobs_found=total_jobs,
         total_applications=total_apps,
@@ -113,6 +157,12 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
         submitted_this_week=submitted_week,
         avg_ats_score=round(float(avg_ats), 3),
         total_llm_cost_usd=round(float(total_llm_cost), 4),
+        jobs_found_today=jobs_found_today,
+        unique_jobs=unique_jobs,
+        jobs_by_source=jobs_by_source,
+        sponsor_confirmed_jobs=sponsor_confirmed,
+        cvs_generated=cvs_generated,
+        sponsor_register_last_refreshed=sponsor_register_status["fetched_at"],
     )
 
 

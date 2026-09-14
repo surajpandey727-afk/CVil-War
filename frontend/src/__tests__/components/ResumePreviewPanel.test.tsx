@@ -17,7 +17,7 @@ const jobs: Job[] = [{
   id: 'j1', platform: 'linkedin', platform_job_id: 'ln1', title: 'Senior PM', company: 'Northwind',
   location: 'Remote', url: 'https://x', description: '', salary_range: null, job_type: null,
   remote: true, posted_date: null, experience_level: null, match_score: 0.9, skills_required: null,
-  status: 'new', created_at: '', updated_at: '',
+  status: 'new', created_at: '', updated_at: '', sponsor_confidence: 'unknown', sponsor_evidence: null,
 }];
 
 const score: ResumeScoreResponse = {
@@ -29,6 +29,7 @@ const noop = () => {};
 const base = {
   resume: resume(), score: null as ResumeScoreResponse | null, scoring: false, jobs,
   targetJobId: '', onSelectJob: noop, onScore: noop, onDownload: (() => {}) as (f: 'pdf' | 'docx') => void,
+  onExtractProfile: noop, extractingProfile: false,
 };
 
 describe('ResumePreviewPanel', () => {
@@ -61,5 +62,15 @@ describe('ResumePreviewPanel', () => {
     render(<ResumePreviewPanel {...base} onDownload={onDownload} />);
     await userEvent.click(screen.getByRole('button', { name: /pdf/i }));
     expect(onDownload).toHaveBeenCalledWith('pdf');
+  });
+
+  it('fires onExtractProfile and disables the button while it runs', async () => {
+    const onExtractProfile = vi.fn();
+    const { rerender } = render(<ResumePreviewPanel {...base} onExtractProfile={onExtractProfile} />);
+    await userEvent.click(screen.getByRole('button', { name: /fill profile from this résumé/i }));
+    expect(onExtractProfile).toHaveBeenCalledOnce();
+
+    rerender(<ResumePreviewPanel {...base} onExtractProfile={onExtractProfile} extractingProfile />);
+    expect(screen.getByRole('button', { name: /reading résumé/i })).toBeDisabled();
   });
 });

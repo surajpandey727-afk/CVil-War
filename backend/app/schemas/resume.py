@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.settings import EducationSchema, WorkExperienceSchema
 
 
 class ResumeUploadResponse(BaseModel):
@@ -145,4 +147,45 @@ class ResumeDeleteResponse(BaseModel):
     deleted: bool
     archived: bool
     used_by: int = 0
+    detail: str = ""
+
+
+class ExtractedProfileData(BaseModel):
+    """The LLM's structured read of one résumé's work history and education.
+
+    Deliberately narrow — just the two fields ATS scoring actually needs (see
+    ``services.resume._experience_entries_for_scoring``) — not the full candidate profile.
+    Contact fields (email/phone/links) are left alone rather than extracted here: those
+    belong to the account itself, not to whichever résumé happened to be analyzed.
+
+    ``validation_alias`` on both fields tolerates the LLM's own natural synonyms for these
+    keys. Confirmed live on a real résumé: the model returned a completely correct,
+    detailed work history under the key ``work_experience`` instead of ``experience`` —
+    Pydantic doesn't error on an unrecognised top-level key, it just falls back to each
+    field's default, so the call "succeeded" while silently discarding a perfect answer and
+    reporting 0 roles found. This is the fix, not a prompt tweak alone — a prompt can ask an
+    LLM to use an exact key; it cannot guarantee it will.
+    """
+
+    experience: list[WorkExperienceSchema] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "experience", "work_experience", "employment", "work_history",
+        ),
+    )
+    education: list[EducationSchema] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("education", "education_history", "qualifications"),
+    )
+
+
+class ExtractProfileResponse(BaseModel):
+    """What extraction found and what it did with it."""
+
+    resume_id: str
+    experience_found: int
+    education_found: int
+    #: False when the profile already had entries and was left alone — see
+    #: ``services.resume.extract_candidate_profile_from_resume``'s overwrite guard.
+    profile_updated: bool
     detail: str = ""

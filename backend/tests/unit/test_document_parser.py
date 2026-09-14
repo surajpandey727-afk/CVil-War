@@ -208,7 +208,7 @@ class TestParseSyncEdgeCases:
         mock_reader = MagicMock()
         mock_reader.pages = [mock_page]
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("pypdf.PdfReader", return_value=mock_reader):
             with pytest.raises(ParseError, match="No text content"):
                 parser._parse_pdf_sync(pdf_file)
 
@@ -232,3 +232,177 @@ class TestParseSyncEdgeCases:
         with patch.object(parser, "_parse_pdf_sync", side_effect=RuntimeError("boom")):
             with pytest.raises(ParseError, match="boom"):
                 await parser.parse(pdf_file)
+
+
+# ---------------------------------------------------------------------------
+# DOCX tables and headers/footers (previously silently dropped — B: table-based
+# CV templates extracted to near-empty text because only doc.paragraphs was read)
+# ---------------------------------------------------------------------------
+
+
+def _mock_docx(paragraph_texts, table_rows=None, header_texts=None, footer_texts=None):
+    """Build a MagicMock standing in for a python-docx Document.
+
+    ``table_rows`` is a list of rows, each a list of cell text strings.
+    """
+    doc = MagicMock()
+    doc.paragraphs = [MagicMock(text=t) for t in paragraph_texts]
+
+    if table_rows:
+        row_mocks = []
+        for row in table_rows:
+            cell_mocks = [MagicMock(text=c) for c in row]
+            row_mocks.append(MagicMock(cells=cell_mocks))
+        doc.tables = [MagicMock(rows=row_mocks)]
+    else:
+        doc.tables = []
+
+    section = MagicMock()
+    section.header.paragraphs = [MagicMock(text=t) for t in (header_texts or [])]
+    section.footer.paragraphs = [MagicMock(text=t) for t in (footer_texts or [])]
+    doc.sections = [section]
+    return doc
+
+
+class TestDocxTablesAndHeaders:
+    def test_reads_table_cell_text(self, parser: DocumentParser, tmp_path: Path) -> None:
+        docx_file = tmp_path / "resume.docx"
+        docx_file.touch()
+        doc = _mock_docx(
+            paragraph_texts=["John Doe"],
+            table_rows=[["Python", "FastAPI"], ["Docker", "Kubernetes"]],
+        )
+        with patch("docx.Document", return_value=doc):
+            text = parser._parse_docx_sync(docx_file)
+
+        assert "John Doe" in text
+        assert "Python" in text
+        assert "Kubernetes" in text
+
+    def test_reads_header_and_footer_text(self, parser: DocumentParser, tmp_path: Path) -> None:
+        docx_file = tmp_path / "resume.docx"
+        docx_file.touch()
+        doc = _mock_docx(
+            paragraph_texts=["Body content"],
+            header_texts=["Jane Smith — CV"],
+            footer_texts=["Page 1 of 2"],
+        )
+        with patch("docx.Document", return_value=doc):
+            text = parser._parse_docx_sync(docx_file)
+
+        assert "Jane Smith" in text
+        assert "Page 1 of 2" in text
+
+    def test_table_only_resume_is_not_empty(self, parser: DocumentParser, tmp_path: Path) -> None:
+        """A two-column CV template with all content in a table used to extract to nothing
+        (only doc.paragraphs was read), which is what produced a near-zero ATS score."""
+        docx_file = tmp_path / "resume.docx"
+        docx_file.touch()
+        doc = _mock_docx(
+            paragraph_texts=[],
+            table_rows=[["Senior Data Scientist"], ["5 years Python, SQL, MLOps"]],
+        )
+        with patch("docx.Document", return_value=doc):
+            text = parser._parse_docx_sync(docx_file)
+
+        assert text.strip()
+        assert "Senior Data Scientist" in text
+
+    def test_docx_no_text_anywhere_raises_parse_error(
+        self, parser: DocumentParser, tmp_path: Path,
+    ) -> None:
+        docx_file = tmp_path / "empty.docx"
+        docx_file.touch()
+        doc = _mock_docx(paragraph_texts=[""])
+        with patch("docx.Document", return_value=doc):
+            with pytest.raises(ParseError, match="No text content"):
+                parser._parse_docx_sync(docx_file)
+
+
+# ---------------------------------------------------------------------------
+# PDF: pdfplumber primary, pypdf fallback
+# ---------------------------------------------------------------------------
+
+
+class TestPdfPlumberPrimary:
+    def test_uses_pdfplumber_text_when_available(
+        self, parser: DocumentParser, tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.touch()
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "pdfplumber extracted this real CV text"
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [mock_page]
+        mock_pdf.__enter__.return_value = mock_pdf
+        mock_pdf.__exit__.return_value = False
+
+        with patch("pdfplumber.open", return_value=mock_pdf) as mock_open, patch(
+            "pypdf.PdfReader"
+        ) as mock_pypdf:
+            text = parser._parse_pdf_sync(pdf_file)
+
+        mock_open.assert_called_once()
+        mock_pypdf.assert_not_called()  # pdfplumber succeeded — pypdf fallback unused
+        assert text == "pdfplumber extracted this real CV text"
+
+    def test_falls_back_to_pypdf_when_pdfplumber_yields_nothing(
+        self, parser: DocumentParser, tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.touch()
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = ""
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [mock_page]
+        mock_pdf.__enter__.return_value = mock_pdf
+        mock_pdf.__exit__.return_value = False
+
+        mock_pypdf_page = MagicMock()
+        mock_pypdf_page.extract_text.return_value = "pypdf fallback text"
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_pypdf_page]
+
+        with patch("pdfplumber.open", return_value=mock_pdf), patch(
+            "pypdf.PdfReader", return_value=mock_reader
+        ):
+            text = parser._parse_pdf_sync(pdf_file)
+
+        assert text == "pypdf fallback text"
+
+    def test_falls_back_to_pypdf_when_pdfplumber_raises(
+        self, parser: DocumentParser, tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "resume.pdf"
+        pdf_file.touch()
+
+        mock_pypdf_page = MagicMock()
+        mock_pypdf_page.extract_text.return_value = "pypdf fallback text"
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_pypdf_page]
+
+        with patch("pdfplumber.open", side_effect=RuntimeError("corrupt PDF")), patch(
+            "pypdf.PdfReader", return_value=mock_reader
+        ):
+            text = parser._parse_pdf_sync(pdf_file)
+
+        assert text == "pypdf fallback text"
+
+    def test_both_extractors_empty_raises_parse_error(
+        self, parser: DocumentParser, tmp_path: Path,
+    ) -> None:
+        pdf_file = tmp_path / "empty.pdf"
+        pdf_file.touch()
+
+        mock_pypdf_page = MagicMock()
+        mock_pypdf_page.extract_text.return_value = ""
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_pypdf_page]
+
+        with patch("pdfplumber.open", side_effect=RuntimeError("not a PDF")), patch(
+            "pypdf.PdfReader", return_value=mock_reader
+        ):
+            with pytest.raises(ParseError, match="No text content"):
+                parser._parse_pdf_sync(pdf_file)

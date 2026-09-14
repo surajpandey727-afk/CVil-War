@@ -31,6 +31,26 @@ export function isApprovable(status: string): boolean {
   return status === 'pending_review' || status === 'queued';
 }
 
+/** Mirrors the backend `SponsorConfidence` enum's tiers for display. */
+const DEFAULT_SPONSOR: StatusMeta = { label: 'Sponsorship unknown', color: 'var(--q)', soft: 'var(--q-soft)' };
+
+const SPONSOR: Record<string, StatusMeta> = {
+  confirmed_register: { label: 'Sponsor confirmed', color: 'var(--offer)', soft: 'var(--offer-soft)' },
+  keyword_detected: { label: 'Likely sponsor', color: 'var(--review)', soft: 'var(--review-soft)' },
+  likely: { label: 'Likely sponsor', color: 'var(--review)', soft: 'var(--review-soft)' },
+  unknown: DEFAULT_SPONSOR,
+  not_sponsor: { label: 'Does not sponsor', color: 'var(--rejected)', soft: 'var(--rejected-soft)' },
+};
+
+/**
+ * Present a job's `sponsor_confidence` for display. Never collapses "unknown" into a
+ * false negative — see `SponsorConfidence`'s own docstring on why `not_sponsor` and
+ * `unknown` are kept distinct.
+ */
+export function sponsorMeta(confidence: string | null | undefined): StatusMeta {
+  return SPONSOR[confidence ?? ''] ?? DEFAULT_SPONSOR;
+}
+
 /**
  * Scale a 0–1 ATS/match score (as the API returns it) to a 0–100 integer for display.
  * Use this everywhere a score is shown or passed to {@link atsColor} — the raw 0–1 value

@@ -114,6 +114,76 @@ class TestScoreResume:
         assert result.keyword_score == pytest.approx(0.75, abs=0.01)
 
 
+class TestCrashResilience:
+    """Regression tests for real crash paths found by feeding the scorer deliberately hostile
+    input — every case here 500'd the whole ATS-score request before being fixed. Candidate
+    profiles and job metadata are loosely-typed JSON columns, not validated schemas, by the
+    time they reach here, so a malformed stored value must degrade gracefully, not crash."""
+
+    def test_wholly_none_profile_and_metadata_do_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(None, None, None, None)  # type: ignore[arg-type]
+        assert 0.0 <= result.overall_score <= 1.0
+
+    def test_none_entries_in_required_skills_do_not_crash_and_are_not_suggested(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(
+            "resume", "job", {"skills": ["python"]},
+            {"required_skills": [None, "python"]},  # type: ignore[list-item]
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+        # A None is not a real skill name to tell the operator to add.
+        assert None not in result.missing_required_skills
+
+    def test_non_string_entries_in_candidate_skills_do_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(
+            "resume", "job", {"skills": [123, None, "python"]},  # type: ignore[list-item]
+            {"required_skills": ["python"]},
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+
+    def test_candidate_skills_explicitly_none_does_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        # A settings row can store `candidate_profile.skills: null` (key present, empty
+        # value) — `.get("skills", [])` only applies its default when the key is *absent*.
+        result = scorer.score_resume(
+            "resume", "job", {"skills": None}, {"required_skills": ["python"]},  # type: ignore[arg-type]
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+
+    def test_education_entry_that_is_not_a_dict_does_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(
+            "resume", "requires a bachelor degree",
+            {"education": ["BSc Computer Science"]},  # type: ignore[dict-item]
+            {},
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+
+    def test_education_degree_that_is_not_a_string_does_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(
+            "resume", "requires a bachelor degree",
+            {"education": [{"degree": 123}]}, {},  # type: ignore[dict-item]
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+
+    def test_education_explicitly_none_with_a_real_requirement_does_not_crash(
+        self, scorer: ResumeScorer,
+    ) -> None:
+        result = scorer.score_resume(
+            "resume", "requires a bachelor degree", {"education": None}, {},  # type: ignore[arg-type]
+        )
+        assert 0.0 <= result.overall_score <= 1.0
+
+
 class TestSuggestionsGenerated:
     def test_suggestions_when_missing_required_skills(
         self,

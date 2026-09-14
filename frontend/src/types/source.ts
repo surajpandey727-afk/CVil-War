@@ -1,6 +1,20 @@
-/** Job-source catalogue types. Corresponds to `backend/app/api/v1/sources.py`. */
+/** Job-source catalogue types. Corresponds to `backend/app/api/v1/sources.py`.
+ *
+ *  `SourceHealth` must mirror `app.core.job_discovery.source_registry.SourceHealth` exactly —
+ *  it previously listed only 4 of the backend's 7 values. `rate_limited`, `interactive_available`
+ *  and `unavailable` were missing, so any source in one of those states made `HEALTH_META[health]`
+ *  return `undefined` and crash `SourcesPage` outright the moment a source like Civil Service
+ *  Jobs (browser-only, `interactive_available`) reached the catalogue — the whole page failed to
+ *  render rather than just that one card. */
 
-export type SourceHealth = 'live' | 'degraded' | 'auth_required' | 'not_implemented';
+export type SourceHealth =
+  | 'live'
+  | 'degraded'
+  | 'auth_required'
+  | 'rate_limited'
+  | 'interactive_available'
+  | 'unavailable'
+  | 'not_implemented';
 
 export interface SourceRecord {
   key: string;

@@ -12,10 +12,7 @@ export interface TimelineStep {
   diag?: string;
 }
 
-const FAILED_DIAG =
-  "The application form changed mid-run; the agent couldn't locate the submit button. Safe to re-run.";
-
-export function buildAppTimeline(mode: string, status: string): TimelineStep[] {
+export function buildAppTimeline(mode: string, status: string, diagnosis?: string): TimelineStep[] {
   const defs = [
     { key: 'queued', label: 'Queued', desc: 'Added to the apply queue' },
     { key: 'pending_review', label: 'Pending review', desc: 'Waiting for your approval' },
@@ -76,7 +73,10 @@ export function buildAppTimeline(mode: string, status: string): TimelineStep[] {
     const step: TimelineStep = { key: s.key, label: s.label, desc: s.desc, state };
     if (state === 'failed') {
       step.desc = '';
-      step.diag = FAILED_DIAG;
+      // No fallback guess here: a wrong specific claim is worse than none. The caller
+      // passes the real diagnosis when it has one (see AppDetailPage); a caller without
+      // one — a list row, say — simply gets no callout rather than a fabricated cause.
+      if (diagnosis) step.diag = diagnosis;
     }
     steps.push(step);
   });

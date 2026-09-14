@@ -21,6 +21,8 @@ Do not strip that.
 
 from __future__ import annotations
 
+import asyncio
+import random
 import re
 from abc import abstractmethod
 from enum import StrEnum
@@ -57,6 +59,14 @@ class SourceUnavailableError(RuntimeError):
 
 REQUEST_TIMEOUT_S = 25.0
 USER_AGENT = "CVil-War/2.0 (job search aggregator; +https://github.com/)"
+
+#: Retries beyond the first attempt — 3 attempts total. A source-wide fan-out already runs
+#: dozens of these per search; more than a couple of retries per source turns one slow
+#: upstream into a slow search for every source behind it.
+MAX_FETCH_RETRIES = 2
+#: 429/503 are throttling, not a bug — see the docstring on `search()`. Any other HTTP
+#: status (401/403/404/...) is retried zero times: the request will not succeed on replay.
+_RETRYABLE_STATUS = {429, 503}
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
@@ -338,6 +348,40 @@ class ApiJobSource(JobPlatform):
 
     # -- Public entry point -----------------------------------------------------------
 
+    async def _fetch_with_retry(
+        self, client: httpx.AsyncClient, query: str, location: str, limit: int
+    ) -> list[dict[str, Any]]:
+        """Retry a transient failure with exponential backoff and jitter.
+
+        Only timeouts, connection errors, and 429/503 are retried — anything else (a bad
+        credential, a 404, a malformed request) will not succeed on replay, so it is raised
+        immediately for ``search()``'s existing handling to log and degrade to an empty
+        result. Retries are exhausted the same way: the final attempt's exception propagates
+        unchanged, so a source that is genuinely down still fails exactly as before, just
+        after giving a transient blip a real chance to clear first.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await self._fetch(client, query, location, limit)
+            except httpx.HTTPStatusError as exc:
+                retryable = exc.response.status_code in _RETRYABLE_STATUS
+                if not retryable or attempt >= MAX_FETCH_RETRIES:
+                    raise
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError):
+                if attempt >= MAX_FETCH_RETRIES:
+                    raise
+            attempt += 1
+            # Full jitter, capped: a thundering herd of sources retrying in lockstep after a
+            # shared blip (e.g. a flaky upstream network hop) would just recreate the spike
+            # that caused the failure.
+            delay = min(8.0, 0.5 * (2**attempt)) * random.uniform(0.5, 1.5)
+            logger.info(
+                "job_source.retrying", source=self.source_name, attempt=attempt,
+                delay_s=round(delay, 2),
+            )
+            await asyncio.sleep(delay)
+
     async def search(
         self,
         query: str,
@@ -357,7 +401,7 @@ class ApiJobSource(JobPlatform):
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
                 follow_redirects=True,
             ) as client:
-                records = await self._fetch(client, query, location, limit)
+                records = await self._fetch_with_retry(client, query, location, limit)
         except httpx.HTTPStatusError as exc:
             # 429/403 are throttling or a block, not a bug. Distinguished from a generic
             # failure so the operator can tell "we hit the free ceiling" from "this broke",

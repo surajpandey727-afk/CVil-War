@@ -7,9 +7,10 @@ import JobDrawer from '@/components/jobs/JobDrawer';
 import { useJobs, useSearchJobs } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
 import { useResumes } from '@/hooks/useResumes';
+import { useSources } from '@/hooks/useSources';
 import { useAppStore } from '@/store/useAppStore';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
-import { atsColor, atsPercent, relativeTime } from '@/lib/status';
+import { atsColor, atsPercent, relativeTime, sponsorMeta } from '@/lib/status';
 import { ROLE_FAMILIES, familyForTitle, queryForTitles, type RoleFamily } from '@/lib/roleTargets';
 import {
   HEALTH_META, SOURCE_BY_KEY, SOURCE_TIERS, sourceLabel, sourcesInTier,
@@ -48,6 +49,74 @@ function ageInDays(iso: string | null): number {
   return (Date.now() - t) / 86_400_000;
 }
 
+/**
+ * Which filter is hiding the jobs, and the button that undoes it.
+ *
+ * Built because "23 stored roles were filtered out" sent the operator hunting through eight
+ * controls to find which one was responsible — the honest answer was a remote-only toggle they
+ * had set days earlier and forgotten. Naming the control and offering to clear it turns a dead
+ * end into one click.
+ */
+function FilterCulprits({ rejected }: { rejected: Record<string, number> }) {
+  const { patchFilters, activeFamilies, toggleFamily, setSources } = useDiscoveryStore();
+
+  const LABELS: Record<string, { label: string; clear: () => void }> = {
+    remoteOnly: { label: 'Remote or hybrid only', clear: () => patchFilters({ remoteOnly: false }) },
+    minAtsScore: { label: 'Minimum ATS match', clear: () => patchFilters({ minAtsScore: 0 }) },
+    hideApplied: { label: 'Hide already applied', clear: () => patchFilters({ hideApplied: false }) },
+    postedWithin: { label: 'Posted within', clear: () => patchFilters({ postedWithin: 'any' }) },
+    publishedSalaryOnly: {
+      label: 'Published salary only', clear: () => patchFilters({ publishedSalaryOnly: false }),
+    },
+    minSalaryK: { label: 'Minimum salary', clear: () => patchFilters({ minSalaryK: 0 }) },
+    seniority: { label: 'Seniority', clear: () => patchFilters({ seniority: [] }) },
+    roleTargets: {
+      label: 'Role target chips',
+      clear: () => activeFamilies.forEach((f) => toggleFamily(f)),
+    },
+    sources: { label: 'Disabled sources', clear: () => setSources([]) },
+  };
+
+  // Worst offender first — that is almost always the one to clear.
+  const entries = Object.entries(rejected)
+    .filter(([key, count]) => count > 0 && LABELS[key])
+    .sort((a, b) => b[1] - a[1]);
+
+  if (!entries.length) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12, width: '100%', maxWidth: 460 }}>
+      {entries.map(([key, count]) => (
+        <div
+          key={key}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 11px',
+            borderRadius: 'var(--r-md)', background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <span style={{ flex: 1, textAlign: 'left', font: '600 12px/1.3 var(--font)', color: 'var(--text-2)' }}>
+            {LABELS[key]!.label}
+          </span>
+          <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--rejected)' }}>
+            {`−${count} hidden`}
+          </span>
+          <button
+            onClick={LABELS[key]!.clear}
+            style={{
+              height: 24, padding: '0 9px', borderRadius: 'var(--r-sm)', cursor: 'pointer',
+              font: '600 11px/1 var(--font)', border: '1px solid var(--accent-line)',
+              background: 'var(--accent-soft)', color: 'var(--accent)',
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function JobSearchPage() {
   const navigate = useNavigate();
   const notify = useAppStore((s) => s.showNotification);
@@ -68,6 +137,9 @@ export default function JobSearchPage() {
     query: appliedQuery,
   });
   const { data: resumeData } = useResumes();
+  // The authoritative list of what exists, from the backend registry rather than the static
+  // catalogue. Used only to decide whether a source is one the operator could have disabled.
+  const { catalogue: liveCatalogue } = useSources();
   const search = useSearchJobs();
   const createApps = useCreateApplicationBatch();
 
@@ -76,27 +148,62 @@ export default function JobSearchPage() {
 
   const resumes = useMemo(() => resumeData?.items ?? [], [resumeData]);
   const allJobs = useMemo(() => data?.items ?? [], [data]);
+  // An empty selection means "no restriction", not "exclude everything" — the operator has
+  // simply never narrowed the list.
+  const restrictSources = enabledSources.length > 0;
+  const knownKeys = useMemo(
+    () => new Set(liveCatalogue.tiers.flatMap((t) => t.sources.map((src) => src.key))),
+    [liveCatalogue],
+  );
 
   /** Client-side filtering. The backend returns the stored corpus; these are the operator's
-   *  standing preferences, applied to whatever is in it. */
-  const jobs = useMemo(() => {
+   *  standing preferences, applied to whatever is in it.
+   *
+   *  Alongside the surviving jobs this counts *which* control rejected each one. An empty
+   *  screen that says "23 roles were filtered out" and leaves you to guess which of eight
+   *  controls did it is barely better than showing nothing: the operator's actual question is
+   *  "what is hiding my jobs, and how do I undo it". Each job is charged to the first filter
+   *  that rejects it, so the counts sum to the number hidden rather than double-counting. */
+  const { jobs, rejected } = useMemo(() => {
     const maxAge = POSTED.find((p) => p.key === filters.postedWithin)?.days ?? 3650;
+    const rejected: Record<string, number> = {};
+    const reject = (key: string) => {
+      rejected[key] = (rejected[key] ?? 0) + 1;
+      return false;
+    };
     const out = allJobs.filter((j) => {
-      if (enabledSources.length && !enabledSources.includes(j.platform)) return false;
-      if (atsPercent(j.match_score) < filters.minAtsScore && j.match_score != null) return false;
-      if (filters.remoteOnly && !j.remote) return false;
-      if (filters.hideApplied && j.status !== 'new' && j.status !== 'discovered') return false;
+      // Only exclude a source the operator has actually switched off. A job whose source
+      // the frontend catalogue does not recognise must never be dropped silently: the static
+      // catalogue in lib/sources marks every `careers:*` entry not_implemented, which was
+      // false for nine of them and hid 28 of 55 London jobs. The live registry decides what
+      // exists; this filter only applies the operator's own choices on top of it.
+      if (restrictSources && knownKeys.has(j.platform) && !enabledSources.includes(j.platform)) {
+        return reject('sources');
+      }
+      if (atsPercent(j.match_score) < filters.minAtsScore && j.match_score != null) {
+        return reject('minAtsScore');
+      }
+      if (filters.remoteOnly && !j.remote) return reject('remoteOnly');
+      if (filters.hideApplied && j.status !== 'new' && j.status !== 'discovered') {
+        return reject('hideApplied');
+      }
       // A missing posted_date is unknown, not old: excluding it would silently drop every
       // source that does not publish one (Arbeitnow, several career pages).
-      if (j.posted_date && ageInDays(j.posted_date) > maxAge) return false;
+      if (j.posted_date && ageInDays(j.posted_date) > maxAge) return reject('postedWithin');
       const band = salaryK(j.salary_range);
-      if (filters.publishedSalaryOnly && band == null) return false;
-      if (filters.minSalaryK > 0 && band != null && band < filters.minSalaryK) return false;
+      if (filters.publishedSalaryOnly && band == null) return reject('publishedSalaryOnly');
+      if (filters.minSalaryK > 0 && band != null && band < filters.minSalaryK) {
+        return reject('minSalaryK');
+      }
       if (filters.seniority.length) {
         const level = (j.experience_level ?? '').toLowerCase();
-        if (!filters.seniority.some((s) => level.includes(s.toLowerCase()))) return false;
+        if (!filters.seniority.some((s) => level.includes(s.toLowerCase()))) {
+          return reject('seniority');
+        }
       }
-      if (activeFamilies.length && !activeFamilies.includes(familyForTitle(j.title))) return false;
+      if (activeFamilies.length && !activeFamilies.includes(familyForTitle(j.title))) {
+        return reject('roleTargets');
+      }
       return true;
     });
     out.sort((a, b) => {
@@ -104,8 +211,8 @@ export default function JobSearchPage() {
       if (filters.sort === 'newest') return ageInDays(a.posted_date) - ageInDays(b.posted_date);
       return (salaryK(b.salary_range) ?? 0) - (salaryK(a.salary_range) ?? 0);
     });
-    return out;
-  }, [allJobs, enabledSources, filters, activeFamilies]);
+    return { jobs: out, rejected };
+  }, [allJobs, enabledSources, restrictSources, knownKeys, filters, activeFamilies]);
 
   const selected = selectedJobIds.filter((id) => jobs.some((j) => j.id === id));
   const allSelected = jobs.length > 0 && selected.length === jobs.length;
@@ -147,7 +254,15 @@ export default function JobSearchPage() {
       notify('Add at least one role target, or type a search term', 'warning');
       return;
     }
-    const usable = enabledSources.filter((k) => SOURCE_BY_KEY[k]?.implemented);
+    // Empty means "every live source", the same convention this file already applies to
+    // filtering results (`restrictSources`, above) and that SourcesPage/platforms_enabled
+    // use for the background scheduler. Without this, a first-time visitor who has never
+    // touched the per-device source filter got a dead-end "none of the enabled sources
+    // have a working adapter yet" the moment they tried to search — discovery blocked
+    // entirely, not merely narrowed, on a screen whose only job is to search.
+    const usable = enabledSources.length > 0
+      ? enabledSources.filter((k) => SOURCE_BY_KEY[k]?.implemented)
+      : liveCatalogue.live_keys;
     if (!usable.length) {
       notify('None of the enabled sources have a working adapter yet', 'warning');
       return;
@@ -365,13 +480,14 @@ export default function JobSearchPage() {
                   location filter now runs on the server, so an empty list can mean "nothing
                   in London yet" — which is a prompt to search, not evidence of a broken app. */}
               {allJobs.length
-                ? `${allJobs.length} stored roles were filtered out. Lower the ATS threshold, widen seniority, or enable more sources.`
+                ? `${allJobs.length} stored roles are hidden by your filters. Each one below says how many it removed — clear it to get them back.`
                 : appliedLocation.trim() || appliedQuery.trim()
                   ? `No stored roles${appliedQuery.trim() ? ` matching “${appliedQuery.trim()}”` : ''}${appliedLocation.trim() ? ` in ${appliedLocation.trim()}` : ''}. Run the search to pull fresh ones from the enabled sources.`
                   : 'Run a search above to discover roles across the enabled sources.'}
             </span>
+            {allJobs.length > 0 && <FilterCulprits rejected={rejected} />}
             {allJobs.length > 0 && (
-              <button onClick={resetFilters} style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}>Reset filters</button>
+              <button onClick={resetFilters} style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}>Clear every filter</button>
             )}
           </div>
         ) : (
@@ -567,6 +683,17 @@ function JobRow({ job, selected, onToggle, onOpen, onApply }: {
                 {t}
               </span>
             ))}
+            {/* "Unknown" is the common case (most postings never mention sponsorship) and
+                would be pure noise repeated on every row — the drawer shows it explicitly
+                for anyone who opens the job. Here, only a genuine signal earns a badge. */}
+            {job.sponsor_confidence !== 'unknown' && (() => {
+              const sm = sponsorMeta(job.sponsor_confidence);
+              return (
+                <span title={job.sponsor_evidence ?? undefined} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: sm.soft, color: sm.color, font: '700 10.5px/1 var(--font)' }}>
+                  {sm.label}
+                </span>
+              );
+            })()}
             {job.posted_date && (
               <span style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
                 {relativeTime(job.posted_date)}

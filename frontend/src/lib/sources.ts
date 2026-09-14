@@ -10,7 +10,11 @@
  *  `domain` drives the logo lookup in `components/ui/CompanyLogo`.
  */
 
-export type SourceHealth = 'live' | 'degraded' | 'auth_required' | 'not_implemented';
+// Re-exported from types/source (the wire-format source of truth) rather than redeclared here —
+// two independent copies of this union is exactly how it drifted out of sync with the backend's
+// real values before and broke SourcesPage; see that file for the incident.
+export type { SourceHealth } from '@/types/source';
+import type { SourceHealth } from '@/types/source';
 
 export interface JobSource {
   key: string;
@@ -24,7 +28,7 @@ export interface JobSource {
   note?: string;
 }
 
-export type SourceTierId = 'tier1' | 'tier2' | 'tier3' | 'tier4' | 'tier5' | 'careers';
+export type SourceTierId = 'tier1' | 'tier2' | 'tier4' | 'tier5' | 'careers';
 
 export interface SourceTier {
   id: SourceTierId;
@@ -32,10 +36,15 @@ export interface SourceTier {
   note: string;
 }
 
+// No tier3: removed 2026-08-30 along with every source that was in it, matching the backend
+// registry (app.core.job_discovery.source_registry) exactly — see that file's SourceTier
+// docstring for why. Keeping the two catalogues in sync by hand is exactly the failure mode
+// that let this file drift as far as it had (missing sources the backend had shipped weeks
+// earlier); the real fix is `useSources()` reading the live endpoint, this file is only its
+// offline fallback.
 export const SOURCE_TIERS: SourceTier[] = [
   { id: 'tier1', name: 'Tier 1 — Must use', note: 'Highest volume for London AI/ML and product roles' },
   { id: 'tier2', name: 'Tier 2 — UK job boards', note: 'Consultancies, traditional business, contract' },
-  { id: 'tier3', name: 'Tier 3 — Government & public sector', note: 'Statistical Scientist, Operational Research, AI Specialist' },
   { id: 'tier4', name: 'Tier 4 — Tech & startup', note: 'AI-first companies and scale-ups' },
   { id: 'tier5', name: 'Tier 5 — Specialist recruiters', note: 'Registered agencies' },
   { id: 'careers', name: 'Company career pages', note: 'Monitored directly, checked hourly' },
@@ -66,32 +75,39 @@ export const SOURCES: JobSource[] = [
   s('remoteok', 'RemoteOK', 'remoteok.com', 'tier4', true, 'live'),
   s('exa', 'Exa semantic search', 'exa.ai', 'tier4', true, 'auth_required', 'Set EXA_API_KEY'),
 
-  s('reed', 'Reed', 'reed.co.uk', 'tier2', false, 'not_implemented', 'Needs a Reed API key'),
-  s('totaljobs', 'Totaljobs', 'totaljobs.com', 'tier2', false, 'not_implemented'),
-  s('cvlibrary', 'CV-Library', 'cv-library.co.uk', 'tier2', false, 'not_implemented'),
-  s('cwjobs', 'CWJobs', 'cwjobs.co.uk', 'tier2', false, 'not_implemented'),
-  s('jobsite', 'Jobsite', 'jobsite.co.uk', 'tier2', false, 'not_implemented'),
-  s('adzuna', 'Adzuna', 'adzuna.co.uk', 'tier2', false, 'not_implemented', 'Needs an Adzuna app id'),
-  s('jobserve', 'JobServe', 'jobserve.com', 'tier2', false, 'not_implemented'),
-  s('guardianjobs', 'The Guardian Jobs', 'jobs.theguardian.com', 'tier2', false, 'not_implemented'),
-
-  s('civilservice', 'Civil Service Jobs', 'civilservicejobs.service.gov.uk', 'tier3', false, 'not_implemented'),
-  s('findajob', 'Find a job — GOV.UK', 'gov.uk', 'tier3', false, 'not_implemented'),
-  s('nhsjobs', 'NHS Jobs', 'jobs.nhs.uk', 'tier3', false, 'not_implemented'),
-  s('ddat', 'Digital & Data Jobs', 'ddat.gov.uk', 'tier3', false, 'not_implemented'),
-
-  s('otta', 'Otta / Welcome to the Jungle', 'otta.com', 'tier4', false, 'not_implemented'),
-  s('hired', 'Hired', 'hired.com', 'tier4', false, 'not_implemented'),
-  s('builtin', 'Built In', 'builtin.com', 'tier4', false, 'not_implemented'),
-  s('technojobs', 'Technojobs', 'technojobs.co.uk', 'tier4', false, 'not_implemented'),
-
-  s('devsdata', 'DevsData LLC', 'devsdata.com', 'tier5', false, 'not_implemented'),
-  s('proactive', 'Proactive IT Appointments', 'proactive.uk.com', 'tier5', false, 'not_implemented'),
-  s('ashdown', 'Ashdown Group', 'ashdowngroup.com', 'tier5', false, 'not_implemented'),
-  s('datalogic', 'DataLogic', 'datalogic-recruitment.co.uk', 'tier5', false, 'not_implemented'),
+  s('reed', 'Reed', 'reed.co.uk', 'tier2', true, 'live', 'Live — API key configured'),
+  s('adzuna', 'Adzuna', 'adzuna.co.uk', 'tier2', true, 'live', 'Live — app id configured'),
+  s('movejobs', 'MoveJobs', 'movejobs.uk', 'tier2', true, 'live', 'Visa-sponsorship-framed UK board'),
+  s('tarve', 'Tarve', 'tarve.co.uk', 'tier2', true, 'live', 'Cross-checks the Home Office sponsor register'),
+  s(
+    'workinstartups', 'WorkInStartups', 'workinstartups.com', 'tier2', false, 'not_implemented',
+    'Cloudflare-protected — covered via the Adzuna source instead (same network)',
+  ),
+  s(
+    'findajob', 'Work Hub — GOV.UK', 'jobs.service.gov.uk', 'tier2', false, 'not_implemented',
+    "DWP's new jobseeker platform — reconnaissance pending",
+  ),
+  s(
+    'civilservice', 'Civil Service Jobs', 'civilservicejobs.service.gov.uk', 'tier2', false, 'auth_required',
+    'Bot-verification gate — connect in Settings, then discovery can be built',
+  ),
+  s(
+    'ukvisajobs', 'UK Visa Jobs', 'ukvisajobs.com', 'tier2', false, 'auth_required',
+    'Real catalogue is behind login — connect in Settings, then discovery can be built',
+  ),
+  // tier4/5 placeholder entries (Otta, Hired, Built In, Technojobs, DevsData, Proactive,
+  // Ashdown, DataLogic) were removed 2026-08-30 along with their backend registry
+  // counterparts — none had an adapter, a note, or any research behind them; they were
+  // exactly the kind of "unknown, never actually checked" entry this cleanup targeted.
 ];
 
-/** Employers whose career pages are polled directly. One `careers:<slug>` source each. */
+/** Employers whose career pages are polled directly. One `careers:<slug>` source each.
+ *
+ *  Mirrors `app.core.job_discovery.source_registry.CAREER_PAGES` exactly, including which
+ *  ones actually have a working adapter (`sources.ats.COMPANY_BOARDS`) versus which were
+ *  probed and genuinely have no public board (`sources.ats.NO_PUBLIC_BOARD`) — see that
+ *  file's 2026-08-30 comment for how each token was live-verified, not guessed.
+ */
 export const CAREER_PAGES: { slug: string; label: string; domain: string }[] = [
   { slug: 'deepmind', label: 'DeepMind', domain: 'deepmind.google' },
   { slug: 'anthropic', label: 'Anthropic', domain: 'anthropic.com' },
@@ -118,10 +134,65 @@ export const CAREER_PAGES: { slug: string; label: string; domain: string }[] = [
   { slug: 'expedia', label: 'Expedia', domain: 'expedia.com' },
   { slug: 'trainline', label: 'Trainline', domain: 'thetrainline.com' },
   { slug: 'king', label: 'King', domain: 'king.com' },
+
+  { slug: 'quantexa', label: 'Quantexa', domain: 'quantexa.com' },
+  { slug: 'synthesia', label: 'Synthesia', domain: 'synthesia.io' },
+  { slug: 'speechmatics', label: 'Speechmatics', domain: 'speechmatics.com' },
+  { slug: 'faculty', label: 'Faculty AI', domain: 'faculty.ai' },
+  { slug: 'tractable', label: 'Tractable', domain: 'tractable.ai' },
+  { slug: 'graphcore', label: 'Graphcore', domain: 'graphcore.ai' },
+  { slug: 'improbable', label: 'Improbable', domain: 'improbable.io' },
+  { slug: 'gocardless', label: 'GoCardless', domain: 'gocardless.com' },
+  { slug: 'zopa', label: 'Zopa', domain: 'zopa.com' },
+  { slug: 'truelayer', label: 'TrueLayer', domain: 'truelayer.com' },
+  { slug: 'clearbank', label: 'ClearBank', domain: 'clearbank.co.uk' },
+  { slug: 'marshmallow', label: 'Marshmallow', domain: 'marshmallow.com' },
+  { slug: 'cleo', label: 'Cleo', domain: 'cleo.com' },
+  { slug: 'snowflake', label: 'Snowflake', domain: 'snowflake.com' },
+  { slug: 'databricks', label: 'Databricks', domain: 'databricks.com' },
+  { slug: 'datadog', label: 'Datadog', domain: 'datadoghq.com' },
+  { slug: 'fivetran', label: 'Fivetran', domain: 'fivetran.com' },
+  { slug: 'similarweb', label: 'Similarweb', domain: 'similarweb.com' },
+  { slug: 'contentsquare', label: 'Contentsquare', domain: 'contentsquare.com' },
+  { slug: 'alphasense', label: 'AlphaSense', domain: 'alpha-sense.com' },
+  { slug: 'stripe', label: 'Stripe', domain: 'stripe.com' },
+  { slug: 'notion', label: 'Notion', domain: 'notion.so' },
+  { slug: 'figma', label: 'Figma', domain: 'figma.com' },
+  { slug: 'canva', label: 'Canva', domain: 'canva.com' },
+  { slug: 'airtable', label: 'Airtable', domain: 'airtable.com' },
+  { slug: 'asana', label: 'Asana', domain: 'asana.com' },
+  { slug: 'miro', label: 'Miro', domain: 'miro.com' },
+  { slug: 'linear', label: 'Linear', domain: 'linear.app' },
+  { slug: 'vercel', label: 'Vercel', domain: 'vercel.com' },
+  { slug: 'gitlab', label: 'GitLab', domain: 'gitlab.com' },
+  { slug: 'thoughtworks', label: 'Thoughtworks', domain: 'thoughtworks.com' },
+  { slug: 'cohere', label: 'Cohere', domain: 'cohere.com' },
+  { slug: 'stabilityai', label: 'Stability AI', domain: 'stability.ai' },
+  { slug: 'elevenlabs', label: 'ElevenLabs', domain: 'elevenlabs.io' },
+  { slug: 'runwayml', label: 'Runway', domain: 'runwayml.com' },
+  { slug: 'perplexity', label: 'Perplexity', domain: 'perplexity.ai' },
+  { slug: 'scale', label: 'Scale AI', domain: 'scale.com' },
+  { slug: 'together', label: 'Together AI', domain: 'together.ai' },
+  { slug: 'harvey', label: 'Harvey', domain: 'harvey.ai' },
+  { slug: 'glean', label: 'Glean', domain: 'glean.com' },
+  { slug: 'ramp', label: 'Ramp', domain: 'ramp.com' },
+  { slug: 'brex', label: 'Brex', domain: 'brex.com' },
+  { slug: 'remote', label: 'Remote', domain: 'remote.com' },
 ];
 
+/** Slugs with NO working adapter — probed against all four ATS providers and genuinely
+ *  found nothing (large enterprises typically run Workday or a custom career site). Mirrors
+ *  `sources.ats.NO_PUBLIC_BOARD` exactly. Everything else in `CAREER_PAGES` is implemented. */
+const CAREER_NO_BOARD = new Set([
+  'starling', 'revolut', 'deliveroo',
+  'nvidia', 'c3ai', 'lseg', 'bloomberg', 'capitalone', 'justeat', 'booking', 'expedia', 'king',
+]);
+
 for (const c of CAREER_PAGES) {
-  SOURCES.push(s(`careers:${c.slug}`, c.label, c.domain, 'careers', false, 'not_implemented'));
+  const implemented = !CAREER_NO_BOARD.has(c.slug);
+  SOURCES.push(
+    s(`careers:${c.slug}`, c.label, c.domain, 'careers', implemented, implemented ? 'live' : 'not_implemented'),
+  );
 }
 
 export const SOURCE_BY_KEY: Record<string, JobSource> = Object.fromEntries(
@@ -145,5 +216,11 @@ export const HEALTH_META: Record<SourceHealth, { label: string; color: string }>
   live: { label: 'Live', color: 'var(--applied)' },
   degraded: { label: 'Degraded', color: 'var(--review)' },
   auth_required: { label: 'Sign-in required', color: 'var(--rejected)' },
+  rate_limited: { label: 'Rate limited', color: 'var(--review)' },
+  // The portal refuses server-side automation but is reachable through the same one-time
+  // browser sign-in Settings already offers (e.g. Civil Service Jobs, UK Visa Jobs) — a real,
+  // usable rung, not a failure state, so it gets its own label rather than reading as broken.
+  interactive_available: { label: 'Connect to use', color: 'var(--review)' },
+  unavailable: { label: 'Unavailable', color: 'var(--rejected)' },
   not_implemented: { label: 'Not yet wired', color: 'var(--text-4)' },
 };

@@ -32,8 +32,8 @@ describe('intervention flow', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows the prompt and resolves via the endpoint, then clears', async () => {
-    useAppStore.setState({ pendingIntervention: { application_id: 'app-1', kind: 'captcha', prompt: 'Enter the 6-char code' } });
+  it('shows the prompt and resolves a 2FA code via the endpoint, then clears', async () => {
+    useAppStore.setState({ pendingIntervention: { application_id: 'app-1', kind: '2fa', prompt: 'Enter the 6-char code' } });
     let body: { id?: string; response?: string } | null = null;
     server.use(http.post('/api/v1/applications/:id/intervention', async ({ request, params }) => {
       body = { id: params.id as string, ...(await request.json() as { response: string }) };
@@ -48,6 +48,83 @@ describe('intervention flow', () => {
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.id).toBe('app-1');
     expect(body!.response).toBe('ABC123');
+    await waitFor(() => expect(useAppStore.getState().pendingIntervention).toBeNull());
+  });
+
+  it('shows the URL and resumes a CAPTCHA blocker via resolve-blocker, then clears', async () => {
+    useAppStore.setState({
+      pendingIntervention: {
+        application_id: 'app-1',
+        kind: 'captcha',
+        prompt: 'Solve the challenge',
+        url: 'https://example.com/jobs/apply/123',
+      },
+    });
+    let resolvedId: string | null = null;
+    server.use(http.post('/api/v1/applications/:id/resolve-blocker', ({ params }) => {
+      resolvedId = params.id as string;
+      return HttpResponse.json({ queued: true });
+    }));
+
+    render(<InterventionModal />, { wrapper: wrapper() });
+    expect(screen.getByText(/solve the challenge/i)).toBeInTheDocument();
+    expect(screen.getByText('https://example.com/jobs/apply/123')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/your response/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /resume/i }));
+
+    await waitFor(() => expect(resolvedId).toBe('app-1'));
+    await waitFor(() => expect(useAppStore.getState().pendingIntervention).toBeNull());
+  });
+
+  it('shows the screenshot and approves a submission via the intervention endpoint, then clears', async () => {
+    useAppStore.setState({
+      pendingIntervention: {
+        application_id: 'app-1',
+        kind: 'submit_confirmation',
+        prompt: 'Ready to submit to Acme: Data Analyst application',
+        url: 'https://example.com/jobs/apply/123',
+        screenshot_b64: 'ZmFrZS1wbmc=',
+      },
+    });
+    let body: { id?: string; response?: string } | null = null;
+    server.use(http.post('/api/v1/applications/:id/intervention', async ({ request, params }) => {
+      body = { id: params.id as string, ...(await request.json() as { response: string }) };
+      return HttpResponse.json({ resolved: true });
+    }));
+
+    render(<InterventionModal />, { wrapper: wrapper() });
+    expect(screen.getByText(/ready to submit to acme/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/form the agent is about to submit/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/your response/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /approve & submit/i }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.id).toBe('app-1');
+    expect(body!.response).toBe('approved');
+    await waitFor(() => expect(useAppStore.getState().pendingIntervention).toBeNull());
+  });
+
+  it('rejects a submission via the intervention endpoint, then clears', async () => {
+    useAppStore.setState({
+      pendingIntervention: {
+        application_id: 'app-1',
+        kind: 'submit_confirmation',
+        prompt: 'Ready to submit to Acme: Data Analyst application',
+      },
+    });
+    let body: { id?: string; response?: string } | null = null;
+    server.use(http.post('/api/v1/applications/:id/intervention', async ({ request, params }) => {
+      body = { id: params.id as string, ...(await request.json() as { response: string }) };
+      return HttpResponse.json({ resolved: true });
+    }));
+
+    render(<InterventionModal />, { wrapper: wrapper() });
+    await userEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.response).toBe('rejected');
     await waitFor(() => expect(useAppStore.getState().pendingIntervention).toBeNull());
   });
 });

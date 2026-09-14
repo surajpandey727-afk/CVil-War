@@ -64,9 +64,11 @@ class TestAnalyzeExperience:
         )
         assert 0.0 <= score <= 1.0
 
-    def test_empty_experience_returns_zero(self, analyzer, job_description):
+    def test_empty_experience_returns_neutral_not_zero(self, analyzer, job_description):
+        """No recorded experience means unscoreable, not a real zero-experience candidate —
+        see resume.py's _experience_entries_for_scoring for where this list is populated."""
         score, details = analyzer.analyze_experience([], job_description, {})
-        assert score == 0.0
+        assert score == 0.5
         assert details == []
 
     def test_metadata_required_years_used(self, analyzer, sample_experience):
@@ -75,6 +77,62 @@ class TestAnalyzeExperience:
         )
         # 5 total years / 5 required = 1.0 for years component
         assert score > 0.0
+
+    # Regression tests: a stored candidate profile is loosely-typed JSON. Each of these used
+    # to 500 the whole scoring request over one malformed entry — found by deliberately
+    # feeding the real (non-mocked) analyzer hostile input rather than assuming it was safe.
+    def test_non_dict_entry_is_skipped_not_crashed_on(self, analyzer, job_description):
+        score, _ = analyzer.analyze_experience(
+            ["5 years at Acme"], job_description, {},  # type: ignore[list-item]
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_non_numeric_duration_years_does_not_crash_the_sum(self, analyzer, job_description):
+        score, _ = analyzer.analyze_experience(
+            [{"title": "Engineer", "duration_years": "two"}], job_description, {},
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_none_duration_years_does_not_crash_the_sum(self, analyzer, job_description):
+        score, _ = analyzer.analyze_experience(
+            [{"title": "Engineer", "duration_years": None}], job_description, {},
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_responsibilities_as_a_bare_string_does_not_crash_the_join(
+        self, analyzer, job_description,
+    ):
+        score, _ = analyzer.analyze_experience(
+            [{"title": "Engineer", "responsibilities": "led a team"}], job_description, {},
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_responsibilities_as_none_does_not_crash_the_join(self, analyzer, job_description):
+        score, _ = analyzer.analyze_experience(
+            [{"title": "Engineer", "responsibilities": None}], job_description, {},
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_a_none_entry_inside_responsibilities_does_not_crash_the_join(
+        self, analyzer, job_description,
+    ):
+        score, _ = analyzer.analyze_experience(
+            [{"title": "Engineer", "responsibilities": [None, "shipped features"]}],
+            job_description, {},
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_a_mix_of_valid_and_malformed_entries_still_scores_the_valid_ones(
+        self, analyzer, job_description, sample_experience,
+    ):
+        mixed = [*sample_experience, "not a dict", {"duration_years": "bad"}]
+        score, details = analyzer.analyze_experience(mixed, job_description, {})  # type: ignore[list-item]
+        assert 0.0 <= score <= 1.0
+        # The bare string is dropped outright (not a dict at all); the dict with only a bad
+        # `duration_years` survives with that one field coerced, alongside the two entries
+        # from sample_experience — sanitisation fixes a bad *field*, it only drops a bad
+        # *entry* when the entry itself isn't a dict to begin with.
+        assert len(details) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +162,21 @@ class TestExtractRequiredYears:
     def test_returns_zero_when_not_found(self, analyzer):
         years = analyzer._extract_required_years("Great job opportunity!", {})
         assert years == 0.0
+
+    def test_non_numeric_metadata_value_falls_through_to_text_extraction(self, analyzer):
+        """A parsed job posting's own metadata is not a validated schema — a stray string
+        where a number was expected used to raise ValueError converting to float and 500
+        the whole request. It must fall back to the text-pattern extraction instead."""
+        years = analyzer._extract_required_years(
+            "5+ years of experience required", {"required_years": "lots"},
+        )
+        assert years == 5.0
+
+    def test_none_metadata_value_falls_through_to_text_extraction(self, analyzer):
+        years = analyzer._extract_required_years(
+            "3-5 years of relevant experience", {"required_years": None},
+        )
+        assert years == 3.0
 
 
 # ---------------------------------------------------------------------------

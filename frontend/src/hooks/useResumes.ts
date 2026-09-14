@@ -53,6 +53,13 @@ export function useOptimizeResume() {
   });
 }
 
+/** Fill in the account's work history/education from a résumé already on file. */
+export function useExtractProfile() {
+  return useMutation({
+    mutationFn: (resumeId: string) => resumeService.extractProfile(resumeId),
+  });
+}
+
 /** Fetch where one résumé has been used. Only enabled once an id is chosen. */
 export function useResumeUsage(resumeId: string | null) {
   return useQuery({

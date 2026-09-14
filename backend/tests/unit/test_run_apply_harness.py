@@ -21,11 +21,11 @@ from tests.conftest import TEST_USER_ID
 from tests.unit.test_observe import FakeHistory
 
 
-async def _seed_app(db) -> Application:
+async def _seed_app(db, *, platform: str = "linkedin", url: str = "https://x") -> Application:
     db.add(User(id=TEST_USER_ID, email="u@x.com", hashed_password="x"))
     job = Job(
-        user_id=TEST_USER_ID, platform="linkedin", platform_job_id="j1",
-        title="t", company="c", url="https://x",
+        user_id=TEST_USER_ID, platform=platform, platform_job_id="j1",
+        title="t", company="c", url=url,
     )
     db.add(job)
     await db.flush()
@@ -115,6 +115,24 @@ class TestRunApplyHarness:
         assert call.args[0] == "review_application_run"
         assert call.args[1] == trajs[0].id
 
+    async def test_screenshots_reach_the_application_row_not_just_the_trajectory(
+        self, db_session,
+    ):
+        """Pins a real gap: `Application.browser_screenshots` was a column nobody ever
+        wrote to — real screenshots only ever reached `RunTrajectory.screenshots`, which
+        EvidencePanel/a future lightbox would have to join out to instead of reading
+        straight off the application."""
+        app = await _seed_app(db_session)
+        history = FakeHistory(
+            actions=["go_to_url", "done"], urls=["https://x/job"],
+            screenshots=["/tmp/shots/1.png", "/tmp/shots/2.png"],
+        )
+        with _mock_browser(db_session, history):
+            await apply_mod.run_apply(db_session, app, redis=None)
+
+        await db_session.refresh(app)
+        assert app.browser_screenshots == ["/tmp/shots/1.png", "/tmp/shots/2.png"]
+
     async def test_no_redis_persists_trajectory_but_skips_review(self, db_session):
         app = await _seed_app(db_session)
         with _mock_browser(db_session, FakeHistory()):
@@ -158,6 +176,40 @@ class TestRunApplyHarness:
         redis.enqueue_job.assert_awaited_once()
         signals = redis.enqueue_job.await_args.args[2]
         assert any("Connection refused" in e for e in signals["errors"])
+
+    async def test_keyless_platform_applies_without_a_saved_session(self, db_session):
+        """MoveJobs/Tarve have no login concept the Connect flow even knows about — requiring
+        a saved session before applying blocked every keyless board from ever being
+        auto-applied to, even though discovery already reaches them with no account."""
+        app = await _seed_app(db_session, platform="movejobs", url="https://movejobs.uk/jobs/x")
+        history = FakeHistory(actions=["go_to_url", "done"], urls=["https://movejobs.uk/jobs/x"])
+
+        with _mock_browser(db_session, history):
+            result = await apply_mod.run_apply(db_session, app, redis=None)
+            credential_store_mock = apply_mod.CredentialStore
+            browser_profile_mock = apply_mod.build_browser_profile
+
+        assert result.submitted is True
+        credential_store_mock.return_value.load_session_cookies.assert_not_awaited()
+        _, kwargs = browser_profile_mock.call_args
+        assert kwargs["storage_state"] is None
+        assert kwargs["allowed_domains"] is None
+
+    async def test_authenticated_platform_restricts_to_its_real_registry_domain(self, db_session):
+        """Domain-restriction must come from the source registry, not a guessed
+        '{platform}.com' — reed.co.uk is a real counterexample to that guess (a platform key
+        that never contained the ``.com`` the old logic assumed)."""
+        app = await _seed_app(db_session, platform="reed", url="https://www.reed.co.uk/jobs/x")
+        history = FakeHistory(actions=["go_to_url", "done"], urls=["https://www.reed.co.uk/jobs/x"])
+
+        with _mock_browser(db_session, history):
+            await apply_mod.run_apply(db_session, app, redis=None)
+            browser_profile_mock = apply_mod.build_browser_profile
+
+        _, kwargs = browser_profile_mock.call_args
+        assert kwargs["allowed_domains"] is not None
+        assert "https://reed.co.uk" in kwargs["allowed_domains"]
+        assert not any(d.endswith(".com") for d in kwargs["allowed_domains"])
 
 
 class TestReviewTask:

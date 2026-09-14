@@ -2,16 +2,25 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.core.policy.model import AutomationPolicy, ResumeRule, RunWindow
 
 
 class WorkExperienceSchema(BaseModel):
-    """A single work experience entry."""
+    """A single work experience entry.
 
-    title: str = ""
-    company: str = ""
+    ``title``/``company`` accept a couple of synonyms an LLM extraction naturally reaches
+    for (``job_title``, ``employer``) via ``validation_alias`` — confirmed live: résumé
+    extraction (``services.resume.extract_candidate_profile_from_resume``) once returned a
+    real, complete, correctly-parsed work history under exactly these synonym keys, which
+    silently validated to two *empty* entries instead of raising, because Pydantic quietly
+    falls back to a field's default rather than erroring on an unrecognised key. The primary
+    names remain the first (and manual-edit-compatible) choice; this only adds tolerance.
+    """
+
+    title: str = Field(default="", validation_alias=AliasChoices("title", "job_title"))
+    company: str = Field(default="", validation_alias=AliasChoices("company", "employer"))
     start_date: str = ""
     end_date: str = ""
     description: str = ""
@@ -41,6 +50,32 @@ class CandidateProfileSchema(BaseModel):
     experience: list[WorkExperienceSchema] = Field(default_factory=list)
     education: list[EducationSchema] = Field(default_factory=list)
     certifications: list[str] = Field(default_factory=list)
+
+    @field_validator("skills", "certifications", mode="before")
+    @classmethod
+    def _drop_non_string_entries(cls, v: Any) -> list[Any]:
+        """Tolerate a malformed stored profile instead of 500ing the whole settings read.
+
+        Confirmed live: a stored ``candidate_profile`` with a non-string skill entry
+        raised ``ValidationError`` straight out of ``GET /settings/``, taking the whole
+        response down over one bad list item rather than the rest of a valid profile.
+        """
+        if not isinstance(v, list):
+            return []
+        return [s for s in v if isinstance(s, str)]
+
+    @field_validator("experience", "education", mode="before")
+    @classmethod
+    def _drop_non_dict_entries(cls, v: Any) -> list[Any]:
+        """Same tolerance as ``_drop_non_string_entries``, for the nested-object fields.
+
+        Confirmed live: a stored ``education`` value of a bare string (instead of a list)
+        and an ``experience`` entry that was a bare string (instead of a dict) each raised
+        ``ValidationError`` out of ``GET /settings/``.
+        """
+        if not isinstance(v, list):
+            return []
+        return [e for e in v if isinstance(e, dict)]
 
 
 #: Families the product ships with. Deliberately **not** a ``Literal``: a family is a label
@@ -118,6 +153,25 @@ class RoleTargetSchema(BaseModel):
     #: explicit, visible override the AI hierarchy allows.
     model: str = ""
 
+    @field_validator(
+        "alternative_titles", "seniority", "departments", "skills", "technologies",
+        "keywords", "excluded_keywords", "locations", "employment_types", "industries",
+        "target_companies", "excluded_companies", "job_boards",
+        mode="before",
+    )
+    @classmethod
+    def _drop_non_string_entries(cls, v: Any) -> list[Any]:
+        """Same tolerance as ``CandidateProfileSchema``: degrade, don't 500.
+
+        These criteria lists are stored JSON, same as a candidate profile — nothing
+        stops a malformed entry landing in one, and one bad item taking down the
+        whole settings response over a single unusable string is the same failure
+        mode already confirmed live for ``candidate_profile``.
+        """
+        if not isinstance(v, list):
+            return []
+        return [s for s in v if isinstance(s, str)]
+
 
 # The automation blob is the policy. It used to be declared here as a plain settings shape
 # while the real rules lived nowhere; now :mod:`app.core.policy` owns the model, the rule
@@ -138,9 +192,10 @@ class SettingsResponse(BaseModel):
     min_ats_score: float = 0.75
     max_parallel: int = 3
     preferred_provider: str = "openai"
-    platforms_enabled: list[str] = Field(
-        default_factory=lambda: ["linkedin", "indeed", "glassdoor"],
-    )
+    #: Empty means "every genuinely usable source" — see
+    #: ``models.user_settings.UserSettings.platforms_enabled`` for why this must not be a
+    #: fixed list.
+    platforms_enabled: list[str] = Field(default_factory=list)
     candidate_profile: CandidateProfileSchema = Field(
         default_factory=CandidateProfileSchema,
     )
@@ -162,7 +217,10 @@ class SettingsResponse(BaseModel):
     @classmethod
     def _coerce_role_targets(cls, v: Any) -> list[Any]:
         # The column is nullable, and a settings row created before migration 0007 has NULL.
-        return v or []
+        # A non-dict entry is dropped rather than raised on — same tolerance as
+        # candidate_profile's list fields, for the same reason: one malformed stored
+        # target should not 500 the whole settings response.
+        return [t for t in (v or []) if isinstance(t, dict)]
 
     @field_validator("automation", mode="before")
     @classmethod
@@ -268,6 +326,21 @@ class PolicyPreview(BaseModel):
     items: list[PolicyPreviewItem] = Field(default_factory=list)
 
 
+class SponsorshipRegisterStatus(BaseModel):
+    """Cached-file status of the UK sponsor register — never reflects a live network call."""
+
+    fetched_at: str | None = None
+    row_count: int = 0
+    stale: bool = True
+
+
+class SponsorshipRegisterRefreshResult(SponsorshipRegisterStatus):
+    """Result of an explicit refresh — same shape as status, plus whether it changed anything."""
+
+    refreshed: bool = False
+    error: str | None = None
+
+
 class LLMProviderStatus(BaseModel):
     """Status of a configured LLM provider."""
 
@@ -275,3 +348,29 @@ class LLMProviderStatus(BaseModel):
     configured: bool = False
     model: str = ""
     is_primary: bool = False
+
+
+class BYOLLMKeyUpdate(BaseModel):
+    """Save a user's own API key for one LLM provider.
+
+    The key itself never round-trips back out — see ``BYOLLMKeyStatus``, which reports
+    only whether one is set, never its value.
+    """
+
+    provider: str = Field(..., min_length=1, max_length=50)
+    api_key: str = Field(..., min_length=1)
+    #: Also make this the active provider for new LLM calls — the common case (the
+    #: operator just got a key and wants it used), but not forced: saving a fallback
+    #: key for later shouldn't silently switch what is already working.
+    make_active: bool = True
+    #: Only meaningful when ``make_active`` is true — the model to route to by default.
+    default_model: str | None = None
+
+
+class BYOLLMKeyStatus(BaseModel):
+    """Whether a BYO key is stored for a provider — never the key itself."""
+
+    provider: str
+    has_key: bool
+    is_active: bool = False
+    default_model: str | None = None

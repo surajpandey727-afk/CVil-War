@@ -14,7 +14,7 @@ QUEUE_APPLY = "cvilwar:queue:apply"
 
 # Supported platforms
 # Keyless API sources — these are the ones that actually return results.
-API_JOB_SOURCES = ["remotive", "jobicy", "arbeitnow", "remoteok"]
+API_JOB_SOURCES = ["remotive", "jobicy", "arbeitnow", "remoteok", "movejobs", "tarve"]
 # Browser-scraped platforms. Currently non-functional (docs/PHASE0_AUDIT.md §4.3.1) and kept
 # only so the apply-side keeps its platform identifiers.
 BROWSER_PLATFORMS = ["linkedin", "indeed", "glassdoor"]

@@ -261,12 +261,69 @@ COMPANY_BOARDS: dict[str, tuple[type[AtsBoardSource], str, str]] = {
     # SmartRecruiters rather than Greenhouse: gh/wise returns a single stale US posting,
     # sr/Wise returns the real board.
     "wise": (SmartRecruitersSource, "Wise", "Wise"),                    # 420
+
+    # Below: resolved the same way (live-probed, not guessed) on 2026-08-30, expanding
+    # career-page coverage from 9 employers to 56 for AI/data/ML/PM-adjacent roles per the
+    # operator's request for far broader company coverage than the original eight-ish list.
+    "deepmind": (GreenhouseSource, "deepmind", "DeepMind"),             # 9
+    "openai": (AshbySource, "openai", "OpenAI"),                        # 758
+    "asos": (SmartRecruitersSource, "asos", "ASOS"),                    # 64
+    "spotify": (LeverSource, "spotify", "Spotify"),                     # 89
+
+    "quantexa": (AshbySource, "quantexa", "Quantexa"),                  # 30
+    "synthesia": (AshbySource, "synthesia", "Synthesia"),               # 60
+    "speechmatics": (GreenhouseSource, "speechmatics", "Speechmatics"), # 8
+    "faculty": (AshbySource, "faculty", "Faculty AI"),                  # 73
+    "tractable": (AshbySource, "tractable", "Tractable"),               # 5
+    "graphcore": (GreenhouseSource, "graphcore", "Graphcore"),          # 194
+    "improbable": (AshbySource, "improbable", "Improbable"),            # 7
+    "gocardless": (GreenhouseSource, "gocardless", "GoCardless"),       # 25
+    "zopa": (LeverSource, "zopa", "Zopa"),                              # 30
+    "truelayer": (GreenhouseSource, "truelayer", "TrueLayer"),          # 5
+    "clearbank": (AshbySource, "clearbank", "ClearBank"),               # 10
+    "marshmallow": (AshbySource, "marshmallow", "Marshmallow"),         # 11
+    "cleo": (GreenhouseSource, "cleo", "Cleo"),                         # 4
+    "snowflake": (AshbySource, "snowflake", "Snowflake"),               # 389
+    "databricks": (GreenhouseSource, "databricks", "Databricks"),       # 857
+    "datadog": (GreenhouseSource, "datadog", "Datadog"),                # 454
+    "fivetran": (GreenhouseSource, "fivetran", "Fivetran"),             # 237
+    "similarweb": (GreenhouseSource, "similarweb", "Similarweb"),       # 68
+    "contentsquare": (LeverSource, "contentsquare", "Contentsquare"),   # 28
+    "alphasense": (GreenhouseSource, "alphasense", "AlphaSense"),       # 235
+    "stripe": (GreenhouseSource, "stripe", "Stripe"),                   # 574
+    "notion": (AshbySource, "notion", "Notion"),                        # 133
+    "figma": (GreenhouseSource, "figma", "Figma"),                      # 163
+    "canva": (SmartRecruitersSource, "canva", "Canva"),                 # 268
+    "airtable": (GreenhouseSource, "airtable", "Airtable"),             # 16
+    "asana": (GreenhouseSource, "asana", "Asana"),                      # 123
+    "miro": (AshbySource, "miro", "Miro"),                              # 37
+    "linear": (AshbySource, "linear", "Linear"),                        # 29
+    "vercel": (GreenhouseSource, "vercel", "Vercel"),                   # 91
+    "gitlab": (GreenhouseSource, "gitlab", "GitLab"),                   # 220
+    "thoughtworks": (GreenhouseSource, "thoughtworks", "Thoughtworks"), # 51
+    "cohere": (AshbySource, "cohere", "Cohere"),                        # 146
+    "stabilityai": (GreenhouseSource, "stabilityai", "Stability AI"),   # 4
+    "elevenlabs": (AshbySource, "elevenlabs", "ElevenLabs"),            # 248
+    "runwayml": (AshbySource, "runway", "Runway"),                      # 4
+    "perplexity": (AshbySource, "perplexity", "Perplexity"),            # 97
+    "scale": (GreenhouseSource, "scaleai", "Scale AI"),                 # 219
+    "together": (GreenhouseSource, "togetherai", "Together AI"),        # 62
+    "harvey": (AshbySource, "harvey", "Harvey"),                        # 350
+    "glean": (SmartRecruitersSource, "glean", "Glean"),                 # 1
+    "ramp": (AshbySource, "ramp", "Ramp"),                              # 139
+    "brex": (GreenhouseSource, "brex", "Brex"),                         # 294
+    "remote": (GreenhouseSource, "remotecom", "Remote"),                # 204
 }
 
 #: Employers with no public ATS board on any of the four supported providers. Kept explicit so
 #: the gap is visible rather than looking like an oversight — each was probed across
 #: Greenhouse, Lever, Ashby and SmartRecruiters and returned nothing.
-NO_PUBLIC_BOARD: tuple[str, ...] = ("starling", "revolut", "deliveroo")
+NO_PUBLIC_BOARD: tuple[str, ...] = (
+    "starling", "revolut", "deliveroo",
+    # Probed 2026-08-30 alongside the expansion above — large enterprises typically run
+    # Workday or a custom career site, neither of which these four providers can reach.
+    "nvidia", "c3ai", "lseg", "bloomberg", "capitalone", "justeat", "booking", "expedia", "king",
+)
 
 
 def build_career_sources() -> dict[str, type[AtsBoardSource]]:

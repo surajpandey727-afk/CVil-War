@@ -105,8 +105,20 @@ class ExperienceAnalyzer:
             details is a list of per-entry match breakdowns.
         """
         if not candidate_experience:
-            logger.warning("experience_analyzer.no_candidate_experience")
-            return 0.0, []
+            # Neutral, not punishing: an empty list means the operator has not filled in a
+            # structured work history in Settings yet, not that they have none. Scoring this
+            # 0.0 made every résumé's experience factor a guaranteed zero regardless of the
+            # candidate's real background — see resume.py's _experience_entries_for_scoring.
+            logger.info("experience_analyzer.no_candidate_experience_recorded")
+            return 0.5, []
+
+        # A stored candidate profile is loosely-typed JSON, not a validated schema by the
+        # time it reaches here — sanitised once, at the boundary, rather than trusting every
+        # `.get()` call site below to handle a non-dict entry or a malformed duration.
+        candidate_experience = self._sanitize_experience(candidate_experience)
+        if not candidate_experience:
+            logger.info("experience_analyzer.no_usable_candidate_experience")
+            return 0.5, []
 
         required_years = self._extract_required_years(
             job_description, job_metadata,
@@ -155,6 +167,40 @@ class ExperienceAnalyzer:
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _sanitize_experience(
+        self, candidate_experience: list[Any],
+    ) -> list[dict[str, Any]]:
+        """Drop non-dict entries and coerce every field this class reads to its expected type.
+
+        The one normalisation pass every downstream helper in this class relies on: each
+        entry's own ``.get()`` calls (and the ``" ".join(...)``/``sum(...)`` built on top of
+        them) are only safe once every element here is actually a dict with the right shape
+        — not whatever a malformed stored profile, or a ``None`` written where a key was
+        merely left blank, happened to hold.
+        """
+        clean: list[dict[str, Any]] = []
+        for entry in candidate_experience:
+            if not isinstance(entry, dict):
+                continue
+            duration = entry.get("duration_years", 0)
+            if not isinstance(duration, (int, float)):
+                try:
+                    duration = float(duration)
+                except (TypeError, ValueError):
+                    duration = 0
+            responsibilities = entry.get("responsibilities") or []
+            if not isinstance(responsibilities, list):
+                responsibilities = [responsibilities]
+            clean.append({
+                **entry,
+                "duration_years": duration,
+                "title": str(entry.get("title") or ""),
+                "company": str(entry.get("company") or ""),
+                "description": str(entry.get("description") or ""),
+                "responsibilities": [str(r) for r in responsibilities if r is not None],
+            })
+        return clean
+
     def _extract_required_years(
         self,
         job_description: str,
@@ -162,7 +208,15 @@ class ExperienceAnalyzer:
     ) -> float:
         """Extract required years of experience from job text or metadata."""
         if "required_years" in job_metadata:
-            return float(job_metadata["required_years"])
+            # Metadata is parsed job-posting data — a stray non-numeric value must fall
+            # through to the text-pattern extraction below, not crash the whole request.
+            try:
+                return float(job_metadata["required_years"])
+            except (TypeError, ValueError):
+                logger.warning(
+                    "experience_analyzer.bad_required_years",
+                    value=repr(job_metadata["required_years"]),
+                )
 
         patterns = [
             r"(\d+)\+?\s*(?:years?|yrs?)\s*(?:of)?\s*(?:experience|exp)",

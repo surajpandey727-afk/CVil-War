@@ -273,3 +273,18 @@ export interface LLMProviderStatus {
   model: string;
   is_primary: boolean;
 }
+
+/** Whether a BYO key is stored for a provider — never the key value itself. */
+export interface BYOLLMKeyStatus {
+  provider: string;
+  has_key: boolean;
+  is_active: boolean;
+  default_model: string | null;
+}
+
+export interface BYOLLMKeyUpdate {
+  provider: string;
+  api_key: string;
+  make_active?: boolean;
+  default_model?: string;
+}

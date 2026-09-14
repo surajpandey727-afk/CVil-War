@@ -20,10 +20,12 @@ interface ResumePreviewPanelProps {
   onSelectJob: (id: string) => void;
   onScore: () => void;
   onDownload: (format: 'pdf' | 'docx') => void;
+  onExtractProfile: () => void;
+  extractingProfile: boolean;
 }
 
 /** Sticky "Preview & score" panel for the selected résumé (design §RÉSUMÉS right column). */
-export default function ResumePreviewPanel({ resume, score, scoring, jobs, targetJobId, baseAtsScore, onSelectJob, onScore, onDownload }: ResumePreviewPanelProps) {
+export default function ResumePreviewPanel({ resume, score, scoring, jobs, targetJobId, baseAtsScore, onSelectJob, onScore, onDownload, onExtractProfile, extractingProfile }: ResumePreviewPanelProps) {
   const t = TYPE_META[resume.type] ?? TYPE_META['base']!;
   // Only honor a score that was computed for THIS résumé — the selection can shift (e.g. after a
   // generate/optimize puts a new variant at the top of the list) while a stale score is still held.
@@ -88,6 +90,12 @@ export default function ResumePreviewPanel({ resume, score, scoring, jobs, targe
           )}
         </div>
       </div>
+
+      <button onClick={onExtractProfile} disabled={extractingProfile}
+        title="Reads this résumé and fills in your work history and education in Settings — the Experience and Education factors above score against that, not the résumé file directly."
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 34, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: extractingProfile ? 'var(--text-4)' : 'var(--text-2)', font: '700 11.5px/1 var(--font)', cursor: extractingProfile ? 'default' : 'pointer' }}>
+        <Icon name="wand" size={13} /> {extractingProfile ? 'Reading résumé…' : 'Fill profile from this résumé'}
+      </button>
 
       {showDelta && (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 10px', borderRadius: 8, background: deltaSoft, alignSelf: 'flex-start' }}>

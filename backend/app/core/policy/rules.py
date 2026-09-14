@@ -302,6 +302,21 @@ def _seniority(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
     )
 
 
+def _no_sponsorship_excluded(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
+    """Off by default — see ``AutomationPolicy.exclude_no_sponsorship``. Only fires on
+    ``NOT_SPONSOR``, an explicit "we do not sponsor" statement in the posting itself, never on
+    ``UNKNOWN`` (a posting that simply never mentions it) — the two are not the same evidence,
+    and excluding on the weaker one would drop most of the market for no real reason."""
+    if not p.exclude_no_sponsorship:
+        return None
+    if ctx.sponsor_confidence != "not_sponsor":
+        return None
+    return Fired(
+        f"{ctx.company or 'This employer'}'s posting states it does not sponsor a visa, and "
+        "your policy excludes those outright."
+    )
+
+
 def _blocked_employer(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
     company = (ctx.company or "").casefold()
     if not company:
@@ -609,6 +624,37 @@ RULES: tuple[Rule, ...] = (
         check=_pause_on_challenge,
         tags=("oversight",),
     ),
+    Rule(
+        id="oversight.run_headed",
+        clause="§4.6",
+        title="Run applications in a visible browser window",
+        rationale=(
+            "Some application forms cannot be undone once submitted — many employers will "
+            "not accept a second application for months if the first is rejected. Watching "
+            "the run live is the only way to catch a mistake before it happens rather than "
+            "reading about it afterwards. Off runs headless (faster, no window), for anyone "
+            "who has reviewed enough runs to trust the agent unsupervised."
+        ),
+        enforcement=Enforcement.BEHAVIOUR,
+        control=TOGGLE,
+        field_name="run_headed",
+        tags=("oversight",),
+    ),
+    Rule(
+        id="oversight.require_submission_confirmation",
+        clause="§4.7",
+        title="Confirm with me before the final submit",
+        rationale=(
+            "The agent fills the entire form, then stops and waits for your explicit "
+            "approval before clicking submit — the one moment in the run that cannot be "
+            "undone. Off lets the agent submit unattended the instant it believes the form "
+            "is ready, with no checkpoint at all before that irreversible step."
+        ),
+        enforcement=Enforcement.BEHAVIOUR,
+        control=TOGGLE,
+        field_name="require_submission_confirmation",
+        tags=("oversight",),
+    ),
     # §5 — match and eligibility.
     Rule(
         id="match.min_ats_score",
@@ -667,6 +713,23 @@ RULES: tuple[Rule, ...] = (
         field_name="blocked_companies",
         verdict=Verdict.BLOCK,
         check=_blocked_employer,
+        tags=("match",),
+    ),
+    Rule(
+        id="match.exclude_no_sponsorship",
+        clause="§5.5",
+        title="Exclude postings that explicitly rule out visa sponsorship",
+        rationale=(
+            "Only fires when the posting's own text states it will not sponsor a visa — "
+            "never on a posting that simply doesn't mention sponsorship, which is far more "
+            "common and would wrongly exclude most of the market. Off by default since most "
+            "operators don't need a visa at all."
+        ),
+        enforcement=Enforcement.GATE,
+        control=ControlSpec(kind=ControlKind.TOGGLE, off_value=False),
+        field_name="exclude_no_sponsorship",
+        verdict=Verdict.BLOCK,
+        check=_no_sponsorship_excluded,
         tags=("match",),
     ),
     # §6 — run window.

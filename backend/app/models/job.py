@@ -6,7 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, Index, String, Text, Uniq
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
-from app.models.enums import JobStatus
+from app.models.enums import JobStatus, SponsorConfidence
 
 
 class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
@@ -34,7 +34,7 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     salary_range: Mapped[str | None] = mapped_column(String(200), nullable=True)
     job_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
-    posted_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    posted_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     experience_level: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Analysis
@@ -49,15 +49,35 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     # matches. first/last_seen also give an honest "still listed?" signal.
     canonical_job_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: Where a human applies, when it differs from the posting URL.
     application_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+
+    #: Structured intelligence pulled from the posting itself: the employer's own criteria
+    #: labels, extracted requirement lines, benefits, and whatever else the source publishes.
+    #: Per-source in shape on purpose — flattening LinkedIn's vocabulary and Greenhouse's into
+    #: one fixed schema would mean inventing values neither of them supplied.
+    posting_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: When the full posting was last fetched. ``None`` means never — which is different from
+    #: "fetched and found nothing", and the UI says so.
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     status: Mapped[JobStatus] = mapped_column(
         pg_enum(JobStatus, "job_status"), nullable=False, default=JobStatus.NEW
     )
+
+    #: Ranking boost, never a hard filter — see core.sponsorship and services.job_search.
+    sponsor_confidence: Mapped[SponsorConfidence] = mapped_column(
+        pg_enum(SponsorConfidence, "sponsor_confidence"),
+        nullable=False,
+        default=SponsorConfidence.UNKNOWN,
+        server_default=SponsorConfidence.UNKNOWN.value,
+    )
+    #: Why: the matched register entry name, or the posting phrase that triggered detection.
+    #: Empty for UNKNOWN — there is nothing to show, not a fact that was hidden.
+    sponsor_evidence: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     # Relationships
     applications: Mapped[list["Application"]] = relationship(  # noqa: F821

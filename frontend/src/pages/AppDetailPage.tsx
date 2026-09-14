@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
 import EvidencePanel from '@/components/applications/EvidencePanel';
+import FillActivityPanel from '@/components/applications/FillActivityPanel';
 import RunTimeline from '@/components/applications/RunTimeline';
 import { useApplication, useApplicationEvidence, useUpdateApplicationStatus } from '@/hooks/useApplications';
 import { useAppStore } from '@/store/useAppStore';
@@ -53,7 +54,8 @@ export default function AppDetailPage() {
       ) : (
         (() => {
           const sm = statusMeta(app.status);
-          const steps = buildAppTimeline(app.apply_mode, app.status);
+          const realDiagnosis = evidence?.failure?.root_cause ?? evidence?.failure?.message ?? undefined;
+          const steps = buildAppTimeline(app.apply_mode, app.status, realDiagnosis);
           return (
             <>
               {/* Header */}
@@ -100,6 +102,8 @@ export default function AppDetailPage() {
                     <div style={{ font: '700 14px/1 var(--font)', letterSpacing: '-.01em', marginBottom: 16 }}>Run timeline</div>
                     <RunTimeline steps={steps} />
                   </div>
+
+                  <FillActivityPanel applicationId={app.id} isApplying={app.status === 'applying'} />
 
                   {app.notes && (
                     <div style={{ ...card, padding: 18 }}>

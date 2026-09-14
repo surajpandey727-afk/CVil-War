@@ -118,8 +118,10 @@ class EmailSettings(BaseSettings):
     provider: str = "log"  # "log" (dev/CI) | "smtp"
     from_address: str = "no-reply@cvil-war.app"
     from_name: str = "CVil-War"
-    # Frontend origin used to build the reset link the user clicks.
-    frontend_base_url: str = "http://localhost:5173"
+    # Frontend origin used to build the reset link the user clicks. Matches this project's
+    # configured Vite dev-server port (frontend/vite.config.ts) — a mismatch here means every
+    # generated reset link 404s, with no error anywhere to point at why.
+    frontend_base_url: str = "http://localhost:3000"
     reset_token_expire_minutes: int = 30
 
     # SMTP transport (used when provider == "smtp").
@@ -205,11 +207,36 @@ class Settings(BaseSettings):
     adzuna_app_id: SecretStr = SecretStr("")
     adzuna_app_key: SecretStr = SecretStr("")
     reed_api_key: SecretStr = SecretStr("")
+    # Minutes between background discovery cycles (services.discovery_scheduler). Expanded
+    # into an Arq cron minute-of-hour set at worker startup, so it is clamped to a divisor-
+    # friendly 5-60 range rather than an arbitrary rolling interval.
+    discovery_interval_minutes: int = 30
+
+    # Communications (Apollo outbound tracking, Gmail inbound reply detection)
+    apollo_api_key: SecretStr = SecretStr("")
+    # Google Cloud OAuth client (console.cloud.google.com) — the client id/secret authorise the
+    # one-time consent flow; the resulting access/refresh token pair is per-user mutable state
+    # stored via CredentialStore.put_oauth_token, not here.
+    gmail_client_id: SecretStr = SecretStr("")
+    gmail_client_secret: SecretStr = SecretStr("")
+    #: Must exactly match a redirect URI registered on the Google Cloud OAuth client.
+    gmail_redirect_uri: str = "http://localhost:8000/api/v1/communications/gmail/callback"
+    #: Where the Gmail OAuth callback sends the operator's browser back to once done — the
+    #: dashboard itself, not this API. Matches this project's configured Vite dev-server port
+    #: (frontend/vite.config.ts).
+    frontend_url: str = "http://localhost:3000"
+    #: Shared secret for api.v1.internal — lets an external automation tool (n8n) trigger a
+    #: discovery or inbox-sync cycle on demand, authenticated by a static bearer token rather
+    #: than a user JWT (n8n has no interactive login). Unset means the endpoints refuse
+    #: everything (fail-closed), matching how METRICS_TOKEN gates /metrics.
+    internal_webhook_token: SecretStr = SecretStr("")
 
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    cors_origins: list[str] = [
+        "http://localhost:3000", "http://localhost:5173", "http://localhost:5174",
+    ]
 
     @field_validator("min_ats_score")
     @classmethod

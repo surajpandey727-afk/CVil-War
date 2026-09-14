@@ -4,6 +4,7 @@ Handles job CRUD operations, search orchestration across platform
 scrapers, and ATS-based job analysis.
 """
 
+import asyncio
 import hashlib
 from typing import Any
 
@@ -11,14 +12,17 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SUPPORTED_PLATFORMS
+from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.config.settings import get_settings
 from app.core.automation.platforms import platform_registry
 from app.core.automation.platforms.base import JobListing
 from app.core.exceptions import RecordNotFoundError
 from app.core.job_discovery.exa_search import ExaJobSearch
 from app.core.job_discovery.location import location_matches
+from app.core.job_discovery.source_registry import usable_keys
 from app.core.job_discovery.sources.base import matches_query
+from app.core.sponsorship.classify import classify as classify_sponsor
+from app.models.enums import SponsorConfidence
 from app.models.job import Job
 from app.models.resume import Resume
 from app.observability.metrics import job_searches_total, jobs_found_total
@@ -28,6 +32,7 @@ from app.schemas.job import (
     JobListResponse,
     JobSearchRequest,
 )
+from app.services.policy import load_policy, parse_salary_k
 
 logger = structlog.get_logger(__name__)
 
@@ -35,6 +40,24 @@ logger = structlog.get_logger(__name__)
 #: realistic personal job cache, and low enough that a runaway account cannot turn a
 #: single list call into an unbounded table scan.
 MAX_STORED_SCAN = 2000
+
+#: Concurrent source fetches in one search. The default fan-out now legitimately covers
+#: 60+ sources (see the default-platforms fix); unbounded concurrency would open that many
+#: simultaneous outbound connections per search, which is its own way to look like an
+#: attack to some of these upstreams. Bounded, not sequential, is the actual fix — measured
+#: live: a full default search went from well over a minute to a few seconds.
+_MAX_CONCURRENT_SOURCE_FETCHES = 10
+
+#: Wall-clock ceiling on the whole fetch phase, not any one source. A few slow/rate-limited
+#: sources retrying with backoff (see sources.base) can each occupy a concurrency slot for
+#: a long time; bounding the total keeps an interactive search answerable even when several
+#: of ~65 default sources are currently struggling, at the cost of dropping whichever
+#: haven't answered yet — same trade-off already made per-source, just at the search level.
+_SEARCH_FETCH_DEADLINE_S = 20.0
+
+
+class _UnregisteredPlatformError(Exception):
+    """Sentinel: no adapter is registered under this key. Not a fetch failure."""
 
 
 def _job_identity(job: Job) -> str:
@@ -83,9 +106,15 @@ async def search_jobs(
 
     # `is None` rather than a truthiness check: an explicit empty list is a valid request
     # meaning "search nothing", and `or` would have turned it into "search everything".
-    platforms_to_search = (
-        list(SUPPORTED_PLATFORMS) if request.platforms is None else request.platforms
-    )
+    #
+    # The default fan-out is resolved through the source registry's live health, not a
+    # hand-maintained constant — a static list is exactly how Reed and Adzuna ended up
+    # correctly implemented, correctly credentialed, and never once queried by a default
+    # search: they were simply never added to it. `usable_keys()` derives "usable" from
+    # each source's actual registration/credential/known-broken state, so a newly wired
+    # source is included the moment it is registered, and a source that goes dark (a
+    # revoked key, a scraper that breaks) drops out without another hand-edit here.
+    platforms_to_search = usable_keys() if request.platforms is None else request.platforms
 
     if not platforms_to_search:
         logger.warning("job_search.no_platforms_available")
@@ -131,35 +160,63 @@ async def search_jobs(
             existing_by_key[key] = job
             all_jobs.append(job)
 
-    for platform_name in platforms_to_search:
+    # Fetching is concurrent (bounded); registering results into `db`/`all_jobs` stays
+    # strictly sequential afterward, unchanged from before. Measured real-world cause: the
+    # default fan-out used to be ~9 sources, so a sequential loop was never a problem — it
+    # now legitimately covers 60+ (see the default-platforms fix), and one HTTP round trip
+    # per source in series turned a sub-second search into well over a minute. `AsyncSession`
+    # is not safe for concurrent I/O across tasks, so nothing here touches `db` until every
+    # fetch has already resolved on the main task.
+    fetch_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SOURCE_FETCHES)
+
+    async def _fetch_one(platform_name: str) -> tuple[str, list[JobListing], Exception | None]:
         if not platform_registry.has(platform_name):
-            logger.warning(
-                "job_search.platform_not_registered",
-                platform=platform_name,
+            return platform_name, [], _UnregisteredPlatformError()
+        async with fetch_semaphore:
+            try:
+                platform = platform_registry.create(platform_name)
+                listings = await platform.search(
+                    query=request.query,
+                    location=request.location,
+                    filters=request.filters or None,
+                )
+                return platform_name, listings, None
+            except Exception as exc:
+                return platform_name, [], exc
+
+    # An overall deadline on top of bounded concurrency: measured live, a full ~65-source
+    # default fan-out still took over a minute even with the semaphore above, because a
+    # handful of slow/rate-limited scraped sources (now retried with backoff — see the
+    # source-base retry fix) can each hold a concurrency slot for a long time. A source
+    # that hasn't answered by the deadline degrades exactly like any other per-source
+    # failure — no results this round — rather than making the whole search wait on it.
+    tasks = [asyncio.ensure_future(_fetch_one(name)) for name in platforms_to_search]
+    done, pending = await asyncio.wait(tasks, timeout=_SEARCH_FETCH_DEADLINE_S)
+    for task in pending:
+        task.cancel()
+    if pending:
+        logger.warning(
+            "job_search.fetch_deadline_exceeded",
+            timed_out=len(pending),
+            completed=len(done),
+        )
+    fetch_results = [t.result() for t in done]
+
+    for platform_name, listings, error in fetch_results:
+        if isinstance(error, _UnregisteredPlatformError):
+            logger.warning("job_search.platform_not_registered", platform=platform_name)
+            continue
+        if error is not None:
+            logger.error(
+                "job_search.platform_search_failed", platform=platform_name, error=str(error),
             )
             continue
 
-        try:
-            platform = platform_registry.create(platform_name)
-            listings: list[JobListing] = await platform.search(
-                query=request.query,
-                location=request.location,
-                filters=request.filters or None,
-            )
-            logger.info(
-                "job_search.platform_results",
-                platform=platform_name,
-                count=len(listings),
-            )
-            job_searches_total.labels(platform=platform_name).inc()
-            jobs_found_total.labels(platform=platform_name).inc(len(listings))
-        except Exception as exc:
-            logger.error(
-                "job_search.platform_search_failed",
-                platform=platform_name,
-                error=str(exc),
-            )
-            continue
+        logger.info(
+            "job_search.platform_results", platform=platform_name, count=len(listings),
+        )
+        job_searches_total.labels(platform=platform_name).inc()
+        jobs_found_total.labels(platform=platform_name).inc(len(listings))
 
         for listing in listings:
             try:
@@ -175,12 +232,23 @@ async def search_jobs(
 
     # ------------------------------------------------------------------
     # Exa AI semantic search (supplementary, non-blocking)
+    #
+    # Deliberately silent no-op vs. loud failure: not configuring EXA_API_KEY is a normal,
+    # expected operator choice (one line, INFO, once per search) — but an exception from an
+    # Exa call that IS configured is a real defect, not a market signal, and must not be
+    # indistinguishable from "no matches" (see the platform directive: never silently
+    # return an empty result for a source that should have worked).
     # ------------------------------------------------------------------
-    try:
-        settings = get_settings()
-        exa_key = settings.exa_api_key.get_secret_value()
-        exa = ExaJobSearch(api_key=exa_key)
-        if exa.available:
+    settings = get_settings()
+    exa_key = settings.exa_api_key.get_secret_value()
+    exa = ExaJobSearch(api_key=exa_key)
+    if not exa.available:
+        logger.info(
+            "job_search.exa_not_configured",
+            reason="no EXA_API_KEY" if not exa_key else "exa-py not installed",
+        )
+    else:
+        try:
             exa_listings = await exa.search_jobs(
                 query=request.query,
                 location=request.location,
@@ -189,13 +257,17 @@ async def search_jobs(
             for listing in exa_listings:
                 try:
                     _register(_listing_to_job(listing, user_id))
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "job_search.exa_listing_conversion_failed", error=str(exc),
+                    )
                     continue
             logger.info("job_search.exa_results", count=len(exa_listings))
             job_searches_total.labels(platform="exa").inc()
             jobs_found_total.labels(platform="exa").inc(len(exa_listings))
-    except Exception as exc:
-        logger.debug("job_search.exa_skipped", reason=str(exc))
+        except Exception as exc:
+            # Configured but failed: a real, unexpected problem — loud, not a debug crumb.
+            logger.warning("job_search.exa_failed", error=str(exc)[:300])
 
     if all_jobs:
         try:
@@ -259,6 +331,12 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
             "preferred": listing.skills_preferred,
         }
 
+    # Stamped for every listing regardless of source, so the boost in list_jobs() (and any
+    # future consumer) never has to ask which board a job came from.
+    sponsor_confidence, sponsor_evidence = classify_sponsor(
+        listing.company, listing.description
+    )
+
     return Job(
         user_id=user_id,
         platform=listing.platform,
@@ -273,6 +351,36 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
         remote=listing.remote,
         skills_required=skills_dict,
         status="new",
+        sponsor_confidence=sponsor_confidence,
+        sponsor_evidence=sponsor_evidence,
+    )
+
+
+#: Sponsor-confirmed roles rank above equal-fit non-sponsor roles — never a hard filter, and
+#: never an override of a real signal the user asked for (location, title, salary). Lower is
+#: better, so a plain sort on this value puts CONFIRMED_REGISTER first.
+_SPONSOR_RANK: dict[SponsorConfidence, int] = {
+    SponsorConfidence.CONFIRMED_REGISTER: 0,
+    SponsorConfidence.KEYWORD_DETECTED: 1,
+    SponsorConfidence.LIKELY: 2,
+    SponsorConfidence.UNKNOWN: 3,
+    SponsorConfidence.NOT_SPONSOR: 4,
+}
+
+
+def _passes_hard_criteria(
+    job: Job, *, min_salary_k: int, excluded_employment_types: frozenset[str]
+) -> bool:
+    """Salary floor and employment-type exclusion — real hard filters, unlike the sponsor
+    boost. A posting with no published salary band is kept (see policy §5.2's own reasoning:
+    most UK postings omit one, and filtering on absence would discard most of the market)."""
+    if min_salary_k:
+        band = parse_salary_k(job.salary_range)
+        if band is not None and band < min_salary_k:
+            return False
+    return not (
+        excluded_employment_types
+        and (job.job_type or "").strip().casefold() in excluded_employment_types
     )
 
 
@@ -284,15 +392,16 @@ async def list_jobs(
     *,
     location: str | None = None,
     query: str | None = None,
+    user_id: str | None = None,
 ) -> JobListResponse:
-    """List stored jobs, optionally filtered by location and title.
+    """List stored jobs, optionally filtered by location, title, and the operator's criteria.
 
     ``location`` and ``query`` used to be absent entirely, and that was the whole of the
     "London filter does nothing" bug: the page fetched every cached job and filtered the
     result on ATS, salary and seniority — never on where the job was. A search for London
     therefore showed every job the account had ever discovered, from any search.
 
-    Both filters are applied **server-side**, for two reasons that matter beyond tidiness:
+    All of it is applied **server-side**, for two reasons that matter beyond tidiness:
     pagination is computed from the filtered count, so page 2 of a London search is London
     jobs rather than whatever survived a client-side pass over page 1; and the totals the UI
     reports ("38 roles") are then the real number of matches.
@@ -302,6 +411,13 @@ async def list_jobs(
     Kingdom" — and expressing that as SQL would mean either a LIKE that is wrong or an
     extension SQLite does not have. See :mod:`app.core.job_discovery.location`.
 
+    ``user_id`` opts into the operator's own criteria: their salary floor and excluded
+    employment types (both real, hard filters — a below-floor or excluded-type job is not
+    returned at all) and a sponsor-confidence ranking boost (never a hard filter — a
+    sponsor-confirmed role sorts above an equal non-sponsor one, but nothing is hidden for
+    lacking sponsorship evidence). ``None`` preserves the old, criteria-free behaviour, which
+    existing callers with no notion of "whose policy" rely on.
+
     Args:
         db: Async database session.
         page: Page number (1-indexed).
@@ -309,6 +425,7 @@ async def list_jobs(
         status: Optional status filter.
         location: Optional place filter, e.g. ``"London"`` or ``"London, UK"``.
         query: Optional title filter, scored the same way discovery scores titles.
+        user_id: Whose salary floor, employment-type exclusions, and sponsor ranking to apply.
 
     Returns:
         Paginated job list response whose ``total`` counts matches, not stored rows.
@@ -323,8 +440,17 @@ async def list_jobs(
     wants_location = bool((location or "").strip())
     wants_query = bool((query or "").strip())
 
-    if not (wants_location or wants_query):
-        # Unfiltered: count in SQL and page in SQL, as before.
+    min_salary_k = 0
+    excluded_employment_types: frozenset[str] = frozenset()
+    if user_id is not None:
+        policy = await load_policy(db, user_id)
+        min_salary_k = policy.min_salary_k
+        excluded_employment_types = frozenset(
+            t.strip().casefold() for t in policy.exclude_employment_types if t.strip()
+        )
+
+    if not (wants_location or wants_query or user_id is not None):
+        # Unfiltered and no operator context: count in SQL and page in SQL, as before.
         count_stmt = select(func.count(Job.id))
         if status:
             count_stmt = count_stmt.where(Job.status == status)
@@ -354,7 +480,15 @@ async def list_jobs(
             or location_matches(location or "", job.location or "", remote=bool(job.remote)))
         and (not wants_query
              or matches_query(query or "", job.title or "", _skills_text(job)))
+        and _passes_hard_criteria(
+            job, min_salary_k=min_salary_k, excluded_employment_types=excluded_employment_types
+        )
     ]
+
+    if user_id is not None:
+        # Stable sort: candidates already arrived created_at-desc from the query above, so
+        # jobs within the same sponsor band keep that recency order — only the band changes.
+        matched.sort(key=lambda j: _SPONSOR_RANK.get(j.sponsor_confidence, 3))
 
     total = len(matched)
     items = [

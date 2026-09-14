@@ -7,7 +7,6 @@ import { useDashboardStats } from '@/hooks/useAnalytics';
 const CRUMB: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/jobs': 'Jobs',
-  '/run': 'Run console',
   '/applications': 'Applications',
   '/resumes': 'Résumés',
   '/targets': 'Role targets',

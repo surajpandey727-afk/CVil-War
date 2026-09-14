@@ -75,11 +75,43 @@ export function useAnalyseFit() {
   });
 }
 
+/** Every résumé ranked against this job. Powers both the floating ATS widget and the
+ *  résumés page's "how does this score" question — one source instead of two that could
+ *  disagree. A short `staleTime` keeps repeated widget mounts from refetching needlessly
+ *  while still picking up a newly uploaded résumé within a few seconds. */
+export function useResumeRecommendation(jobId: string | undefined) {
+  return useQuery({
+    queryKey: [...JOBS_KEY, 'resume-recommendation', jobId],
+    queryFn: () => jobService.getResumeRecommendation(jobId!),
+    enabled: !!jobId,
+    staleTime: 30_000,
+  });
+}
+
 /** What is known about a job's employer. */
 export function useCompanyProfile(jobId: string | undefined) {
   return useQuery({
     queryKey: [...JOBS_KEY, 'company', jobId],
     queryFn: () => jobService.getCompanyProfile(jobId!),
     enabled: !!jobId,
+  });
+}
+
+/**
+ * Fetch the full posting for a job.
+ *
+ * Invalidates the job list as well as the fit analysis: enrichment is what gives the fit
+ * analyser a description to read, so a fit computed before it ran was computed against
+ * nothing and must not be left on screen looking authoritative.
+ */
+export function useEnrichJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, force }: { jobId: string; force?: boolean }) =>
+      jobService.enrichJob(jobId, force),
+    onSuccess: (_job, { jobId }) => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void qc.invalidateQueries({ queryKey: ['fit', jobId] });
+    },
   });
 }

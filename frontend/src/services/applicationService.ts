@@ -60,6 +60,13 @@ export async function resolveIntervention(appId: string, response: string): Prom
   return data;
 }
 
+/** Re-queue (headed) an application paused for a CAPTCHA/verification wall, once the
+ *  operator has cleared it themselves in the browser window that opened for it. */
+export async function resolveBlocker(appId: string): Promise<{ queued: boolean }> {
+  const { data } = await api.post<{ queued: boolean }>(`/applications/${appId}/resolve-blocker`);
+  return data;
+}
+
 /** Approve and enqueue a set of staged applications together. Returns the count approved. */
 export async function bulkApprove(applicationIds: string[]): Promise<{ approved: number }> {
   const { data } = await api.post<{ approved: number }>('/applications/bulk-approve', {

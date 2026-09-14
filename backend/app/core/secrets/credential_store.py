@@ -20,6 +20,7 @@ from app.models.user_credential import UserCredential
 
 _KIND_LLM_KEY = "llm_key"
 _KIND_COOKIES = "platform_cookies"
+_KIND_OAUTH = "oauth_token"
 
 
 class CredentialStore:
@@ -109,6 +110,35 @@ class CredentialStore:
                 UserCredential.user_id == user_id,
                 UserCredential.kind == _KIND_COOKIES,
                 UserCredential.provider == platform,
+            )
+        )
+        await db.commit()
+        return result.rowcount > 0
+
+    async def put_oauth_token(
+        self, db: AsyncSession, user_id: str, provider_name: str, token: dict[str, Any]
+    ) -> None:
+        """Encrypt and upsert an OAuth token set (access + refresh token, expiry) for a
+        provider (e.g. ``gmail``) — the mutable state a one-time consent flow produces,
+        distinct from the static client id/secret that authorises the flow itself."""
+        await self._put(db, user_id, _KIND_OAUTH, provider_name, json.dumps(token).encode())
+
+    async def get_oauth_token(
+        self, db: AsyncSession, user_id: str, provider_name: str
+    ) -> dict[str, Any] | None:
+        """Return a provider's decrypted OAuth token set, or ``None`` if never connected."""
+        data = await self._get(db, user_id, _KIND_OAUTH, provider_name)
+        return json.loads(data.decode()) if data is not None else None
+
+    async def delete_oauth_token(
+        self, db: AsyncSession, user_id: str, provider_name: str
+    ) -> bool:
+        """Delete a provider's stored OAuth token. Returns True if a row was removed."""
+        result = await db.execute(
+            delete(UserCredential).where(
+                UserCredential.user_id == user_id,
+                UserCredential.kind == _KIND_OAUTH,
+                UserCredential.provider == provider_name,
             )
         )
         await db.commit()

@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.enums import SponsorConfidence
+
 
 class JobSearchRequest(BaseModel):
     """Request body for multi-platform job search."""
@@ -42,6 +44,19 @@ class JobListingResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    #: Structured intelligence lifted from the posting: the employer's own criteria labels,
+    #: the requirement lines verbatim, benefits, and the experience bar it states.
+    posting_data: dict | None = None
+    #: When the full posting was fetched. ``None`` means never — which the UI must not render
+    #: as "this job has no requirements".
+    enriched_at: datetime | None = None
+    #: How confident the system is this employer sponsors the Skilled Worker visa — see
+    #: ``SponsorConfidence``. Computed and stored on every job, used for ranking, but until
+    #: now never reached this response: the frontend had no way to show it per job.
+    sponsor_confidence: SponsorConfidence = SponsorConfidence.UNKNOWN
+    #: The matched register entry name, or the posting phrase that triggered detection.
+    #: ``None`` for UNKNOWN — there is nothing to show, not a fact that was hidden.
+    sponsor_evidence: str | None = None
 
 
 class JobListResponse(BaseModel):

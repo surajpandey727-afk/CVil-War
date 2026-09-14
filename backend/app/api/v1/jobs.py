@@ -2,11 +2,16 @@
 
 import structlog
 from fastapi import APIRouter, Depends, Query
+from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, get_tenant_db
+from app.api.deps import CurrentUser, get_redis, get_tenant_db
 from app.config.constants import DEFAULT_PAGE_SIZE
+from app.core.exceptions import RecordNotFoundError
+from app.core.orchestration.graph import run_post_enrichment_pipeline
 from app.core.ratelimit import rate_limit
+from app.models.job import Job
 from app.schemas.company import CompanyProfile
 from app.schemas.fit import FitAnalysis, FitRequest
 from app.schemas.job import (
@@ -15,10 +20,13 @@ from app.schemas.job import (
     JobListResponse,
     JobSearchRequest,
 )
+from app.schemas.resume_recommendation import ResumeRecommendation
 from app.services import company as company_service
 from app.services import fit as fit_service
 from app.services import job_search as job_service
 from app.services import resume as resume_service
+from app.services.enrichment import enrich_job
+from app.services.resume_recommendation import recommend_best_resume
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -44,6 +52,7 @@ async def search_jobs(
 
 @router.get("/", response_model=JobListResponse, summary="List jobs with pagination")
 async def list_jobs(
+    user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     status: str | None = Query(default=None),
@@ -61,10 +70,11 @@ async def list_jobs(
 
     ``location`` and ``q`` are applied here rather than in the browser. Filtering client-side
     meant ``total`` counted every stored job and page 2 of a London search was not London —
-    the filter existed only in the rendered list.
+    the filter existed only in the rendered list. The operator's own criteria (salary floor,
+    excluded employment types, sponsor-confidence ranking) are applied the same way.
     """
     return await job_service.list_jobs(
-        db, page, page_size, status, location=location, query=q
+        db, page, page_size, status, location=location, query=q, user_id=user.id
     )
 
 
@@ -76,6 +86,25 @@ async def get_job(
     """Get one of the current user's job listings by ID. Returns 404 if not found."""
     job = await job_service.get_job(db, job_id)
     return JobListingResponse.model_validate(job)
+
+
+@router.get(
+    "/{job_id}/resume-recommendation",
+    response_model=ResumeRecommendation,
+    summary="Which of the user's résumés best fits this job",
+)
+async def resume_recommendation(
+    job_id: str,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeRecommendation:
+    """Score every one of the user's résumés against this job and rank them.
+
+    Backs the floating ATS widget (always visible, updates to whichever job is currently
+    open) and replaces the résumés page's separate ad-hoc scorer — one surface for "which CV,
+    and why", instead of two that could disagree.
+    """
+    await job_service.get_job(db, job_id)  # 404 if the job does not exist / isn't this user's
+    return await recommend_best_resume(db, job_id)
 
 
 @router.post(
@@ -192,3 +221,48 @@ async def delete_job(
 ) -> None:
     """Delete one of the current user's job listings and its applications."""
     await job_service.delete_job(db, job_id)
+
+
+@router.post(
+    "/{job_id}/enrich",
+    response_model=JobListingResponse,
+    summary="Fetch the full posting and store what it says",
+)
+async def enrich(
+    job_id: str,
+    user: CurrentUser,
+    force: bool = False,
+    db: AsyncSession = Depends(get_tenant_db),
+    redis: Redis | None = Depends(get_redis),
+) -> JobListingResponse:
+    """Pull the complete posting for one job and persist its requirements.
+
+    Search results are summaries — a LinkedIn card has no description at all, which is why fit
+    analysis on those roles reported nothing to assess. Opening a job now fetches the real
+    posting once and keeps it, so requirements, benefits and the employer's own criteria are
+    available to every screen afterwards without another upstream request.
+
+    Idempotent: an already-enriched job comes back untouched unless ``force`` is set. That
+    matters because the caller is a drawer the operator may open repeatedly, and re-fetching
+    each time is how a source starts rate-limiting.
+
+    A fresh enrichment also re-runs the Eligibility and Scoring agents (core.orchestration):
+    the fuller description just fetched can change both the sponsorship signal and the résumé
+    match, so re-evaluating both automatically means the operator sees an up-to-date verdict
+    without a second action. Best-effort — a failure there never turns a successful enrichment
+    into a failed request.
+
+    Explicitly scoped by ``user_id`` — ``job_id`` is attacker-reachable path input, and
+    ``Session.get()`` does NOT go through the ORM tenant filter (it is a column/identity-map
+    load, which the filter deliberately skips), so a plain ``db.get()`` here would let one
+    operator enrich (and read back) another's job.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise RecordNotFoundError("Job not found")
+    was_enriched = job.enriched_at is not None
+    job = await enrich_job(db, job, force=force)
+    if force or not was_enriched:
+        await run_post_enrichment_pipeline(db, user.id, job, redis=redis)
+    return JobListingResponse.model_validate(job)

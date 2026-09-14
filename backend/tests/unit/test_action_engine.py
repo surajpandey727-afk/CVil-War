@@ -99,6 +99,27 @@ class TestNoDeadEnds:
         assert v.health is ApplicationHealth.BLOCKED
         assert "work_authorisation" in v.reason
 
+    def test_a_captcha_wall_asks_for_verification_not_a_generic_resume(self) -> None:
+        """A CAPTCHA/2FA pause (workers.tasks._mark_needs_verification) is a distinct,
+        more specific action than the generic 'resume from where it stopped' — the operator
+        needs to know a browser window is waiting on them, not just that a run is paused."""
+        v = compute_action(
+            app(
+                status=ApplicationStatus.PENDING_REVIEW,
+                resume_state={"blocked_reason": "captcha"},
+            ),
+            now=NOW,
+        )
+        assert v.action is NextAction.COMPLETE_VERIFICATION
+        assert v.health is ApplicationHealth.BLOCKED
+        assert "browser window" in v.reason
+
+    def test_pending_review_without_a_captcha_marker_is_the_generic_review_action(self) -> None:
+        """A plain 'needs the operator's review' application must not be swept up by the
+        CAPTCHA rule just because it also happens to be PENDING_REVIEW."""
+        v = compute_action(app(status=ApplicationStatus.PENDING_REVIEW), now=NOW)
+        assert v.action is NextAction.REVIEW_APPLICATION
+
     def test_a_long_paused_application_asks_for_a_reconnect(self) -> None:
         v = compute_action(
             app(status=ApplicationStatus.APPLYING, paused_at=NOW - timedelta(hours=5)),

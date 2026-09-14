@@ -2,6 +2,7 @@ import api from './api';
 import type { CompanyProfile } from '@/types/company';
 import type { FitAnalysis } from '@/types/fit';
 import type { Job, JobSearchRequest, JobListResponse, JobAnalysisResponse } from '@/types/job';
+import type { ResumeRecommendation } from '@/types/resumeRecommendation';
 
 /** Search for jobs across multiple platforms. */
 export async function searchJobs(request: JobSearchRequest): Promise<JobListResponse> {
@@ -71,5 +72,18 @@ export async function getStoredFit(
 /** What is actually known about this job's employer. */
 export async function getCompanyProfile(jobId: string): Promise<CompanyProfile> {
   const { data } = await api.get<CompanyProfile>(`/jobs/${jobId}/company`);
+  return data;
+}
+
+/** Every résumé ranked against this job, with the winner called out and explained. Backs
+ *  the floating ATS widget — visible regardless of which page the operator is on. */
+export async function getResumeRecommendation(jobId: string): Promise<ResumeRecommendation> {
+  const { data } = await api.get<ResumeRecommendation>(`/jobs/${jobId}/resume-recommendation`);
+  return data;
+}
+
+/** Fetch the full posting for a job and persist its requirements. */
+export async function enrichJob(jobId: string, force = false): Promise<Job> {
+  const { data } = await api.post<Job>(`/jobs/${jobId}/enrich`, null, { params: { force } });
   return data;
 }

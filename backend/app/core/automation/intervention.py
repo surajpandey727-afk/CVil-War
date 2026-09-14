@@ -16,11 +16,26 @@ def intervention_key(application_id: str) -> str:
     return f"intervene:{application_id}"
 
 
-def needs_intervention_event(application_id: str, kind: str, prompt: str) -> dict:
-    """Build the WS event that prompts the user to resolve an intervention."""
+def needs_intervention_event(
+    application_id: str, kind: str, prompt: str, *, url: str = "", screenshot_b64: str = ""
+) -> dict:
+    """Build the WS event that prompts the user to resolve an intervention.
+
+    ``url`` is the exact page the browser stopped on (set for ``kind="captcha"``) — a
+    CAPTCHA cannot be cleared by typing a code into this dashboard the way a 2FA prompt
+    can, so the operator needs to know which portal/page to go look at.
+
+    ``screenshot_b64`` (set for ``kind="submit_confirmation"``) is what the operator is
+    actually approving — a link to "the site" is not enough when the decision is "does this
+    filled-in form look right", since a headless run has no window for them to go look at
+    themselves the way a headed CAPTCHA pause does.
+    """
     return {
         "type": "intervention_required",
-        "payload": {"application_id": application_id, "kind": kind, "prompt": prompt},
+        "payload": {
+            "application_id": application_id, "kind": kind, "prompt": prompt, "url": url,
+            "screenshot_b64": screenshot_b64,
+        },
     }
 
 

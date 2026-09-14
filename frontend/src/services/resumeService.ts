@@ -7,6 +7,7 @@ import type {
   ResumeGenerateRequest,
   ResumeListResponse,
   ResumeUsageResponse,
+  ExtractProfileResponse,
 } from '@/types/resume';
 
 /** Upload a PDF or DOCX resume file. */
@@ -73,6 +74,14 @@ export async function downloadResumeFile(
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** Fill in the account's work history/education from this résumé's text (ATS scoring needs
+ *  real structured data for both — see the backend service docstring). No-op if the profile
+ *  already has work history. */
+export async function extractProfile(resumeId: string): Promise<ExtractProfileResponse> {
+  const { data } = await api.post<ExtractProfileResponse>(`/resumes/${resumeId}/extract-profile`);
+  return data;
 }
 
 /** Where a résumé has been used, so removing it is an informed decision. */

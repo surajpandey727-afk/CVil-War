@@ -63,6 +63,25 @@ def create_ws_ticket(sub: str) -> str:
     return jwt.encode(payload, _secret(), algorithm=auth.algorithm)
 
 
+def create_oauth_state(sub: str) -> str:
+    """Mint a short-lived, signed ``state`` value for a third-party OAuth redirect.
+
+    The callback (a raw browser redirect from Google, carrying no auth header this app's
+    normal dependency can read) uses this to recover which operator is completing the flow —
+    the same problem ``create_ws_ticket`` solves for the WebSocket handshake, just with a
+    longer window since a human clicking through Google's consent screen takes longer than a
+    socket connecting.
+    """
+    now = datetime.now(UTC)
+    payload = {
+        "sub": sub,
+        "type": "oauth_state",
+        "iat": now,
+        "exp": now + timedelta(minutes=10),
+    }
+    return jwt.encode(payload, _secret(), algorithm=get_settings().auth.algorithm)
+
+
 def decode_token(token: str, *, expected_type: str | None = None) -> dict[str, Any]:
     """Decode and validate a JWT. Raises :class:`AuthError` on any failure."""
     auth = get_settings().auth

@@ -84,8 +84,15 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Bound to loopback only, not "6379:6379" — nothing outside this container needs to
+    # reach Redis directly; backend/worker talk to it over the internal `cvil-war` network
+    # by service name. An unauthenticated Redis published on a public/LAN interface is one
+    # of the most commonly scanned-and-compromised misconfigurations on the internet (used
+    # for cryptomining/ransomware via CONFIG SET). This still lets a backend/worker running
+    # natively on the host (outside Docker) reach it via redis://localhost:6379, same as
+    # before, since loopback traffic is exactly what "127.0.0.1:" publishes.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:

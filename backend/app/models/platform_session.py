@@ -25,8 +25,8 @@ class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
-    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fingerprint_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # -- Granular lifecycle (Job OS §6/§7) ----------------------------------------------
@@ -39,7 +39,7 @@ class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=SessionState.NOT_CONNECTED,
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: Why the session needs attention, shown to the user verbatim.
     state_detail: Mapped[str | None] = mapped_column(String(300), nullable=True)
     #: Count of applications currently relying on this session, for the connection centre.

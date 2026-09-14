@@ -44,3 +44,50 @@ export interface PlatformsResponse {
   usable: number;
   connected: number;
 }
+
+/**
+ * An in-flight interactive login capture.
+ *
+ * The operator signs in on the platform's own page in a real browser window; only the
+ * resulting session is kept. Nothing here ever carries a cookie or a credential — this is
+ * purely progress, so the UI can say what is happening while a window is open.
+ */
+export interface ConnectAttempt {
+  id: string;
+  platform: string;
+  state:
+    | 'opening'
+    | 'awaiting_login'
+    | 'capturing'
+    | 'connected'
+    | 'failed'
+    | 'cancelled'
+    | 'timed_out';
+  /** True once the attempt has settled; the UI stops polling. */
+  done: boolean;
+  /** What the operator should do right now. */
+  instructions: string;
+  /** What happened, once it has. */
+  detail: string;
+  seconds_remaining: number;
+}
+
+/** One live probe result — what happened just now, not what the catalogue claims. */
+export interface PlatformTestResult {
+  key: string;
+  label: string;
+  state: string;
+  /** The upstream's own words on failure. */
+  detail: string;
+  results: number;
+  elapsed_ms: number;
+  ok: boolean;
+}
+
+export interface PlatformTestResponse {
+  results: PlatformTestResult[];
+  tested: number;
+  passed: number;
+  failed: number;
+  elapsed_ms: number;
+}

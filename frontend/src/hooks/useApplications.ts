@@ -67,6 +67,17 @@ export function useResolveIntervention() {
   });
 }
 
+/** Re-queue (headed) an application paused for a CAPTCHA/verification wall. */
+export function useResolveBlocker() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (appId: string) => appService.resolveBlocker(appId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPS_KEY });
+    },
+  });
+}
+
 /** Approve a set of staged applications together (batch flow). */
 export function useBulkApprove() {
   const queryClient = useQueryClient();

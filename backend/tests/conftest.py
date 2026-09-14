@@ -7,6 +7,20 @@ tenant-correct. The ``client`` fixture is authenticated (auth dependencies overr
 ``anon_client`` exercises the real auth stack for register/login/guard tests.
 """
 
+import os
+
+# Must run before any ``app.*`` import: app.db.session builds its module-level engine from
+# get_settings().database_url at import time, so a dev .env pointed at a real Postgres
+# instance (Supabase or otherwise) would make the whole suite open live network connections
+# — slow, non-isolated, and (via /health's own direct use of that engine) a source of
+# asyncpg/event-loop teardown flakiness that has nothing to do with what a test is checking.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
+# Same reasoning for the live-apply flag: it is a real environment switch (drives a real
+# Playwright browser at a real employer's site), never something a dev .env value should
+# leak into automated tests. Tests that specifically exercise the real-browser path opt in
+# by mocking ``run_apply``/``_submit_application`` directly, not via this env var.
+os.environ.setdefault("BROWSER__LIVE_APPLY", "false")
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -61,6 +75,28 @@ def _isolated_storage_root(tmp_path_factory) -> AsyncGenerator[None, None]:
         os.environ["STORAGE__LOCAL_ROOT"] = previous
     get_settings.cache_clear()
     get_storage.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_sponsor_register(tmp_path, monkeypatch):
+    """Point the sponsor-register cache at an empty temp path for every test.
+
+    Without this, any test that discovers/ingests a job (``_listing_to_job`` calls
+    ``core.sponsorship.classify.classify`` unconditionally) would load whatever real register
+    CSV happens to be cached on disk at ``backend/data/reference/`` — slow (a ~140k-row file),
+    and it would make test outcomes depend on live external data that changes over time.
+    Redirected to a path that never exists, ``is_registered_sponsor`` always reports
+    unmatched, which is the correct, deterministic default for tests that do not care about
+    sponsorship classification specifically (``test_sponsorship.py`` builds its own
+    in-memory ``SponsorRegister`` instances instead of relying on the file cache at all).
+    """
+    from app.core.sponsorship import register
+
+    monkeypatch.setattr(register, "_CSV_PATH", tmp_path / "no-such-register.csv")
+    monkeypatch.setattr(register, "_META_PATH", tmp_path / "no-such-register.meta.json")
+    monkeypatch.setattr(register, "_register_cache", None)
+    yield
+    monkeypatch.setattr(register, "_register_cache", None)
 
 
 @pytest.fixture

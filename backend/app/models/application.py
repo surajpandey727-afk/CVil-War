@@ -65,8 +65,8 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     cover_letter_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Timestamps
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    response_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    response_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Metadata
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -93,7 +93,7 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     #: Computed score used to order the queue; the reason string explains it to the user.
     next_action_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     #: Hard deadline driving urgency (assessment close, interview, response-by).
-    action_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    action_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # -- Provenance (Job OS §1: one canonical record whatever the origin) ---------------
     #: How this application entered the system: discovery, sprint, manual, import, ats.
@@ -133,14 +133,14 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     #: "completed": [...], "current": "work_authorisation", "remaining": [...]}.
     #: Persisted so a reconnect resumes at the current field instead of restarting.
     resume_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # -- Follow-up / assessment / interview tracking -------------------------------------
-    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    assessment_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assessment_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     assessment_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
-    interview_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    interview_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: Document version actually submitted. A version, never a document — see models/document.
     document_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 

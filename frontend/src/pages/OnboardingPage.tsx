@@ -8,7 +8,12 @@ import { useUpdateSettings } from '@/hooks/useSettings';
 import { useAppStore } from '@/store/useAppStore';
 
 const PLATFORMS = ['linkedin', 'indeed', 'glassdoor', 'exa'];
-const STEP_COUNT = 3;
+const STEP_COUNT = 4;
+//: Without at least one, discovery has nothing to search for and a brand-new account sees
+//: zero jobs until someone finds Settings and fills this in by hand — see
+//: `services.discovery_scheduler._active_titles`, which returns nothing at all with no
+//: role targets configured. This step exists so that never happens silently.
+const ROLE_TITLE_EXAMPLES = ['Product Manager', 'Data Analyst', 'Software Engineer', 'Data Scientist'];
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -18,6 +23,8 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [applyMode, setApplyMode] = useState('review');
   const [platforms, setPlatforms] = useState<Set<string>>(new Set(PLATFORMS));
+  const [roleTitles, setRoleTitles] = useState<string[]>([]);
+  const [roleInput, setRoleInput] = useState('');
 
   const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -28,8 +35,28 @@ export default function OnboardingPage() {
   const togglePlatform = (p: string) =>
     setPlatforms((prev) => { const n = new Set(prev); if (n.has(p)) n.delete(p); else n.add(p); return n; });
 
+  const addRoleTitle = (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed || roleTitles.some((t) => t.toLowerCase() === trimmed.toLowerCase())) return;
+    setRoleTitles((prev) => [...prev, trimmed]);
+    setRoleInput('');
+  };
+  const removeRoleTitle = (title: string) => setRoleTitles((prev) => prev.filter((t) => t !== title));
+  const onRoleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addRoleTitle(roleInput);
+    }
+  };
+
   const finish = () => {
-    updateSettings.mutate({ apply_mode: applyMode, platforms_enabled: [...platforms] });
+    updateSettings.mutate({
+      apply_mode: applyMode,
+      platforms_enabled: [...platforms],
+      role_targets: roleTitles.map((title) => ({
+        title, active: true, fit: 1, why: 'Added during onboarding', family: 'other',
+      })),
+    });
     navigate('/dashboard');
   };
   const onPrimary = () => (step < STEP_COUNT - 1 ? setStep(step + 1) : finish());
@@ -66,6 +93,43 @@ export default function OnboardingPage() {
             )}
             {step === 1 && (
               <>
+                <h1 style={{ margin: '0 0 8px', font: '800 22px/1.2 var(--font)', letterSpacing: '-.02em' }}>What roles are you targeting?</h1>
+                <p style={{ margin: '0 0 18px', font: '500 13px/1.5 var(--font)', color: 'var(--text-3)' }}>Add at least one job title. This is what the agent searches for — without it, discovery has nothing to look for.</p>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <input
+                    aria-label="Job title"
+                    value={roleInput}
+                    onChange={(e) => setRoleInput(e.target.value)}
+                    onKeyDown={onRoleInputKeyDown}
+                    placeholder="e.g. Product Manager"
+                    style={{ flex: '1 1 auto', height: 40, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text)', font: '500 13px/1 var(--font)' }}
+                  />
+                  <button type="button" onClick={() => addRoleTitle(roleInput)} style={{ flex: '0 0 auto', height: 40, padding: '0 16px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}>Add</button>
+                </div>
+                {roleTitles.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                    {roleTitles.map((title) => (
+                      <span key={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 6px 0 12px', borderRadius: 999, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', color: 'var(--accent)', font: '600 12px/1 var(--font)' }}>
+                        {title}
+                        <button type="button" aria-label={`Remove ${title}`} onClick={() => removeRoleTitle(title)} style={{ display: 'grid', placeItems: 'center', width: 20, height: 20, borderRadius: '50%', background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer' }}>
+                          <Icon name="x" size={12} sw={2.4} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <span style={{ display: 'block', font: '600 11px/1 var(--font)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Or pick one to start</span>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {ROLE_TITLE_EXAMPLES.filter((t) => !roleTitles.includes(t)).map((title) => (
+                    <button key={title} type="button" onClick={() => addRoleTitle(title)} style={{ height: 32, padding: '0 13px', borderRadius: 999, cursor: 'pointer', font: '600 12px/1 var(--font)', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-3)' }}>
+                      {title}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {step === 2 && (
+              <>
                 <h1 style={{ margin: '0 0 8px', font: '800 22px/1.2 var(--font)', letterSpacing: '-.02em' }}>Add your résumé</h1>
                 <p style={{ margin: '0 0 20px', font: '500 13px/1.5 var(--font)', color: 'var(--text-3)' }}>Upload a base résumé (PDF or DOCX). You can skip this and add one later.</p>
                 <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '30px 20px', borderRadius: 'var(--r-lg)', border: '1.5px dashed var(--border-2)', background: 'var(--surface-2)', cursor: 'pointer', textAlign: 'center' }}>
@@ -76,7 +140,7 @@ export default function OnboardingPage() {
                 </label>
               </>
             )}
-            {step === 2 && (
+            {step === 3 && (
               <>
                 <h1 style={{ margin: '0 0 8px', font: '800 22px/1.2 var(--font)', letterSpacing: '-.02em' }}>How should the agent apply?</h1>
                 <p style={{ margin: '0 0 18px', font: '500 13px/1.5 var(--font)', color: 'var(--text-3)' }}>You can change any of this later in Settings.</p>

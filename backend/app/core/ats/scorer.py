@@ -113,6 +113,14 @@ class ResumeScorer:
         Returns:
             A ScoreDetails instance with the full scoring breakdown.
         """
+        # Both dicts are the public entry point's own inputs — guard here once, rather than
+        # trust every caller to never pass `None` for a whole profile/metadata blob (a bare
+        # `.get()` on `None` is an AttributeError, not a graceful "nothing recorded").
+        candidate_profile = candidate_profile or {}
+        job_metadata = job_metadata or {}
+        resume_text = resume_text or ""
+        job_description = job_description or ""
+
         skill_score, missing_req, missing_pref = self._score_skills(
             candidate_profile.get("skills", []),
             job_metadata.get("required_skills", []),
@@ -173,6 +181,14 @@ class ResumeScorer:
         preferred_skills: list[str],
     ) -> tuple[float, list[str], list[str]]:
         """Score skill coverage and identify gaps."""
+        # Job metadata is parsed, loosely-typed JSON — a stray `None`/non-string entry is not
+        # a real skill name to report missing (and `', '.join()` on the suggestion text below
+        # cannot handle one anyway), so it is dropped here rather than carried downstream.
+        # `candidate_skills` gets the same treatment: a stored profile with `skills: null`
+        # (present key, empty value) must read as "no skills recorded", not crash iterating it.
+        candidate_skills = [s for s in (candidate_skills or []) if isinstance(s, str) and s]
+        required_skills = [s for s in (required_skills or []) if isinstance(s, str) and s]
+        preferred_skills = [s for s in (preferred_skills or []) if isinstance(s, str) and s]
         if not required_skills and not preferred_skills:
             return 0.5, [], []
 
@@ -213,7 +229,12 @@ class ResumeScorer:
         required_rank = self._education_rank(required_level)
         matches: list[dict[str, Any]] = []
         best_rank = 0
-        for edu in candidate_education:
+        for edu in candidate_education or []:
+            # A stored profile is loosely-typed JSON; one malformed entry (a bare string
+            # instead of the expected {degree, institution} shape) must not 500 the whole
+            # scoring request — skip it rather than crash on `.get()`.
+            if not isinstance(edu, dict):
+                continue
             degree = edu.get("degree", "")
             rank = self._education_rank(degree)
             matches.append({
@@ -242,7 +263,15 @@ class ResumeScorer:
         return ""
 
     def _education_rank(self, education_text: str) -> int:
-        """Convert an education string to a numeric rank."""
+        """Convert an education string to a numeric rank.
+
+        ``education_text`` comes from a stored JSON blob (a candidate's own profile, or a
+        job's parsed metadata) — a non-string value there (an int, a stray `None` that
+        slipped past a `.get(..., "")` default because the key was present but null) must
+        rank as "unrecognised" (0), not crash the whole score over one bad field.
+        """
+        if not isinstance(education_text, str):
+            education_text = "" if education_text is None else str(education_text)
         lower = education_text.lower()
         for level, rank in _EDUCATION_LEVELS.items():
             if level in lower:
