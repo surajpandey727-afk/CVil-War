@@ -178,6 +178,12 @@ export const handlers = [
     });
   }),
 
+  http.get('/api/v1/resumes/:resumeId/download', () => {
+    return new HttpResponse(new Blob(['%PDF-1.4 test'], { type: 'application/pdf' }), {
+      headers: { 'Content-Type': 'application/pdf' },
+    });
+  }),
+
   http.get('/api/v1/resumes/:resumeId/usage', ({ params }) => {
     return HttpResponse.json({
       resume_id: params['resumeId'],

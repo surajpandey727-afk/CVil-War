@@ -76,6 +76,18 @@ export async function downloadResumeFile(
   }
 }
 
+/**
+ * Fetch a resume's PDF as a transient object URL for inline preview (an <iframe> src), as
+ * opposed to downloadResumeFile's save-to-disk flow. Caller must URL.revokeObjectURL it.
+ */
+export async function fetchResumePreviewUrl(resumeId: string): Promise<string> {
+  const { data } = await api.get<Blob>(`/resumes/${resumeId}/download`, {
+    params: { format: 'pdf' },
+    responseType: 'blob',
+  });
+  return URL.createObjectURL(data);
+}
+
 /** Fill in the account's work history/education from this résumé's text (ATS scoring needs
  *  real structured data for both — see the backend service docstring). No-op if the profile
  *  already has work history. */

@@ -1,4 +1,5 @@
 import Icon from '@/components/ui/Icon';
+import ResumeThumbnail from '@/components/resumes/ResumeThumbnail';
 import { atsColor, atsPercent, relativeTime } from '@/lib/status';
 import type { Resume } from '@/types/resume';
 
@@ -36,9 +37,9 @@ export default function ResumeCard({ resume, jobLabel, selected, onSelect, onOpt
         aria-label={`Select résumé ${resume.name} — ${t.label}${jobLabel ? `, tailored for ${jobLabel}` : ''}`}
         style={{ display: 'block', width: '100%', textAlign: 'left', padding: 0, margin: 0, background: 'none', border: 0, cursor: 'pointer', color: 'inherit' }}
       >
-        <div style={{ height: 116, borderRadius: 'var(--r-md)', background: 'repeating-linear-gradient(135deg,var(--surface-2),var(--surface-2) 7px,var(--surface-3) 7px,var(--surface-3) 14px)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', position: 'relative' }}>
+        <div style={{ position: 'relative' }}>
+          <ResumeThumbnail resume={resume} height={116} />
           <span style={{ position: 'absolute', top: 8, left: 8, padding: '3px 7px', borderRadius: 6, background: t.soft, color: t.color, font: '700 9px/1 var(--mono)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{t.label}</span>
-          <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)' }}>{resume.template_id}</span>
         </div>
         <div style={{ marginTop: 10 }}>
           <div style={{ font: '700 12.5px/1.25 var(--font)', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{resume.name}</div>

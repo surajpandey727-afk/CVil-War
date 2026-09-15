@@ -1,5 +1,6 @@
 import Icon from '@/components/ui/Icon';
 import { atsColor, atsPercent } from '@/lib/status';
+import { useResumePreviewUrl } from '@/hooks/useResumes';
 import type { Resume, ResumeScoreResponse } from '@/types/resume';
 import type { Job } from '@/types/job';
 
@@ -47,6 +48,7 @@ export default function ResumePreviewPanel({ resume, score, scoring, jobs, targe
       ]
     : [];
   const canScore = Boolean(targetJobId) && !scoring;
+  const { url: previewUrl, loading: previewLoading, error: previewError } = useResumePreviewUrl(resume.id, resume.has_pdf);
 
   return (
     <div style={{ position: 'sticky', top: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)', padding: 16, display: 'flex', flexDirection: 'column', gap: 14, fontFamily: 'var(--font)', color: 'var(--text)' }}>
@@ -55,14 +57,34 @@ export default function ResumePreviewPanel({ resume, score, scoring, jobs, targe
         <span style={{ padding: '3px 8px', borderRadius: 6, background: t.soft, color: t.color, font: '700 9px/1 var(--mono)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{t.label}</span>
       </div>
 
-      {/* Decorative preview mock */}
-      <div style={{ height: 176, borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', padding: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 7 }}>
-        <div style={{ width: '55%', height: 11, borderRadius: 3, background: 'var(--text-4)', opacity: 0.6 }} />
-        <div style={{ width: '35%', height: 7, borderRadius: 3, background: 'var(--border-3)' }} />
-        <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />
-        {['100%', '92%', '96%', '68%'].map((w, i) => <div key={i} style={{ width: w, height: 6, borderRadius: 3, background: 'var(--border-2)' }} />)}
-        <div style={{ width: '42%', height: 8, borderRadius: 3, background: 'var(--accent)', opacity: 0.5, marginTop: 5 }} />
-      </div>
+      {resume.has_pdf ? (
+        <div style={{ height: 340, borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', overflow: 'hidden', position: 'relative' }}>
+          {previewUrl && (
+            <iframe
+              key={resume.id}
+              src={`${previewUrl}#toolbar=0&navpanes=0`}
+              title={`Preview of ${resume.name}`}
+              style={{ width: '100%', height: '100%', border: 0, display: 'block', background: '#fff' }}
+            />
+          )}
+          {previewLoading && (
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', font: '600 11.5px/1 var(--font)', color: 'var(--text-3)' }}>
+              Loading preview…
+            </div>
+          )}
+          {previewError && (
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', gap: 6, textAlign: 'center', padding: 16, font: '600 11.5px/1.4 var(--font)', color: 'var(--text-3)' }}>
+              <Icon name="alert" size={18} />
+              Couldn&apos;t load the preview.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ height: 120, borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', gap: 6, textAlign: 'center', padding: 16, font: '600 11.5px/1.4 var(--font)', color: 'var(--text-3)' }}>
+          <Icon name="file" size={18} />
+          No PDF on file yet for this résumé.
+        </div>
+      )}
 
       <div style={{ font: '700 12.5px/1.3 var(--font)' }}>{resume.name}</div>
 

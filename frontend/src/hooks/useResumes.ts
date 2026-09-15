@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as resumeService from '@/services/resumeService';
 import type { ResumeGenerateRequest } from '@/types/resume';
@@ -67,6 +68,53 @@ export function useResumeUsage(resumeId: string | null) {
     queryFn: () => resumeService.getResumeUsage(resumeId!),
     enabled: Boolean(resumeId),
   });
+}
+
+/**
+ * Object-URL for a résumé's actual PDF, for inline preview. Re-fetches when the resume changes
+ * and revokes the previous URL so blobs don't leak across selections or unmounts.
+ */
+export function useResumePreviewUrl(resumeId: string | null, hasPdf: boolean) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const urlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    urlRef.current = null;
+    setUrl(null);
+    setError(false);
+    if (!resumeId || !hasPdf) return;
+
+    let cancelled = false;
+    setLoading(true);
+    resumeService
+      .fetchResumePreviewUrl(resumeId)
+      .then((objectUrl) => {
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        urlRef.current = objectUrl;
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
+    };
+  }, [resumeId, hasPdf]);
+
+  return { url, loading, error };
 }
 
 /** Delete (or archive) a résumé. */
