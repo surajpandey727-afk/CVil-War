@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import CompanyPanel from '@/components/jobs/CompanyPanel';
 import PostingPanel from '@/components/jobs/PostingPanel';
@@ -98,7 +99,14 @@ export default function JobDrawer({
   // may be absent, and the buttons say so rather than pointing at a guess.
   const applyUrl = job.application_url || job.url || '';
 
-  return (
+  // Portalled to <body>: this drawer is mounted from JobSearchPage, which wraps its whole
+  // tree in `animation: '... both'`. A `both` fill-mode keeps that ancestor "affected by"
+  // its animated transform indefinitely (even once it settles at the identity transform),
+  // which makes it a containing block for `position: fixed` descendants — this drawer was
+  // positioning itself relative to that ~11,000px-tall content wrapper, not the viewport,
+  // so it opened far off-screen instead of sliding in. Same root cause as the bulk-apply
+  // selection bar on the same page.
+  return createPortal(
     <>
       <div onClick={onClose} role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,9,.5)', backdropFilter: 'blur(3px)', animation: 'aaPop .16s var(--ease)' }} />
       <aside
@@ -293,7 +301,8 @@ export default function JobDrawer({
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
 

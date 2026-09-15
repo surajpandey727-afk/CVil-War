@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
@@ -503,8 +504,16 @@ export default function JobSearchPage() {
         )}
       </div>
 
-      {/* ---- Selection bar ------------------------------------------------------------- */}
-      {selected.length > 0 && (
+      {/* ---- Selection bar --------------------------------------------------------------
+          Rendered through a portal straight into <body>, not as a descendant of this
+          page's `animation: '... both'` wrapper above. A `both` fill-mode keeps an
+          element "affected by" its animated properties indefinitely after it finishes —
+          Chrome then still treats it as a containing block for `position: fixed`
+          descendants, so this bar was positioning itself relative to that wrapper's full
+          (~11,000px) content height instead of the viewport. It rendered correctly, just
+          buried far down the page — indistinguishable from "the feature doesn't exist"
+          without scrolling to the exact spot. */}
+      {selected.length > 0 && createPortal(
         <div
           style={{
             position: 'fixed', left: '50%', bottom: 22, transform: 'translateX(-50%)', zIndex: 80,
@@ -534,7 +543,8 @@ export default function JobSearchPage() {
           >
             {createApps.isPending ? 'Queueing…' : 'Start applying'}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {drawerJob && (

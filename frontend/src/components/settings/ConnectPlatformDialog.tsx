@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import Icon from '@/components/ui/Icon';
 import { cancelConnect, getConnectAttempt, startConnect } from '@/services/settingsService';
@@ -94,7 +95,11 @@ export default function ConnectPlatformDialog({
   const copy = attempt ? STATE_COPY[attempt.state] : null;
   const settled = attempt?.done ?? false;
 
-  return (
+  // Portalled to <body> — SourcesPage wraps its tree in `animation: '... both'`, whose
+  // fill-mode keeps it a containing block for `position: fixed` descendants indefinitely
+  // (see JobDrawer.tsx for the full explanation). Without this, `inset: 0` centers the
+  // dialog inside that animated wrapper's full content height instead of the viewport.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -160,6 +165,7 @@ export default function ConnectPlatformDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
