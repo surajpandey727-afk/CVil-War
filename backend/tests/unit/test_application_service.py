@@ -5,6 +5,7 @@ import pytest
 from app.core.exceptions import RecordNotFoundError
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
+from app.models.resume import Resume
 from app.schemas.application import (
     ApplicationBatchCreate,
     ApplicationCreate,
@@ -12,6 +13,14 @@ from app.schemas.application import (
 )
 from app.services import application as app_service
 from tests.conftest import TEST_USER_ID
+
+
+async def _create_resume(db_session, name="Test Resume"):
+    r = Resume(user_id=TEST_USER_ID, name=name, type="base", template_id="modern")
+    db_session.add(r)
+    await db_session.commit()
+    await db_session.refresh(r)
+    return r
 
 
 async def _create_job(db_session, sample_job_data, suffix="0"):
@@ -147,3 +156,45 @@ class TestUpdateStatus:
 
         assert updated.status == ApplicationStatus.APPLIED
         assert updated.applied_at is not None
+
+    async def test_update_status_can_attach_a_resume(self, db_session, sample_job_data):
+        """Resolves the dashboard's "CV required" blocker: an application queued without
+        a résumé (or auto-mode with no match) previously had no way to have one attached —
+        there was no endpoint at all for it."""
+        job = await _create_job(db_session, sample_job_data)
+        created = await app_service.create_application(
+            db_session, ApplicationCreate(job_id=job.id), TEST_USER_ID
+        )
+        assert created.resume_id is None
+        resume = await _create_resume(db_session)
+
+        update = ApplicationStatusUpdate(status=created.status, resume_id=resume.id)
+        updated = await app_service.update_status(db_session, created.id, update)
+
+        assert updated.resume_id == resume.id
+
+    async def test_update_status_rejects_a_resume_that_does_not_exist(
+        self, db_session, sample_job_data,
+    ):
+        job = await _create_job(db_session, sample_job_data)
+        created = await app_service.create_application(
+            db_session, ApplicationCreate(job_id=job.id), TEST_USER_ID
+        )
+
+        update = ApplicationStatusUpdate(status=created.status, resume_id="nonexistent")
+        with pytest.raises(RecordNotFoundError):
+            await app_service.update_status(db_session, created.id, update)
+
+    async def test_update_status_without_resume_id_leaves_it_unchanged(
+        self, db_session, sample_job_data,
+    ):
+        job = await _create_job(db_session, sample_job_data)
+        resume = await _create_resume(db_session)
+        created = await app_service.create_application(
+            db_session, ApplicationCreate(job_id=job.id, resume_id=resume.id), TEST_USER_ID
+        )
+
+        update = ApplicationStatusUpdate(status=ApplicationStatus.REJECTED)
+        updated = await app_service.update_status(db_session, created.id, update)
+
+        assert updated.resume_id == resume.id

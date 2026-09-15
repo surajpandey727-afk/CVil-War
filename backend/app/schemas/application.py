@@ -33,10 +33,17 @@ class ApplicationBulkApprove(BaseModel):
 
 
 class ApplicationStatusUpdate(BaseModel):
-    """Request to update application status."""
+    """Request to update application status.
+
+    ``resume_id`` is optional and independent of ``status`` — it exists so the "CV
+    required" dashboard blocker (an application queued without a résumé chosen, or with
+    one that's since been archived) can be resolved by re-sending the current status
+    alongside the newly-picked résumé, without a separate endpoint.
+    """
 
     status: StatusEnum
     notes: str | None = None
+    resume_id: str | None = None
 
 
 class ApplicationIntervention(BaseModel):

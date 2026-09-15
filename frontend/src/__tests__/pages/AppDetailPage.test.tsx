@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -100,5 +101,88 @@ describe('AppDetailPage', () => {
 
     await screen.findByRole('heading', { name: 'Senior Product Manager' });
     expect(screen.queryByText(/fill activity/i)).not.toBeInTheDocument();
+  });
+
+  describe('résumé picker for an application missing one', () => {
+    // Regression: the dashboard's "CV required" action used to route here to nothing —
+    // AppDetailPage had no way to attach a résumé to an existing application at all, and
+    // the backend had no endpoint for it either.
+
+    it('shows a picker when no résumé is attached', async () => {
+      server.use(
+        http.get('/api/v1/applications/:appId', () =>
+          HttpResponse.json(fullApp({ resume_id: null, resume_name: null }))),
+      );
+      server.use(
+        http.get('/api/v1/resumes/', () => HttpResponse.json({
+          items: [{ id: 'resume-9', name: 'Suraj_N_Pandey_MLOps.pdf' }],
+          total: 1, page: 1, page_size: 20, has_next: false,
+        })),
+      );
+      renderDetail();
+
+      await screen.findByRole('heading', { name: 'Senior Product Manager' });
+      expect(screen.getByText('No résumé selected')).toBeInTheDocument();
+      expect(await screen.findByRole('option', { name: 'Suraj_N_Pandey_MLOps.pdf' })).toBeInTheDocument();
+    });
+
+    it('shows a picker when the attached résumé has been archived', async () => {
+      server.use(
+        http.get('/api/v1/applications/:appId', () =>
+          HttpResponse.json(fullApp({ resume_archived: true }))),
+      );
+      renderDetail();
+
+      await screen.findByRole('heading', { name: 'Senior Product Manager' });
+      expect(screen.getByText('The résumé used here has since been archived')).toBeInTheDocument();
+    });
+
+    it('does not show a picker once a résumé is attached', async () => {
+      server.use(http.get('/api/v1/applications/:appId', () => HttpResponse.json(fullApp())));
+      renderDetail();
+
+      await screen.findByRole('heading', { name: 'Senior Product Manager' });
+      expect(screen.queryByLabelText('Choose a résumé')).not.toBeInTheDocument();
+    });
+
+    it('attaches the picked résumé, sending the app id and resume id together', async () => {
+      server.use(
+        http.get('/api/v1/applications/:appId', () =>
+          HttpResponse.json(fullApp({ resume_id: null, resume_name: null, status: 'queued' }))),
+      );
+      server.use(
+        http.get('/api/v1/resumes/', () => HttpResponse.json({
+          items: [{ id: 'resume-9', name: 'Suraj_N_Pandey_MLOps.pdf' }],
+          total: 1, page: 1, page_size: 20, has_next: false,
+        })),
+      );
+      let body: { status?: string; resume_id?: string } | null = null;
+      server.use(
+        http.put('/api/v1/applications/:appId/status', async ({ request }) => {
+          body = (await request.json()) as { status: string; resume_id: string };
+          return HttpResponse.json(fullApp({ resume_id: body.resume_id }));
+        }),
+      );
+      renderDetail();
+
+      await screen.findByRole('heading', { name: 'Senior Product Manager' });
+      await userEvent.selectOptions(screen.getByLabelText('Choose a résumé'), 'resume-9');
+      await userEvent.click(screen.getByRole('button', { name: /attach résumé/i }));
+
+      await waitFor(() => expect(body).not.toBeNull());
+      expect(body!.resume_id).toBe('resume-9');
+      expect(body!.status).toBe('queued');
+    });
+
+    it('disables the attach button until a résumé is picked', async () => {
+      server.use(
+        http.get('/api/v1/applications/:appId', () =>
+          HttpResponse.json(fullApp({ resume_id: null, resume_name: null }))),
+      );
+      renderDetail();
+
+      await screen.findByRole('heading', { name: 'Senior Product Manager' });
+      expect(screen.getByRole('button', { name: /attach résumé/i })).toBeDisabled();
+    });
   });
 });

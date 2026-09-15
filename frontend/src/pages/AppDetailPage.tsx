@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
@@ -5,6 +6,7 @@ import EvidencePanel from '@/components/applications/EvidencePanel';
 import FillActivityPanel from '@/components/applications/FillActivityPanel';
 import RunTimeline from '@/components/applications/RunTimeline';
 import { useApplication, useApplicationEvidence, useUpdateApplicationStatus } from '@/hooks/useApplications';
+import { useResumes } from '@/hooks/useResumes';
 import { useAppStore } from '@/store/useAppStore';
 import { buildAppTimeline } from '@/lib/timeline';
 import { statusMeta, atsColor, atsPercent, relativeTime } from '@/lib/status';
@@ -24,12 +26,26 @@ export default function AppDetailPage() {
     error: evidenceErr, refetch: reloadEvidence,
   } = useApplicationEvidence(id);
   const updateStatus = useUpdateApplicationStatus();
+  const { data: resumeData } = useResumes();
+  const resumes = resumeData?.items ?? [];
+  const [pickedResumeId, setPickedResumeId] = useState('');
 
   const setStatus = (status: string, msg: string) =>
     app &&
     updateStatus.mutate(
       { appId: app.id, update: { status } },
       { onSuccess: () => notify(msg, 'success'), onError: () => notify('Could not update status', 'error') },
+    );
+
+  const attachResume = () =>
+    app &&
+    pickedResumeId &&
+    updateStatus.mutate(
+      { appId: app.id, update: { status: app.status, resume_id: pickedResumeId } },
+      {
+        onSuccess: () => notify('Résumé attached', 'success'),
+        onError: () => notify('Could not attach that résumé', 'error'),
+      },
     );
 
   return (
@@ -93,6 +109,38 @@ export default function AppDetailPage() {
                       misleading duplicate is gone rather than sitting next to the real one. */}
                 </div>
               </div>
+
+              {/* The dashboard's "CV required" action lands here — this used to route to
+                  the generic /resumes page with no way to attach a choice back to this
+                  specific application, because there was nothing here to attach it with. */}
+              {(!app.resume_id || app.resume_archived) && (
+                <div style={{ ...card, padding: 18, marginBottom: 16, borderColor: 'var(--review)' }}>
+                  <div style={{ font: '700 13px/1 var(--font)', marginBottom: 4 }}>
+                    {app.resume_archived ? 'The résumé used here has since been archived' : 'No résumé selected'}
+                  </div>
+                  <p style={{ margin: '0 0 12px', font: '500 12.5px/1.5 var(--font)', color: 'var(--text-3)' }}>
+                    Choose one before this application can be submitted.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <select
+                      aria-label="Choose a résumé"
+                      value={pickedResumeId}
+                      onChange={(e) => setPickedResumeId(e.target.value)}
+                      style={{ height: 34, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12.5px/1 var(--font)', minWidth: 220 }}
+                    >
+                      <option value="">Select a résumé…</option>
+                      {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    <ActionButton
+                      icon="briefcase"
+                      label={updateStatus.isPending ? 'Attaching…' : 'Attach résumé'}
+                      primary
+                      disabled={!pickedResumeId || updateStatus.isPending}
+                      onClick={attachResume}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Timeline on the left, evidence on the right. The right-hand column was
                   empty space; it is now where "Applied — prove it" is answered. */}

@@ -49,6 +49,7 @@ export interface ApplicationBatchCreate {
 export interface ApplicationStatusUpdate {
   status: string;
   notes?: string | null;
+  resume_id?: string | null;
 }
 
 /** Paginated list of applications. */

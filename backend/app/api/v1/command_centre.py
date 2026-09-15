@@ -51,7 +51,10 @@ _ACTION_TARGET: dict[NextAction, str] = {
     NextAction.RELOGIN: "connection",
     NextAction.COMPLETE_VERIFICATION: "connection",
     NextAction.RESUME_APPLICATION: "resume",
-    NextAction.UPLOAD_CV: "documents",
+    # Was "documents" — routed to the generic /resumes page with no indication of which
+    # application needed a CV, or any way to attach one back to it once there (the frontend
+    # now has that picker on the application detail page; see AppDetailPage.tsx).
+    NextAction.UPLOAD_CV: "application",
     NextAction.UPLOAD_DOCUMENT: "documents",
     NextAction.REVIEW_APPLICATION: "review",
     NextAction.REVIEW_ANSWER: "review",

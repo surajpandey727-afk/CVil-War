@@ -330,6 +330,16 @@ async def update_status(
     app.status = update.status
     if update.notes is not None:
         app.notes = update.notes
+    if update.resume_id is not None:
+        # Tenant-scoped: Resume, like Application, is auto-filtered to the current user by
+        # the ORM's do_orm_execute hook, so a resume_id belonging to another tenant simply
+        # doesn't match here rather than being silently attached.
+        resume = (
+            await db.execute(select(Resume).where(Resume.id == update.resume_id))
+        ).scalar_one_or_none()
+        if resume is None:
+            raise RecordNotFoundError("Resume not found")
+        app.resume_id = update.resume_id
     if update.status == ApplicationStatus.APPLIED:
         app.applied_at = datetime.now(UTC)
     await db.commit()
