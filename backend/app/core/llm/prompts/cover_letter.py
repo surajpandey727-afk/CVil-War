@@ -7,6 +7,8 @@ into the chosen prompt.
 
 from enum import StrEnum
 
+from app.core.llm.prompts.sanitize import wrap_untrusted
+
 
 class CoverLetterTemplate(StrEnum):
     """Available cover letter template styles."""
@@ -245,12 +247,14 @@ def render_prompt(
         Fully rendered prompt string ready for LLM completion.
     """
     company_section = (
-        f"COMPANY INFORMATION:\n{company_info}" if company_info else ""
+        f"COMPANY INFORMATION:\n{wrap_untrusted(company_info, label='COMPANY INFO')}"
+        if company_info
+        else ""
     )
     prompt_template = TEMPLATE_PROMPTS[template]
 
     kwargs: dict[str, str] = {
-        "job_description": job_description,
+        "job_description": wrap_untrusted(job_description, label="JOB POSTING"),
         "candidate_resume": candidate_resume,
         "company_section": company_section,
     }

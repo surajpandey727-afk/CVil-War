@@ -11,6 +11,8 @@ import json
 
 from pydantic import BaseModel, Field
 
+from app.core.llm.prompts.sanitize import wrap_untrusted
+
 
 class ExperienceEntry(BaseModel):
     """A single work experience entry."""
@@ -93,6 +95,7 @@ def render_resume_tailor_prompt(
         Formatted prompt string for LLM completion.
     """
     resume_json = json.dumps(resume_data, indent=2, default=str)
+    safe_job_description = wrap_untrusted(job_description, label="JOB POSTING")
 
     return f"""\
 Tailor the following resume for the job posting below.
@@ -101,7 +104,7 @@ CURRENT RESUME DATA:
 {resume_json}
 
 TARGET JOB POSTING:
-{job_description}
+{safe_job_description}
 
 Instructions:
 - Rewrite the "summary" field to directly address this role.

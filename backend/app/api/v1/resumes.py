@@ -40,6 +40,14 @@ ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+# `Content-Type` and the filename extension are both attacker-controlled — a request can
+# claim "application/pdf" while uploading anything. Verify the actual file signature
+# (magic bytes) instead of trusting either. PDF starts with "%PDF-"; DOCX is a ZIP
+# container, which always starts with the local-file-header signature "PK\x03\x04".
+MAGIC_BYTES: dict[str, bytes] = {
+    ".pdf": b"%PDF-",
+    ".docx": b"PK\x03\x04",
+}
 
 
 @router.post(
@@ -72,11 +80,23 @@ async def upload_resume(
     # Validate file size by reading in chunks to avoid loading huge files into memory
     size = 0
     chunk_size = 64 * 1024  # 64KB
+    first_chunk = b""
     while chunk := await file.read(chunk_size):
+        if not first_chunk:
+            first_chunk = chunk
         size += len(chunk)
         if size > MAX_UPLOAD_SIZE:
             raise HTTPException(status_code=413, detail="File too large. Max 10MB.")
     await file.seek(0)
+
+    # Validate the actual file signature — extension and Content-Type are both
+    # attacker-controlled and prove nothing about what the bytes actually are.
+    signature = MAGIC_BYTES[file_ext]
+    if not first_chunk.startswith(signature):
+        raise HTTPException(
+            status_code=422,
+            detail=f"File content does not match a valid {file_ext} file.",
+        )
 
     return await resume_service.upload_resume(db, file, user.id)
 

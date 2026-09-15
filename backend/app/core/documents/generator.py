@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.documents.claim_guard import check_tailored_resume_for_fabrication
 from app.core.documents.docx_renderer import DOCXRenderer
 from app.core.documents.pdf_renderer import PDFRenderer
 from app.core.exceptions import GenerationError
@@ -49,6 +50,14 @@ class GeneratedDocument(BaseModel):
     template: str
     pdf_path: str | None = None
     docx_path: str | None = None
+    # Skills the model introduced that weren't in the source resume. Not blocked (the
+    # tailoring prompt legitimately asks it to restate matching skills using the job
+    # posting's terminology), but surfaced so the candidate can review before sending
+    # anything out under their name (PHASE0_AUDIT D2).
+    unsupported_skills: list[str] = Field(default_factory=list)
+    # True when the LLM introduced a company or institution not in the source resume and
+    # its output was discarded in favor of the original, factually-accurate data.
+    fabrication_rejected: bool = False
 
 
 class DocumentGenerator:
@@ -102,8 +111,12 @@ class DocumentGenerator:
 
         # Optionally tailor content via LLM
         context = resume_data
+        unsupported_skills: list[str] = []
+        fabrication_rejected = False
         if self._llm and job_description:
-            context = await self._tailor_resume(resume_data, job_description)
+            context, unsupported_skills, fabrication_rejected = await self._tailor_resume(
+                resume_data, job_description,
+            )
 
         # Render requested formats in parallel
         tasks: list[asyncio.Task[Path]] = []
@@ -167,6 +180,8 @@ class DocumentGenerator:
             template=template_name,
             pdf_path=pdf_path,
             docx_path=docx_path,
+            unsupported_skills=unsupported_skills,
+            fabrication_rejected=fabrication_rejected,
         )
 
     async def generate_cover_letter(
@@ -280,16 +295,27 @@ class DocumentGenerator:
         self,
         resume_data: dict[str, Any],
         job_description: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], list[str], bool]:
         """Use LLM to tailor resume data for the target job.
 
         Sends the resume data and job description to the LLM with
         structured output enforcement, returning the tailored version
         in template-compatible format.
+
+        If the model fabricates a company or institution not present in
+        the original resume — the prompt requires these stay unchanged
+        verbatim, so any new value here is fabrication, not paraphrasing
+        (PHASE0_AUDIT D2) — the fabricated version is discarded and the
+        original, factually-accurate data is returned instead. This fails
+        toward "no fabricated content", not toward "no resume at all".
+
+        Returns:
+            A tuple of (data to render, unsupported skills to flag for
+            review, whether a fabrication was rejected).
         """
         if not self._llm:
             logger.warning("resume_tailoring_skipped", reason="no_llm_client")
-            return resume_data
+            return resume_data, [], False
 
         from app.core.llm.prompts.resume_tailor import (
             RESUME_TAILOR_SYSTEM_PROMPT,
@@ -306,11 +332,26 @@ class DocumentGenerator:
                 purpose="resume_tailor",
             )
             tailored = result.model_dump()
+
+            claim_check = check_tailored_resume_for_fabrication(resume_data, tailored)
+            if claim_check.has_hard_violation:
+                logger.error(
+                    "resume_tailoring_fabrication_rejected",
+                    fabricated_companies=claim_check.fabricated_companies,
+                    fabricated_institutions=claim_check.fabricated_institutions,
+                )
+                return resume_data, [], True
+            if claim_check.unsupported_skills:
+                logger.warning(
+                    "resume_tailoring_unsupported_skills",
+                    skills=claim_check.unsupported_skills,
+                )
+
             logger.info("resume_tailored_via_llm", skills_count=len(tailored.get("skills", [])))
-            return tailored
+            return tailored, claim_check.unsupported_skills, False
         except Exception:
             logger.exception("resume_tailoring_failed")
-            return resume_data
+            return resume_data, [], False
 
     async def _generate_letter_content(
         self,

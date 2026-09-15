@@ -7,6 +7,8 @@ keeping all content factually accurate.
 
 import json
 
+from app.core.llm.prompts.sanitize import wrap_untrusted
+
 ATS_OPTIMIZE_SYSTEM_PROMPT = """\
 You are an ATS (Applicant Tracking System) optimization specialist. \
 Your task is to rewrite a resume to maximize its ATS compatibility \
@@ -45,6 +47,7 @@ def render_ats_optimize_prompt(
     """
     scores_json = json.dumps(score_breakdown, indent=2, default=str)
     suggestions_text = "\n".join(f"- {s}" for s in suggestions)
+    safe_job_description = wrap_untrusted(job_description, label="JOB POSTING")
 
     return f"""\
 Optimize the following resume to maximize its ATS score for the job \
@@ -54,7 +57,7 @@ CURRENT RESUME:
 {resume_text}
 
 TARGET JOB POSTING:
-{job_description}
+{safe_job_description}
 
 CURRENT ATS SCORE ANALYSIS:
 {scores_json}

@@ -57,12 +57,70 @@ class TestUploadResumeAPI:
         with patch.object(resume_service, "UPLOAD_DIR", tmp_path):
             resp = await client.post(
                 "/api/v1/resumes/upload",
-                files={"file": ("resume.pdf", b"fake pdf content", "application/pdf")},
+                files={"file": ("resume.pdf", b"%PDF-1.4 fake pdf content", "application/pdf")},
             )
         assert resp.status_code == 201
         data = resp.json()
         assert data["file_format"] == "pdf"
         assert data["name"] == "resume.pdf"
+
+    async def test_upload_rejects_content_that_does_not_match_pdf_signature(
+        self, client, db_session, tmp_path,
+    ) -> None:
+        """Extension + Content-Type are attacker-controlled; only the actual file
+        signature (magic bytes) proves what the upload really is (PHASE0_AUDIT D3)."""
+        import app.services.resume as resume_service
+
+        with patch.object(resume_service, "UPLOAD_DIR", tmp_path):
+            resp = await client.post(
+                "/api/v1/resumes/upload",
+                files={
+                    "file": (
+                        "resume.pdf",
+                        b"MZ this is actually an executable, not a PDF",
+                        "application/pdf",
+                    )
+                },
+            )
+        assert resp.status_code == 422
+        assert "does not match" in resp.json()["detail"]
+
+    async def test_upload_rejects_content_that_does_not_match_docx_signature(
+        self, client, db_session, tmp_path,
+    ) -> None:
+        import app.services.resume as resume_service
+
+        with patch.object(resume_service, "UPLOAD_DIR", tmp_path):
+            resp = await client.post(
+                "/api/v1/resumes/upload",
+                files={
+                    "file": (
+                        "resume.docx",
+                        b"not a real zip/docx file at all",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+        assert resp.status_code == 422
+        assert "does not match" in resp.json()["detail"]
+
+    async def test_upload_accepts_valid_docx_signature(
+        self, client, db_session, tmp_path,
+    ) -> None:
+        import app.services.resume as resume_service
+
+        with patch.object(resume_service, "UPLOAD_DIR", tmp_path):
+            resp = await client.post(
+                "/api/v1/resumes/upload",
+                files={
+                    "file": (
+                        "resume.docx",
+                        b"PK\x03\x04 fake but correctly-signed docx bytes",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+        assert resp.status_code == 201
 
 
 class TestGenerateResumeAPI:
