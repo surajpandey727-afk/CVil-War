@@ -79,6 +79,22 @@ class TestJobSearchRequest:
         with pytest.raises(ValidationError):
             JobSearchRequest()
 
+    def test_query_accepts_a_realistic_joined_title_list(self):
+        """Regression: the frontend's default query joins every active role-target title
+        with ', ' — 31 default titles alone run to ~690 chars. A 500-char cap 422'd every
+        default search before it ran, which looked like total job-discovery breakage from
+        the UI (nothing to select, nothing to preview) with no visible error."""
+        titles = [f"Senior Example Role Title Number {i}" for i in range(31)]
+        long_query = ", ".join(titles)
+        assert len(long_query) > 690
+        req = JobSearchRequest(query=long_query)
+        assert req.query == long_query
+
+    def test_query_max_length_2000(self):
+        JobSearchRequest(query="x" * 2000)
+        with pytest.raises(ValidationError):
+            JobSearchRequest(query="x" * 2001)
+
 
 # ---------------------------------------------------------------------------
 # JobListingResponse

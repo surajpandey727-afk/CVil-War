@@ -79,7 +79,19 @@ export function familyForTitle(title: string): RoleFamily {
   return 'engineering';
 }
 
-/** The exact query string the backend search takes for a set of active titles. */
+// Keeps real headroom under the backend's 2000-char cap (JobSearchRequest.query) even as
+// more role targets get added later, and keeps the query focused: platform search APIs
+// treat this as one literal string, so cramming in every active title dilutes relevance
+// rather than widening the match the way "OR-ing" titles would.
+const MAX_QUERY_TITLES = 15;
+
+/** The exact query string the backend search takes for a set of active titles.
+ *
+ * Caps at `MAX_QUERY_TITLES` — sending all active titles unbounded is what made the
+ * default 31-title search 422 against the backend's length limit, which looked like
+ * "job discovery is completely broken" (nothing to select or preview) with no visible
+ * error on screen.
+ */
 export function queryForTitles(titles: string[]): string {
-  return titles.join(', ');
+  return titles.slice(0, MAX_QUERY_TITLES).join(', ');
 }

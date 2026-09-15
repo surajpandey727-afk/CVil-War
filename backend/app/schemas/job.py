@@ -11,7 +11,13 @@ from app.models.enums import SponsorConfidence
 class JobSearchRequest(BaseModel):
     """Request body for multi-platform job search."""
 
-    query: str = Field(..., min_length=1, max_length=500)
+    # The frontend's default query is every active role-target title joined with ", " —
+    # 500 was sized for a hand-typed search box, not a generated list. 31 default titles
+    # alone run to ~690 chars; a 500-char cap 422'd every default search before it ran,
+    # which looked like "job discovery is completely broken" from the UI (nothing to
+    # select, nothing to preview) with no visible error. 2000 comfortably covers the
+    # current default list with headroom for a user adding more targets.
+    query: str = Field(..., min_length=1, max_length=2000)
     location: str = ""
     # None (omitted) means "use the configured default fan-out"; an explicit [] means
     # "search nothing". A plain list default cannot express that difference — `[] or DEFAULT`
