@@ -122,6 +122,36 @@ class TestGetJob:
         assert body["remote"] is True
 
 
+class TestUpdateJobStatus:
+    """Tests for PATCH /api/v1/jobs/{job_id} — previously no way existed to save/hide a job."""
+
+    async def test_patch_nonexistent_returns_404(self, client):
+        response = await client.patch(f"{API_PREFIX}/nonexistent-id", json={"status": "saved"})
+
+        assert response.status_code == 404
+
+    async def test_saves_a_job(self, client, db_session, job_data):
+        job = Job(**job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+
+        response = await client.patch(f"{API_PREFIX}/{job.id}", json={"status": "saved"})
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "saved"
+
+    async def test_rejects_an_invalid_status(self, client, db_session, job_data):
+        job = Job(**job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+
+        response = await client.patch(f"{API_PREFIX}/{job.id}", json={"status": "not_a_real_status"})
+
+        assert response.status_code == 422
+
+
 class TestAnalyzeJob:
     """Tests for POST /api/v1/jobs/{job_id}/analyze."""
 

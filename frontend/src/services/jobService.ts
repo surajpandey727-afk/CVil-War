@@ -87,3 +87,9 @@ export async function enrichJob(jobId: string, force = false): Promise<Job> {
   const { data } = await api.post<Job>(`/jobs/${jobId}/enrich`, null, { params: { force } });
   return data;
 }
+
+/** Save, hide, or otherwise change a job's lifecycle status. */
+export async function updateJobStatus(jobId: string, status: string): Promise<Job> {
+  const { data } = await api.patch<Job>(`/jobs/${jobId}`, { status });
+  return data;
+}

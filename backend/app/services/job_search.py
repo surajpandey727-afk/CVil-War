@@ -22,7 +22,7 @@ from app.core.job_discovery.location import location_matches
 from app.core.job_discovery.source_registry import usable_keys
 from app.core.job_discovery.sources.base import matches_query
 from app.core.sponsorship.classify import classify as classify_sponsor
-from app.models.enums import SponsorConfidence
+from app.models.enums import JobStatus, SponsorConfidence
 from app.models.job import Job
 from app.models.resume import Resume
 from app.observability.metrics import job_searches_total, jobs_found_total
@@ -533,6 +533,31 @@ async def get_job(db: AsyncSession, job_id: str) -> Job:
     job = result.scalar_one_or_none()
     if job is None:
         raise RecordNotFoundError("Job", job_id)
+    return job
+
+
+async def update_job_status(db: AsyncSession, job_id: str, status: JobStatus) -> Job:
+    """Save, hide, or otherwise change a job's lifecycle status.
+
+    There was previously no way to do this at all — a job only ever moved to APPLIED as a
+    side effect of creating an application. "Save this for later" and "hide this, I'm not
+    interested" had no endpoint to call.
+
+    Args:
+        db: Async database session.
+        job_id: UUID of the job.
+        status: The new status.
+
+    Returns:
+        The updated Job.
+
+    Raises:
+        RecordNotFoundError: If job does not exist.
+    """
+    job = await get_job(db, job_id)
+    job.status = status
+    await db.commit()
+    await db.refresh(job)
     return job
 
 

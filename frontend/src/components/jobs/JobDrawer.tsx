@@ -1,23 +1,21 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+import CompanyLogo from '@/components/ui/CompanyLogo';
 import CompanyPanel from '@/components/jobs/CompanyPanel';
 import PostingPanel from '@/components/jobs/PostingPanel';
 import FitPanel from '@/components/jobs/FitPanel';
 import Icon from '@/components/ui/Icon';
 import {
   useAnalyseFit, useCompanyProfile, useEnrichJob, useResumeRecommendation, useStoredFit,
+  useUpdateJobStatus,
 } from '@/hooks/useJobs';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
-import { sponsorMeta } from '@/lib/status';
+import { jcSponsorMeta, jobStatusMeta } from '@/lib/status';
+import '@/styles/jobs-command.css';
 import type { Job } from '@/types/job';
 import type { Resume } from '@/types/resume';
-
-const PLAT_COLOR: Record<string, string> = {
-  linkedin: 'var(--approved)', indeed: 'var(--interview)',
-  glassdoor: 'var(--applied)', exa: 'var(--accent)',
-};
 
 type Tab = 'fit' | 'posting' | 'company' | 'description';
 
@@ -78,6 +76,17 @@ export default function JobDrawer({
   const { data: company, isLoading: companyLoading } = useCompanyProfile(job.id);
   const analyse = useAnalyseFit();
   const enrich = useEnrichJob();
+  const updateStatus = useUpdateJobStatus();
+  const isSaved = job.status === 'saved';
+
+  const toggleSave = () =>
+    updateStatus.mutate(
+      { jobId: job.id, status: isSaved ? 'new' : 'saved' },
+      {
+        onSuccess: () => notify(isSaved ? 'Removed from saved' : 'Saved for later', 'success'),
+        onError: () => notify('Could not update this job', 'error'),
+      },
+    );
 
   // The freshly computed result wins over the stored one for this render; both are the same
   // shape, so the panel does not care which it got.
@@ -108,117 +117,131 @@ export default function JobDrawer({
   // selection bar on the same page.
   return createPortal(
     <>
-      <div onClick={onClose} role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,9,.5)', backdropFilter: 'blur(3px)', animation: 'aaPop .16s var(--ease)' }} />
+      <div
+        data-jc-theme=""
+        onClick={onClose}
+        role="presentation"
+        className="jc-drawer-overlay"
+        style={{ animation: 'jcPop .16s var(--jc-ease)' }}
+      />
       <aside
+        data-jc-theme=""
         role="dialog"
         aria-label="Job details"
-        style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(96vw,620px)', zIndex: 71, background: 'var(--surface)', borderLeft: '1px solid var(--border-2)', boxShadow: 'var(--shadow-pop)', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font)', color: 'var(--text)', animation: 'aaDrawer .28s var(--ease)' }}
+        className="jc-drawer"
+        style={{ fontFamily: 'var(--font)', animation: 'jcSlide .3s var(--jc-ease)' }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '20px 22px', borderBottom: '1px solid var(--border)' }}>
+        {/* ---- Header: identity + status + close --------------------------------------- */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid var(--jc-border)' }}>
+          <CompanyLogo name={job.company} />
           <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-            <div style={{ font: '800 18px/1.2 var(--font)', letterSpacing: '-.02em' }}>{job.title}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8, font: '500 12.5px/1 var(--font)', color: 'var(--text-3)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-2)' }}>
-                <Icon name="building" size={13} /> {job.company}
+            <div className="jc-display" style={{ fontSize: 19 }}>{job.title}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 7 }} className="jc-body">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--jc-text-2)', fontWeight: 700 }}>
+                {job.company}
               </span>
-              <span style={{ color: 'var(--text-4)' }}>·</span>
+              <span style={{ color: 'var(--jc-text-4)' }}>·</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Icon name="mappin" size={13} /> {job.location || (job.remote ? 'Remote' : '—')}
+                <Icon name="mappin" size={12} /> {job.location || (job.remote ? 'Remote' : '—')}
               </span>
               {job.salary_range && (
                 <>
-                  <span style={{ color: 'var(--text-4)' }}>·</span>
+                  <span style={{ color: 'var(--jc-text-4)' }}>·</span>
                   <span>{job.salary_range}</span>
                 </>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
-              <span style={{ padding: '3px 8px', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', font: '600 10.5px/1 var(--mono)', color: PLAT_COLOR[job.platform] ?? 'var(--text-3)' }}>
-                {job.platform}
-              </span>
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
+              {(() => {
+                const sm = jobStatusMeta(job.status);
+                return (
+                  <span className="jc-status" style={{ background: sm.soft, color: sm.color }}>
+                    <span className="jc-status-dot" style={{ background: sm.color }} /> {sm.label}
+                  </span>
+                );
+              })()}
               {job.remote && <Tag>Remote</Tag>}
               {job.job_type && <Tag>{job.job_type}</Tag>}
               {(() => {
-                const sm = sponsorMeta(job.sponsor_confidence);
+                const sm = jcSponsorMeta(job.sponsor_confidence);
                 return (
                   <span
                     title={job.sponsor_evidence ?? undefined}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 6, background: sm.soft, color: sm.color, font: '700 11px/1 var(--font)' }}
+                    className="jc-status"
+                    style={{ background: sm.soft, color: sm.color }}
                   >
                     <Icon name="shield" size={11} /> {sm.label}
                   </span>
                 );
               })()}
-              {/* The same destination as "Apply manually" at the foot of the drawer, repeated
-                  here because that one sits below the fold — the operator's first question on
-                  opening a job is often just "show me the actual posting". */}
-              {applyUrl && (
-                <a
-                  href={applyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => onApplyManually(applyUrl)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
-                    borderRadius: 6, background: 'var(--accent-soft)',
-                    border: '1px solid var(--accent-line)', color: 'var(--accent)',
-                    font: '600 10.5px/1.5 var(--font)', textDecoration: 'none',
-                  }}
-                >
-                  Open posting <Icon name="ext" size={12} />
-                </a>
-              )}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ flex: '0 0 auto', width: 32, height: 32, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', cursor: 'pointer', display: 'grid', placeItems: 'center', font: '400 18px/1 var(--font)' }}>×</button>
+          <div style={{ flex: '0 0 auto', display: 'flex', gap: 8 }}>
+            <button
+              onClick={toggleSave}
+              disabled={updateStatus.isPending}
+              aria-pressed={isSaved}
+              title={isSaved ? 'Remove from saved' : 'Save for later'}
+              className="jc-btn jc-btn-secondary"
+              style={{ width: 36, height: 36, padding: 0, borderRadius: 'var(--jc-r-sm)', color: isSaved ? 'var(--jc-accent-2)' : 'var(--jc-text-3)', borderColor: isSaved ? 'var(--jc-accent-line)' : 'var(--jc-border)' }}
+            >
+              <Icon name="bookmark" size={16} sw={isSaved ? 2.4 : 1.8} />
+            </button>
+            <button onClick={onClose} aria-label="Close" className="jc-btn jc-btn-secondary" style={{ width: 36, height: 36, padding: 0, borderRadius: 'var(--jc-r-sm)', fontSize: 18 }}>×</button>
+          </div>
         </div>
 
-        {/* Résumé selection lives here, against this job — not on a separate screen. */}
-        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 22px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-          <label htmlFor="fit-resume" style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.1em', color: 'var(--text-4)', textTransform: 'uppercase' }}>
-            CV
-          </label>
-          <select
-            id="fit-resume"
-            value={resumeId}
-            onChange={(e) => setResumeId(e.target.value)}
-            style={{ flex: '1 1 180px', minWidth: 0, height: 32, padding: '0 9px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)' }}
-          >
-            {resumes.length === 0 && <option value="">No CV uploaded yet</option>}
-            {resumes.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
+        {applyUrl && (
+          <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--jc-border)' }}>
+            <a
+              href={applyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => onApplyManually(applyUrl)}
+              className="jc-meta"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--jc-accent-2)', textDecoration: 'none' }}
+            >
+              <Icon name="ext" size={12} /> View original posting
+            </a>
+          </div>
+        )}
+
+        {/* ---- Application Intelligence: CV chosen against THIS job ---------------------- */}
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, padding: '14px 24px', borderBottom: '1px solid var(--jc-border)', flexWrap: 'wrap' }}>
+          <label htmlFor="fit-resume" className="jc-micro">CV</label>
+          <div className="jc-input" style={{ flex: '1 1 180px', height: 34 }}>
+            <select
+              id="fit-resume"
+              value={resumeId}
+              onChange={(e) => setResumeId(e.target.value)}
+              style={{ flex: 1, minWidth: 0, background: 'transparent', border: 0, outline: 'none', color: 'var(--jc-text)', font: '600 12px/1 var(--font)' }}
+            >
+              {resumes.length === 0 && <option value="">No CV uploaded yet</option>}
+              {resumes.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
           <button
             onClick={() => runAnalysis(Boolean(analysis))}
             disabled={analyse.isPending || !resumeId}
-            style={{
-              flex: '0 0 auto', height: 32, padding: '0 14px', borderRadius: 'var(--r-md)',
-              background: resumeId ? 'var(--accent)' : 'var(--surface-2)',
-              border: `1px solid ${resumeId ? 'var(--accent)' : 'var(--border)'}`,
-              color: resumeId ? 'var(--accent-ink)' : 'var(--text-4)',
-              font: '700 12px/1 var(--font)',
-              cursor: analyse.isPending || !resumeId ? 'default' : 'pointer',
-            }}
+            className={`jc-btn ${resumeId ? 'jc-btn-primary' : 'jc-btn-secondary'}`}
+            style={{ flex: '0 0 auto', height: 34, padding: '0 14px' }}
           >
             {analyse.isPending ? 'Analysing…' : analysis ? 'Re-analyse' : 'Analyse my fit'}
           </button>
         </div>
 
-        <div style={{ flex: '0 0 auto', display: 'flex', gap: 5, padding: '12px 22px 0' }}>
+        {/* ---- Section switcher: Fit / Posting / Company / Description ------------------- */}
+        <div style={{ flex: '0 0 auto', display: 'flex', gap: 5, padding: '14px 24px 0' }}>
           {([['fit', 'Fit'], ['posting', 'Posting'], ['company', 'Company'], ['description', 'Description']] as const).map(
             ([key, label]) => (
               <button
                 key={key}
                 onClick={() => setTab(key)}
                 aria-pressed={tab === key}
-                style={{
-                  height: 28, padding: '0 12px', borderRadius: 999, cursor: 'pointer',
-                  font: '600 12px/1 var(--font)',
-                  border: `1px solid ${tab === key ? 'var(--accent-line)' : 'var(--border)'}`,
-                  background: tab === key ? 'var(--accent-soft)' : 'var(--surface-2)',
-                  color: tab === key ? 'var(--accent)' : 'var(--text-3)',
-                }}
+                data-on={tab === key}
+                className="jc-drawer-tab"
               >
                 {label}
               </button>
@@ -226,7 +249,7 @@ export default function JobDrawer({
           )}
         </div>
 
-        <div style={{ flex: '1 1 auto', overflowY: 'auto', padding: '16px 22px 20px' }}>
+        <div style={{ flex: '1 1 auto', overflowY: 'auto', padding: '18px 24px 22px' }}>
           {tab === 'fit' && (
             analyse.isPending ? (
               <Centered>Reading the posting and your CV…</Centered>
@@ -263,7 +286,7 @@ export default function JobDrawer({
             paras.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {paras.map((p, i) => (
-                  <p key={i} style={{ margin: 0, font: '500 12.5px/1.6 var(--font)', color: 'var(--text-2)' }}>{p}</p>
+                  <p key={i} className="jc-body" style={{ margin: 0, lineHeight: 1.6 }}>{p}</p>
                 ))}
               </div>
             ) : (
@@ -274,12 +297,13 @@ export default function JobDrawer({
           )}
         </div>
 
-        {/* The decision. Two routes, always distinguishable. */}
-        <div style={{ flex: '0 0 auto', display: 'flex', gap: 9, padding: '14px 22px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+        {/* ---- Actions: two distinguishable routes, plus save --------------------------- */}
+        <div style={{ flex: '0 0 auto', display: 'flex', gap: 9, padding: '16px 24px', borderTop: '1px solid var(--jc-border)', flexWrap: 'wrap' }}>
           <button
             onClick={() => onApplyWithAgent(resumeId || null)}
             disabled={applying}
-            style={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 42, borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 13px/1 var(--font)', cursor: applying ? 'default' : 'pointer' }}
+            className="jc-btn jc-btn-primary"
+            style={{ flex: '1 1 200px', height: 44 }}
           >
             <Icon name="cpu" size={14} /> {applying ? 'Queueing…' : 'Apply with agent'}
           </button>
@@ -290,12 +314,13 @@ export default function JobDrawer({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => onApplyManually(applyUrl)}
-              style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 42, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 13px/1 var(--font)', textDecoration: 'none' }}
+              className="jc-btn jc-btn-secondary"
+              style={{ flex: '1 1 180px', height: 44, textDecoration: 'none' }}
             >
               Apply manually <Icon name="ext" size={14} />
             </a>
           ) : (
-            <span style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: 42, font: '500 11.5px/1.4 var(--font)', color: 'var(--text-4)', textAlign: 'center' }}>
+            <span style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: 44, font: '500 11.5px/1.4 var(--font)', color: 'var(--jc-text-4)', textAlign: 'center' }}>
               No application URL was stored for this job
             </span>
           )}
@@ -308,7 +333,7 @@ export default function JobDrawer({
 
 function Centered({ children }: { children: ReactNode }) {
   return (
-    <div style={{ padding: '28px 8px', textAlign: 'center', color: 'var(--text-3)', font: '500 12.5px/1.6 var(--font)' }}>
+    <div style={{ padding: '28px 8px', textAlign: 'center', color: 'var(--jc-text-3)', font: '500 12.5px/1.6 var(--font)' }}>
       {children}
     </div>
   );
@@ -316,7 +341,7 @@ function Centered({ children }: { children: ReactNode }) {
 
 function Tag({ children }: { children: ReactNode }) {
   return (
-    <span style={{ padding: '3px 8px', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', font: '600 11px/1 var(--font)', color: 'var(--text-3)' }}>
+    <span style={{ padding: '3px 8px', borderRadius: 6, background: 'var(--jc-surface-2)', border: '1px solid var(--jc-border)', font: '600 11px/1 var(--font)', color: 'var(--jc-text-3)' }}>
       {children}
     </span>
   );

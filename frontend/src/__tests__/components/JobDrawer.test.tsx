@@ -206,4 +206,42 @@ describe('JobDrawer as the decision centre', () => {
     await userEvent.click(screen.getByRole('button', { name: /close/i }));
     await waitFor(() => expect(handlers.onClose).toHaveBeenCalled());
   });
+
+  describe('saving a job', () => {
+    // Previously there was no way to save a job at all, anywhere in the product.
+
+    it('saves a new job', async () => {
+      let sentStatus: string | null = null;
+      server.use(
+        http.patch('/api/v1/jobs/:jobId', async ({ request }) => {
+          sentStatus = ((await request.json()) as { status: string }).status;
+          return HttpResponse.json(job({ status: sentStatus! }));
+        }),
+      );
+      renderDrawer({ job: job({ status: 'new' }) });
+
+      const saveButton = screen.getByRole('button', { name: /save for later/i });
+      expect(saveButton).toHaveAttribute('aria-pressed', 'false');
+      await userEvent.click(saveButton);
+
+      await waitFor(() => expect(sentStatus).toBe('saved'));
+    });
+
+    it('unsaves an already-saved job', async () => {
+      let sentStatus: string | null = null;
+      server.use(
+        http.patch('/api/v1/jobs/:jobId', async ({ request }) => {
+          sentStatus = ((await request.json()) as { status: string }).status;
+          return HttpResponse.json(job({ status: sentStatus! }));
+        }),
+      );
+      renderDrawer({ job: job({ status: 'saved' }) });
+
+      const saveButton = screen.getByRole('button', { name: /remove from saved/i });
+      expect(saveButton).toHaveAttribute('aria-pressed', 'true');
+      await userEvent.click(saveButton);
+
+      await waitFor(() => expect(sentStatus).toBe('new'));
+    });
+  });
 });

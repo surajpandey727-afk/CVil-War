@@ -5,23 +5,25 @@ import { useNavigate } from 'react-router-dom';
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import JobDrawer from '@/components/jobs/JobDrawer';
-import { useJobs, useSearchJobs } from '@/hooks/useJobs';
+import { useJobs, useSearchJobs, useUpdateJobStatus } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
+import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useResumes } from '@/hooks/useResumes';
 import { useSettings } from '@/hooks/useSettings';
 import { useSources } from '@/hooks/useSources';
 import { useAppStore } from '@/store/useAppStore';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
-import { atsColor, atsPercent, relativeTime, sponsorMeta } from '@/lib/status';
+import { atsColor, atsPercent, relativeTime, jcSponsorMeta, jobStatusMeta } from '@/lib/status';
 import { ROLE_FAMILIES, familyForTitle, queryForTitles, type RoleFamily } from '@/lib/roleTargets';
 import {
   HEALTH_META, SOURCE_BY_KEY, SOURCE_TIERS, sourceLabel, sourcesInTier,
 } from '@/lib/sources';
+import '@/styles/jobs-command.css';
 import type { Job } from '@/types/job';
 
 const card: React.CSSProperties = {
-  background: 'var(--surface)', border: '1px solid var(--border)',
-  borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)',
+  background: 'var(--jc-surface)', border: '1px solid var(--jc-border)',
+  borderRadius: 'var(--jc-r-lg)', boxShadow: 'var(--jc-shadow-1)',
 };
 
 const SENIORITY = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
@@ -93,22 +95,23 @@ function FilterCulprits({ rejected }: { rejected: Record<string, number> }) {
           key={key}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, padding: '8px 11px',
-            borderRadius: 'var(--r-md)', background: 'var(--surface-2)',
-            border: '1px solid var(--border)',
+            borderRadius: 'var(--jc-r-md)', background: 'var(--jc-surface-2)',
+            border: '1px solid var(--jc-border)',
           }}
         >
-          <span style={{ flex: 1, textAlign: 'left', font: '600 12px/1.3 var(--font)', color: 'var(--text-2)' }}>
+          <span style={{ flex: 1, textAlign: 'left', font: '600 12px/1.3 var(--font)', color: 'var(--jc-text-2)' }}>
             {LABELS[key]!.label}
           </span>
-          <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--rejected)' }}>
+          <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--jc-status-rejected)' }}>
             {`−${count} hidden`}
           </span>
           <button
             onClick={LABELS[key]!.clear}
+            className="jc-btn"
             style={{
-              height: 24, padding: '0 9px', borderRadius: 'var(--r-sm)', cursor: 'pointer',
-              font: '600 11px/1 var(--font)', border: '1px solid var(--accent-line)',
-              background: 'var(--accent-soft)', color: 'var(--accent)',
+              height: 24, padding: '0 9px', borderRadius: 'var(--jc-r-sm)',
+              font: '600 11px/1 var(--font)', border: '1px solid var(--jc-accent-line)',
+              background: 'var(--jc-accent-soft)', color: 'var(--jc-accent-2)',
             }}
           >
             Clear
@@ -145,6 +148,12 @@ export default function JobSearchPage() {
   const { data: settings } = useSettings();
   const search = useSearchJobs();
   const createApps = useCreateApplicationBatch();
+  const updateJobStatus = useUpdateJobStatus();
+  // Real, backend-aggregated counts — the same source the Dashboard's own stat tiles use.
+  // The command header intentionally does not invent pipeline stages (e.g. a generic
+  // "shortlisted"/"ready" bucket) that have no field behind them; every number here maps
+  // to something the API actually computes.
+  const { data: stats } = useDashboardStats();
 
   const [drawerJob, setDrawerJob] = useState<Job | null>(null);
   const [runResumeId, setRunResumeId] = useState<string>('auto');
@@ -187,7 +196,12 @@ export default function JobSearchPage() {
         return reject('minAtsScore');
       }
       if (filters.remoteOnly && !j.remote) return reject('remoteOnly');
-      if (filters.hideApplied && j.status !== 'new' && j.status !== 'discovered') {
+      // Was `status !== 'new' && status !== 'discovered'`, which also caught 'saved' —
+      // added by this same redesign as a genuinely distinct, still-relevant status. That
+      // meant saving a job for later immediately hid it from the default view (hideApplied
+      // is on by default), the opposite of what "save for later" is for. Only an actual
+      // 'applied' status is what this filter's own label promises to hide.
+      if (filters.hideApplied && j.status === 'applied') {
         return reject('hideApplied');
       }
       // A missing posted_date is unknown, not old: excluding it would silently drop every
@@ -247,6 +261,19 @@ export default function JobSearchPage() {
     notify(
       `Opening ${new URL(url).hostname} — record the outcome yourself once you have applied.`,
       'info',
+    );
+  };
+
+  /** Save a job for later, or un-save it. Previously there was no way to do this at all —
+   *  a job only ever moved status as a side effect of creating an application. */
+  const toggleSaveJob = (job: Job) => {
+    const next = job.status === 'saved' ? 'new' : 'saved';
+    updateJobStatus.mutate(
+      { jobId: job.id, status: next },
+      {
+        onSuccess: () => notify(next === 'saved' ? 'Saved for later' : 'Removed from saved', 'success'),
+        onError: () => notify('Could not update this job', 'error'),
+      },
     );
   };
 
@@ -317,10 +344,45 @@ export default function JobSearchPage() {
   const enabledInTier = (tier: (typeof SOURCE_TIERS)[number]['id']) =>
     sourcesInTier(tier).filter((s) => enabledSources.includes(s.key)).length;
 
+  // Real, backend-computed pipeline stages — never a fabricated "shortlisted"/"ready"
+  // bucket with no field behind it. Opportunities is the deduped corpus size; the rest
+  // mirror the ApplicationStatus lifecycle exactly.
+  const pipeline = [
+    { key: 'opportunities', label: 'Opportunities', value: stats?.unique_jobs ?? allJobs.length },
+    { key: 'queued', label: 'Queued', value: stats?.applications_queued ?? 0 },
+    { key: 'review', label: 'Pending review', value: stats?.applications_pending ?? 0 },
+    { key: 'applied', label: 'Applied', value: stats?.applications_applied ?? 0 },
+    { key: 'interview', label: 'Interview', value: stats?.applications_interview ?? 0 },
+    { key: 'offer', label: 'Offer', value: stats?.applications_offer ?? 0 },
+  ] as const;
+
   return (
-    <div style={{ animation: 'aaUp .4s var(--ease) both', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+    <div data-jc-theme="" className="jc-leather" style={{ animation: 'aaUp .4s var(--ease) both', margin: -20, padding: 20 }}>
+      {/* ---- Command header ------------------------------------------------------------ */}
+      <div className="jc-header">
+        <div>
+          <div className="jc-display">Jobs</div>
+          <div className="jc-body" style={{ marginTop: 4 }}>
+            Discover, evaluate, and act on every opportunity in one command surface.
+          </div>
+        </div>
+      </div>
+
+      {/* ---- Pipeline: glanceable in under three seconds -------------------------------- */}
+      <div className="jc-pipeline">
+        {pipeline.map((stage) => (
+          <div key={stage.key} className="jc-pipeline-stage">
+            <span className="jc-pipeline-count" style={{ color: stage.key === 'opportunities' ? 'var(--jc-text)' : 'var(--jc-accent-2)' }}>
+              {stage.value}
+            </span>
+            <span className="jc-pipeline-label">{stage.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="jc-layout" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
       {/* ---- Left rail: targets, filters, sources ------------------------------------ */}
-      <div style={{ flex: '0 0 268px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="jc-rail" style={{ flex: '0 0 268px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ ...card, padding: 14 }}>
           <RailHead label="Role targets" action="Edit" onAction={() => navigate('/targets')} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -435,12 +497,8 @@ export default function JobSearchPage() {
           <SearchField icon="mappin" label="Location" placeholder="London, UK" value={location} onChange={setLocation} grow={1} />
           <button
             type="submit" disabled={search.isPending}
-            style={{
-              flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 7, height: 40,
-              padding: '0 18px', borderRadius: 'var(--r-md)', background: 'var(--accent)',
-              border: '1px solid var(--accent)', color: 'var(--accent-ink)',
-              font: '700 13px/1 var(--font)', cursor: 'pointer',
-            }}
+            className="jc-btn jc-btn-primary"
+            style={{ flex: '0 0 auto', height: 40, padding: '0 18px' }}
           >
             {search.isPending ? 'Searching…' : 'Search'}
           </button>
@@ -479,7 +537,7 @@ export default function JobSearchPage() {
           </div>
         ) : jobs.length === 0 ? (
           <div style={{ ...card, ...notice, flexDirection: 'column', gap: 8, padding: '46px 20px' }}>
-            <div style={{ display: 'grid', placeItems: 'center', width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+            <div style={{ display: 'grid', placeItems: 'center', width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--jc-accent-2)' }}>
               <Icon name="search" size={20} />
             </div>
             <div style={{ font: '700 14px/1.2 var(--font)', color: 'var(--text)' }}>
@@ -511,10 +569,12 @@ export default function JobSearchPage() {
                 key={j.id} job={j} selected={selected.includes(j.id)}
                 onToggle={() => toggleJob(j.id)} onOpen={() => openDrawer(j)}
                 onApply={() => { setSelected([j.id]); notify(`Selected · ${j.title}`, 'success'); }}
+                onSave={() => toggleSaveJob(j)} saving={updateJobStatus.isPending}
               />
             ))}
           </div>
         )}
+      </div>
       </div>
 
       {/* ---- Selection bar --------------------------------------------------------------
@@ -528,31 +588,35 @@ export default function JobSearchPage() {
           without scrolling to the exact spot. */}
       {selected.length > 0 && createPortal(
         <div
+          data-jc-theme=""
           style={{
             position: 'fixed', left: '50%', bottom: 22, transform: 'translateX(-50%)', zIndex: 80,
             display: 'flex', alignItems: 'center', gap: 14, padding: '11px 12px 11px 18px',
-            borderRadius: 'var(--r-lg)', background: 'var(--surface-2)', border: '1px solid var(--border-2)',
-            boxShadow: 'var(--shadow-pop)', animation: 'aaPop .16s var(--ease)', flexWrap: 'wrap',
+            borderRadius: 'var(--jc-r-lg)', background: 'var(--jc-surface-2)', border: '1px solid var(--jc-border-strong)',
+            boxShadow: 'var(--jc-shadow-4), var(--jc-clay-inset)', animation: 'jcPop .18s var(--jc-ease)', flexWrap: 'wrap',
           }}
         >
-          <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--text)' }}>
+          <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--jc-text)' }}>
             {selected.length} role{selected.length === 1 ? '' : 's'} selected
           </span>
-          <span style={{ width: 1, height: 20, background: 'var(--border-2)' }} />
-          <span style={{ font: '600 11.5px/1 var(--font)', color: 'var(--text-3)' }}>CV</span>
-          <select
-            value={runResumeId} onChange={(e) => setRunResumeId(e.target.value)}
-            style={{ height: 32, padding: '0 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-3)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', maxWidth: 240 }}
-          >
-            <option value="auto">Auto — rule-based per role</option>
-            {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-          <button onClick={clearSelection} style={{ height: 32, padding: '0 12px', borderRadius: 'var(--r-sm)', background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}>
+          <span style={{ width: 1, height: 20, background: 'var(--jc-border-strong)' }} />
+          <span className="jc-meta">CV</span>
+          <div className="jc-input" style={{ height: 34, minWidth: 200 }}>
+            <select
+              value={runResumeId} onChange={(e) => setRunResumeId(e.target.value)}
+              style={{ flex: 1, background: 'transparent', border: 0, outline: 'none', color: 'var(--jc-text)', font: '600 12px/1 var(--font)' }}
+            >
+              <option value="auto">Auto — rule-based per role</option>
+              {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <button onClick={clearSelection} className="jc-btn jc-btn-ghost" style={{ height: 34, padding: '0 12px' }}>
             Clear
           </button>
           <button
             onClick={startRun} disabled={createApps.isPending}
-            style={{ height: 32, padding: '0 16px', borderRadius: 'var(--r-sm)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}
+            className="jc-btn jc-btn-primary"
+            style={{ height: 34 }}
           >
             {createApps.isPending ? 'Queueing…' : 'Start applying'}
           </button>
@@ -594,7 +658,7 @@ function RailHead({ label, action, onAction }: { label: string; action: string; 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 }}>
       <span style={{ font: '700 12.5px/1 var(--font)' }}>{label}</span>
-      <button onClick={onAction} style={{ background: 'none', border: 0, color: 'var(--accent)', font: '600 11px/1 var(--font)', cursor: 'pointer', padding: 0 }}>
+      <button onClick={onAction} style={{ background: 'none', border: 0, color: 'var(--jc-accent-2)', font: '600 11px/1 var(--font)', cursor: 'pointer', padding: 0 }}>
         {action}
       </button>
     </div>
@@ -612,7 +676,7 @@ function RangeRow({ label, value, min, max, step, current, onChange }: {
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)' }}>{label}</span>
-        <span style={{ font: '700 11px/1 var(--mono)', color: 'var(--accent)' }}>{value}</span>
+        <span style={{ font: '700 11px/1 var(--mono)', color: 'var(--jc-accent-2)' }}>{value}</span>
       </div>
       <input
         type="range" min={min} max={max} step={step} value={current} aria-label={label}
@@ -655,7 +719,11 @@ function Chip({ on, small, onClick, children }: { on: boolean; small?: boolean; 
         font: `600 ${small ? 11 : 11.5}px/1 var(--font)`,
         border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`,
         background: on ? 'var(--accent-soft)' : 'var(--surface-2)',
-        color: on ? 'var(--accent)' : 'var(--text-3)',
+        // Not var(--accent) — on this page's dark ground that resolves to a muted, low-
+        // luminosity green whose own text-on-background contrast measured under the
+        // craft floor's 4.5:1 minimum. jc-accent-2 is the same accent family at a
+        // luminosity actually legible as text.
+        color: on ? 'var(--jc-accent-2)' : 'var(--text-3)',
       }}
     >
       {children}
@@ -667,84 +735,112 @@ function SearchField({ icon, label, placeholder, value, onChange, grow }: {
   icon: 'search' | 'mappin'; label: string; placeholder: string; value: string; onChange: (v: string) => void; grow: number;
 }) {
   return (
-    <div style={{ flex: `${grow} 1 ${grow === 2 ? 260 : 180}px`, display: 'flex', alignItems: 'center', gap: 9, height: 40, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>
-      <span style={{ color: 'var(--text-3)', display: 'grid', placeItems: 'center' }}><Icon name={icon} size={16} /></span>
+    <div className="jc-input" style={{ flex: `${grow} 1 ${grow === 2 ? 260 : 180}px`, height: 40 }}>
+      <span style={{ color: 'var(--jc-text-3)', display: 'grid', placeItems: 'center' }}><Icon name={icon} size={16} /></span>
       <input
         aria-label={label} placeholder={placeholder} value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 0, outline: 'none', color: 'var(--text)', font: '500 13px/1 var(--font)' }}
       />
     </div>
   );
 }
 
-function JobRow({ job, selected, onToggle, onOpen, onApply }: {
+function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
   job: Job; selected: boolean; onToggle: () => void; onOpen: () => void; onApply: () => void;
+  onSave: () => void; saving: boolean;
 }) {
   const pct = atsPercent(job.match_score);
   const src = SOURCE_BY_KEY[job.platform];
+  // Level 4 metadata — everything that answers "is this worth reading further" without
+  // being a decision signal itself.
   const tags = [job.salary_range, job.job_type, job.experience_level, job.remote ? 'Remote' : null]
     .filter(Boolean) as string[];
+  const fitColor = job.match_score == null ? 'var(--jc-text-4)' : atsColor(pct);
+  const statusMetaJob = jobStatusMeta(job.status);
+  const isSaved = job.status === 'saved';
 
   return (
-    <div style={{ ...card, padding: '15px 16px', borderColor: selected ? 'var(--accent-line)' : 'var(--border)' }}>
-      <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start' }}>
-        <button onClick={onToggle} aria-label="Select role" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', marginTop: 3, flex: '0 0 auto' }}>
-          <CheckBox on={selected} />
-        </button>
-        <CompanyLogo name={job.company} />
-        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-          <button onClick={onOpen} style={{ display: 'block', textAlign: 'left', padding: 0, background: 'none', border: 0, cursor: 'pointer', font: '700 14.5px/1.25 var(--font)', color: 'var(--text)' }}>
+    <div className="jc-card" data-selected={selected}>
+      {/* Level 5 — select for bulk apply, always available, never competing with identity. */}
+      <button onClick={onToggle} aria-label="Select role" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', marginTop: 3, flex: '0 0 auto' }}>
+        <CheckBox on={selected} />
+      </button>
+
+      {/* Level 2 — fit, the first thing worth a glance after identity. */}
+      <div
+        className="jc-fit-ring"
+        title={job.match_score == null ? 'No match score yet' : `${pct}% match`}
+        style={{ '--fit-pct': job.match_score == null ? 0 : pct, '--fit-color': fitColor } as React.CSSProperties}
+      >
+        <span className="jc-fit-ring-inner" style={{ '--fit-color': fitColor } as React.CSSProperties}>
+          {job.match_score == null ? '—' : pct}
+        </span>
+      </div>
+
+      <CompanyLogo name={job.company} />
+
+      {/* Level 1 — identity. */}
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={onOpen} className="jc-card-title">
             {job.title}
           </button>
-          <div style={{ font: '500 12.5px/1.3 var(--font)', color: 'var(--text-2)', marginTop: 4 }}>
-            {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
-            {tags.map((t) => (
-              <span key={t} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
-                {t}
-              </span>
-            ))}
-            {/* "Unknown" is the common case (most postings never mention sponsorship) and
-                would be pure noise repeated on every row — the drawer shows it explicitly
-                for anyone who opens the job. Here, only a genuine signal earns a badge. */}
-            {job.sponsor_confidence !== 'unknown' && (() => {
-              const sm = sponsorMeta(job.sponsor_confidence);
-              return (
-                <span title={job.sponsor_evidence ?? undefined} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: sm.soft, color: sm.color, font: '700 10.5px/1 var(--font)' }}>
-                  {sm.label}
-                </span>
-              );
-            })()}
-            {job.posted_date && (
-              <span style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
-                {relativeTime(job.posted_date)}
-              </span>
-            )}
-          </div>
+          {/* Level 3 — status, always visible, never color-only (label + dot). */}
+          <span className="jc-status" style={{ background: statusMetaJob.soft, color: statusMetaJob.color }}>
+            <span className="jc-status-dot" style={{ background: statusMetaJob.color }} /> {statusMetaJob.label}
+          </span>
         </div>
-        <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', font: '600 10.5px/1 var(--font)' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: src ? HEALTH_META[src.health].color : 'var(--text-4)' }} />
-              {sourceLabel(job.platform)}
+        <div className="jc-body" style={{ marginTop: 4 }}>
+          {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
+          {tags.map((t) => (
+            <span key={t} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--jc-surface-3)', color: 'var(--jc-text-3)', font: '600 10.5px/1 var(--font)' }}>
+              {t}
             </span>
-            <span
-              title="ATS match"
-              style={{ display: 'inline-grid', placeItems: 'center', minWidth: 44, height: 26, padding: '0 9px', borderRadius: 'var(--r-sm)', font: '700 12.5px/1 var(--mono)', color: job.match_score == null ? 'var(--text-4)' : atsColor(pct), background: 'var(--surface-2)' }}
-            >
-              {job.match_score == null ? '—' : `${pct}%`}
+          ))}
+          {/* "Unknown" is the common case (most postings never mention sponsorship) and
+              would be pure noise repeated on every row — the drawer shows it explicitly
+              for anyone who opens the job. Here, only a genuine signal earns a badge. */}
+          {job.sponsor_confidence !== 'unknown' && (() => {
+            const sm = jcSponsorMeta(job.sponsor_confidence);
+            return (
+              <span title={job.sponsor_evidence ?? undefined} className="jc-status" style={{ background: sm.soft, color: sm.color }}>
+                {sm.label}
+              </span>
+            );
+          })()}
+          {job.posted_date && (
+            <span className="jc-meta" style={{ height: 22, display: 'inline-flex', alignItems: 'center' }}>
+              {relativeTime(job.posted_date)}
             </span>
-          </div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <a href={job.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 11.5px/1 var(--font)', textDecoration: 'none' }}>
-              Posting
-            </a>
-            <button onClick={onApply} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 11.5px/1 var(--font)', cursor: 'pointer' }}>
-              Apply
-            </button>
-          </div>
+          )}
+          <span className="jc-meta" style={{ height: 22, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: src ? HEALTH_META[src.health].color : 'var(--jc-text-4)' }} />
+            {sourceLabel(job.platform)}
+          </span>
+        </div>
+      </div>
+
+      {/* Level 5 — actions: primary (apply), secondary (view posting), tertiary (save). */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          aria-pressed={isSaved}
+          title={isSaved ? 'Remove from saved' : 'Save for later'}
+          className="jc-btn jc-btn-ghost"
+          style={{ width: 30, height: 30, padding: 0, color: isSaved ? 'var(--jc-accent-2)' : 'var(--jc-text-4)' }}
+        >
+          <Icon name="bookmark" size={15} sw={isSaved ? 2.4 : 1.8} />
+        </button>
+        <div style={{ display: 'flex', gap: 7 }}>
+          <a href={job.url} target="_blank" rel="noreferrer" className="jc-btn jc-btn-secondary" style={{ height: 30, padding: '0 11px', textDecoration: 'none' }}>
+            Posting
+          </a>
+          <button onClick={onApply} className="jc-btn jc-btn-primary" style={{ height: 30, padding: '0 13px' }}>
+            Apply
+          </button>
         </div>
       </div>
     </div>

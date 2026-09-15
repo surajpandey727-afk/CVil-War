@@ -19,6 +19,7 @@ from app.schemas.job import (
     JobListingResponse,
     JobListResponse,
     JobSearchRequest,
+    JobStatusUpdate,
 )
 from app.schemas.resume_recommendation import ResumeRecommendation
 from app.services import company as company_service
@@ -85,6 +86,25 @@ async def get_job(
 ) -> JobListingResponse:
     """Get one of the current user's job listings by ID. Returns 404 if not found."""
     job = await job_service.get_job(db, job_id)
+    return JobListingResponse.model_validate(job)
+
+
+@router.patch(
+    "/{job_id}",
+    response_model=JobListingResponse,
+    summary="Save, hide, or otherwise change a job's status",
+)
+async def update_job_status(
+    job_id: str,
+    update: JobStatusUpdate,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> JobListingResponse:
+    """Change a job's lifecycle status (e.g. save it for later, or hide it).
+
+    There was previously no endpoint for this at all — a job only ever moved to APPLIED as
+    a side effect of creating an application.
+    """
+    job = await job_service.update_job_status(db, job_id, update.status)
     return JobListingResponse.model_validate(job)
 
 

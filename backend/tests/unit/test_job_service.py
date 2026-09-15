@@ -7,6 +7,7 @@ import pytest
 
 from app.core.automation.platforms.base import JobListing
 from app.core.exceptions import RecordNotFoundError
+from app.models.enums import JobStatus
 from app.models.job import Job
 from app.schemas.job import JobSearchRequest
 from app.services import job_search
@@ -435,6 +436,34 @@ class TestGetJob:
     async def test_get_job_not_found_raises(self, db_session):
         with pytest.raises(RecordNotFoundError):
             await job_search.get_job(db_session, "nonexistent_id")
+
+
+class TestUpdateJobStatus:
+    """There was previously no way to save or hide a job at all — a job only ever moved to
+    APPLIED as a side effect of creating an application."""
+
+    async def test_saves_a_job(self, db_session, sample_job_data):
+        job = Job(**sample_job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+        assert job.status == JobStatus.NEW
+
+        updated = await job_search.update_job_status(db_session, job.id, JobStatus.SAVED)
+        assert updated.status == JobStatus.SAVED
+
+    async def test_hides_a_job(self, db_session, sample_job_data):
+        job = Job(**sample_job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+
+        updated = await job_search.update_job_status(db_session, job.id, JobStatus.HIDDEN)
+        assert updated.status == JobStatus.HIDDEN
+
+    async def test_not_found_raises(self, db_session):
+        with pytest.raises(RecordNotFoundError):
+            await job_search.update_job_status(db_session, "nonexistent_id", JobStatus.SAVED)
 
 
 class TestDeleteJob:

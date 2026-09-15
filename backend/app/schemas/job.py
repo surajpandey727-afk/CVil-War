@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import SponsorConfidence
+from app.models.enums import JobStatus, SponsorConfidence
 
 
 class JobSearchRequest(BaseModel):
@@ -25,6 +25,12 @@ class JobSearchRequest(BaseModel):
     platforms: list[str] | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=20, ge=1, le=100)
+
+
+class JobStatusUpdate(BaseModel):
+    """Request to save, hide, or otherwise change a job's lifecycle status."""
+
+    status: JobStatus
 
 
 class JobListingResponse(BaseModel):

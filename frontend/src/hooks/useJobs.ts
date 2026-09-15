@@ -115,3 +115,17 @@ export function useEnrichJob() {
     },
   });
 }
+
+/** Save, hide, or otherwise change a job's lifecycle status. There was previously no way
+ *  to do this at all — a job only ever moved to "applied" as a side effect of creating an
+ *  application. */
+export function useUpdateJobStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, status }: { jobId: string; status: string }) =>
+      jobService.updateJobStatus(jobId, status),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+  });
+}

@@ -51,6 +51,42 @@ export function sponsorMeta(confidence: string | null | undefined): StatusMeta {
   return SPONSOR[confidence ?? ''] ?? DEFAULT_SPONSOR;
 }
 
+/** Mirrors the backend `JobStatus` enum (new/saved/applied/hidden) for the Jobs command
+ *  centre's own palette — kept separate from `statusMeta` (application lifecycle) because
+ *  they're different enums answering different questions: this is "what did the operator do
+ *  with this listing", not "where is this application in the pipeline". Uses the jc- scoped
+ *  tokens so it stays inside the Jobs page's own restrained palette rather than pulling in
+ *  the app-wide accent. */
+const JC_DEFAULT_JOB_STATUS: StatusMeta = { label: 'New', color: 'var(--jc-status-new)', soft: 'var(--jc-status-new-soft)' };
+
+const JC_JOB_STATUS: Record<string, StatusMeta> = {
+  new: JC_DEFAULT_JOB_STATUS,
+  saved: { label: 'Saved', color: 'var(--jc-status-saved)', soft: 'var(--jc-status-saved-soft)' },
+  applied: { label: 'Applied', color: 'var(--jc-status-applied)', soft: 'var(--jc-status-applied-soft)' },
+  hidden: { label: 'Hidden', color: 'var(--jc-status-rejected)', soft: 'var(--jc-status-rejected-soft)' },
+};
+
+export function jobStatusMeta(status: string): StatusMeta {
+  return JC_JOB_STATUS[status] ?? JC_DEFAULT_JOB_STATUS;
+}
+
+/** Sponsor-confidence presentation for the Jobs command centre's jc- scoped palette — same
+ *  data as `sponsorMeta`, restated in tokens that stay inside this page's restrained
+ *  army-green/brass/pewter system instead of the app-wide accent. */
+const JC_DEFAULT_SPONSOR: StatusMeta = { label: 'Sponsorship unknown', color: 'var(--jc-text-3)', soft: 'var(--jc-status-new-soft)' };
+
+const JC_SPONSOR: Record<string, StatusMeta> = {
+  confirmed_register: { label: 'Sponsor confirmed', color: 'var(--jc-status-offer)', soft: 'var(--jc-status-offer-soft)' },
+  keyword_detected: { label: 'Likely sponsor', color: 'var(--jc-status-review)', soft: 'var(--jc-status-review-soft)' },
+  likely: { label: 'Likely sponsor', color: 'var(--jc-status-review)', soft: 'var(--jc-status-review-soft)' },
+  unknown: JC_DEFAULT_SPONSOR,
+  not_sponsor: { label: 'Does not sponsor', color: 'var(--jc-status-rejected)', soft: 'var(--jc-status-rejected-soft)' },
+};
+
+export function jcSponsorMeta(confidence: string | null | undefined): StatusMeta {
+  return JC_SPONSOR[confidence ?? ''] ?? JC_DEFAULT_SPONSOR;
+}
+
 /**
  * Scale a 0–1 ATS/match score (as the API returns it) to a 0–100 integer for display.
  * Use this everywhere a score is shown or passed to {@link atsColor} — the raw 0–1 value

@@ -1,0 +1,402 @@
+/* ============================================================================================
+   Jobs Command Centre — scoped design system for the Jobs page and its detail drawer.
+
+   DIRECTION CONTRACT
+   THESIS: A job search is a campaign to run, not a feed to scroll — this page reads like the
+     operations room for that campaign, not another card-grid dashboard.
+   OWN-WORLD: Near-black leather-dark ground (#050605), a single restrained army-green accent
+     family carrying every actionable/positive state, claymorphic surfaces for the few things
+     that matter (job cards, the pipeline bar), flat neumorphic controls for the many things
+     that don't (chips, toggles, inputs). No gradients-as-decoration, no rainbow statuses.
+   STORY: The operator opens Jobs, reads the pipeline in three seconds, scans job cards by
+     fit and status without reading paragraphs, opens one for full intelligence, acts.
+   FIRST VIEWPORT: Command header (title + live pipeline counts) → search/filter bar → dense
+     job list, each card identity-first with progressive disclosure of fit/status/actions.
+   FORM: Restrained color strategy — neutral ground, one accent family. Applied directly in
+     code (code-led; the brief specified exact values, no comp round needed).
+   FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review,
+     the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+
+   Scoped under [data-jc-theme] rather than :root — this redesign is intentionally limited to
+   the Jobs surface; every other page (Dashboard, Applications, Résumés, Settings) keeps its
+   existing ultramarine theme untouched. Applied to three disconnected DOM roots: the page
+   wrapper, and the two React portals (bulk-apply bar, job drawer) that render straight into
+   <body> and would otherwise fall outside this scope.
+   ============================================================================================ */
+
+[data-jc-theme] {
+  /* ---- Surfaces: background -> surface -> elevated -> interactive -------------------- */
+  --jc-bg: #050605;
+  --jc-bg-2: #090b09;
+  --jc-surface: #0d110e;
+  --jc-surface-2: #121712;
+  --jc-surface-3: #171d17;
+  --jc-hover: #1a211a;
+
+  --jc-border: rgba(255, 255, 255, 0.07);
+  --jc-border-soft: rgba(255, 255, 255, 0.04);
+  --jc-border-strong: rgba(255, 255, 255, 0.13);
+
+  --jc-text: #f1f3ef;
+  --jc-text-2: #a7aea5;
+  --jc-text-3: #687068;
+  --jc-text-4: #454b45;
+
+  /* ---- Army green accent system — the ONLY accent family on this surface -------------- */
+  --jc-accent-deep: #202d20;
+  --jc-accent: #465b3d;
+  /* Measured ~4:1 against these near-black surfaces at #617955 (the brief's literal
+     "Highlight" value) — short of the 4.5:1 floor for text this size. Brightened for
+     anywhere this token is used as text/foreground (links, active chip labels, values);
+     it still reads as the same army-green family, just legible as text and not only as
+     a background tint. */
+  --jc-accent-2: #7ba968;
+  --jc-accent-primary: #34452f;
+  --jc-accent-ink: #f1f3ef;
+  /* 0.16 measured imperceptible against the near-black surfaces here (--jc-surface-2 is
+     already close to black, so a translucent tint barely shifts it) — this is the value
+     the real filter chips (role targets, seniority, posted-within, sort) use for their
+     active/selected state via the generic --accent-soft remap below, and that state must
+     be instantly perceivable, not merely technically present. */
+  --jc-accent-soft: rgba(70, 91, 61, 0.38);
+  --jc-accent-line: rgba(70, 91, 61, 0.55);
+  --jc-accent-glow: rgba(70, 91, 61, 0.25);
+
+  /* ---- Semantic status — desaturated, kept inside the dark-luxury family -------------- */
+  /* NEW: neutral slate, no signal yet. */
+  --jc-status-new: var(--jc-text-3);
+  --jc-status-new-soft: rgba(167, 174, 165, 0.1);
+  /* SAVED/SHORTLISTED: army highlight — worth a second look. */
+  --jc-status-saved: var(--jc-accent-2);
+  --jc-status-saved-soft: rgba(97, 121, 85, 0.16);
+  /* QUEUED / PENDING REVIEW: warm brass — waiting on a decision, not yet acted on. */
+  --jc-status-review: #b08d57;
+  --jc-status-review-soft: rgba(176, 141, 87, 0.14);
+  /* APPLIED / APPROVED: full army accent — the confident, acted-on state. */
+  --jc-status-applied: var(--jc-accent);
+  --jc-status-applied-soft: rgba(70, 91, 61, 0.22);
+  /* INTERVIEW: cool pewter-blue — distinct, still restrained, never neon. */
+  --jc-status-interview: #6f8a8c;
+  --jc-status-interview-soft: rgba(111, 138, 140, 0.16);
+  /* OFFER: brightest army highlight in the palette — the win state. */
+  --jc-status-offer: #7a9a68;
+  --jc-status-offer-soft: rgba(122, 154, 104, 0.2);
+  /* REJECTED / FAILED: muted clay-rust, not alarm red. */
+  --jc-status-rejected: #a1615a;
+  --jc-status-rejected-soft: rgba(161, 97, 90, 0.14);
+
+  /* ---- Radius scale — pills reserved for status/tag/filter chips --------------------- */
+  --jc-r-xs: 6px;
+  --jc-r-sm: 8px;
+  --jc-r-md: 12px;
+  --jc-r-lg: 16px;
+  --jc-r-xl: 20px;
+  --jc-r-pill: 999px;
+
+  /* ---- Shadow levels — soft and deep, never a bright/colored halo -------------------- */
+  --jc-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --jc-shadow-2: 0 10px 28px -12px rgba(0, 0, 0, 0.6), 0 3px 10px -4px rgba(0, 0, 0, 0.42);
+  --jc-shadow-3: 0 24px 56px -18px rgba(0, 0, 0, 0.68), 0 8px 20px -8px rgba(0, 0, 0, 0.5);
+  --jc-shadow-4: 0 36px 90px -24px rgba(0, 0, 0, 0.78), 0 12px 32px -12px rgba(0, 0, 0, 0.55);
+
+  /* Claymorphic inset used on the few "important widget" surfaces (pipeline bar, hero
+     card) — a soft top highlight plus a soft bottom shadow inside the element's own border,
+     giving a slightly inflated, tactile plate rather than a flat rectangle. */
+  --jc-clay-inset: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -10px 20px -14px rgba(0, 0, 0, 0.5);
+  /* Neumorphic surface used on compact utility controls (chips, toggles, inputs) — a very
+     subtle dual shadow that reads as pressed-into rather than floating-above. */
+  --jc-neu-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+
+  --jc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  color: var(--jc-text);
+
+  /* ---- Generic-token remap ------------------------------------------------------------
+     Every pre-existing component on this page (the filter rail, chips, checkboxes, range
+     inputs) was written against the app-wide generic tokens (--text, --border, --surface,
+     --accent, ...). Rather than hand-editing every one of those inline styles — high risk
+     for zero behavioral gain — this remaps the generic names to the jc- equivalents inside
+     this scope only. Every element outside [data-jc-theme] is completely unaffected and
+     keeps the app's existing ultramarine theme exactly as it was. */
+  --bg: var(--jc-bg); --bg-2: var(--jc-bg-2);
+  --surface: var(--jc-surface); --surface-2: var(--jc-surface-2); --surface-3: var(--jc-surface-3);
+  --hover: var(--jc-hover);
+  --border: var(--jc-border); --border-2: var(--jc-border-strong); --border-3: var(--jc-border-strong);
+  --text: var(--jc-text); --text-2: var(--jc-text-2); --text-3: var(--jc-text-3); --text-4: var(--jc-text-4);
+  --accent: var(--jc-accent); --accent-2: var(--jc-accent-2); --accent-3: var(--jc-accent-primary);
+  --accent-ink: var(--jc-accent-ink);
+  --accent-soft: var(--jc-accent-soft); --accent-line: var(--jc-accent-line); --accent-glow: var(--jc-accent-glow);
+  --q: var(--jc-text-3); --q-soft: var(--jc-status-new-soft);
+  --review: var(--jc-status-review); --review-soft: var(--jc-status-review-soft);
+  --approved: var(--jc-status-saved); --approved-soft: var(--jc-status-saved-soft);
+  --applied: var(--jc-status-applied); --applied-soft: var(--jc-status-applied-soft);
+  --interview: var(--jc-status-interview); --interview-soft: var(--jc-status-interview-soft);
+  --offer: var(--jc-status-offer); --offer-soft: var(--jc-status-offer-soft);
+  --rejected: var(--jc-status-rejected); --rejected-soft: var(--jc-status-rejected-soft);
+  --withdrawn: var(--jc-text-3); --failed: var(--jc-status-rejected); --failed-soft: var(--jc-status-rejected-soft);
+  --shadow-1: var(--jc-shadow-1); --shadow-2: var(--jc-shadow-2); --shadow-pop: var(--jc-shadow-4);
+  --r-sm: var(--jc-r-sm); --r-md: var(--jc-r-md); --r-lg: var(--jc-r-lg); --r-xl: var(--jc-r-xl);
+  --ease: var(--jc-ease);
+}
+
+/* ---- Leather-grain background --------------------------------------------------------
+   Three layered elements, all CSS: a very faint diagonal fiber hatch (two opposing
+   repeating-linear-gradients at low opacity), a soft vignette, and a fine grain built from
+   a tiled radial-gradient dot pattern. Every layer is under 4% opacity — meant to be felt
+   as depth, not seen as texture. No image asset, no background-image request. */
+.jc-leather {
+  position: relative;
+  background: var(--jc-bg);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.025) 1px, transparent 0),
+    repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.012) 0px, rgba(255, 255, 255, 0.012) 1px, transparent 1px, transparent 3px),
+    repeating-linear-gradient(28deg, rgba(0, 0, 0, 0.18) 0px, rgba(0, 0, 0, 0.18) 1px, transparent 1px, transparent 4px),
+    radial-gradient(ellipse 120% 90% at 50% -10%, rgba(70, 91, 61, 0.05), transparent 60%),
+    radial-gradient(ellipse 140% 100% at 50% 110%, rgba(0, 0, 0, 0.55), transparent 55%);
+  background-size: 3px 3px, 5px 5px, 6px 6px, 100% 100%, 100% 100%;
+}
+
+/* ---- Typography — reuses the app's existing Hanken Grotesk / JetBrains Mono stack; the
+   brief's own request is restraint, and swapping display faces for one page would be the
+   inconsistency this redesign is meant to remove. --------------------------------------- */
+[data-jc-theme] .jc-display { font: 800 26px/1.15 var(--font); letter-spacing: -0.02em; color: var(--jc-text); }
+[data-jc-theme] .jc-section { font: 700 13px/1 var(--font); letter-spacing: -0.005em; color: var(--jc-text); }
+[data-jc-theme] .jc-body { font: 500 13px/1.4 var(--font); color: var(--jc-text-2); }
+[data-jc-theme] .jc-meta { font: 600 11px/1 var(--font); color: var(--jc-text-3); }
+[data-jc-theme] .jc-micro { font: 700 10px/1 var(--mono); letter-spacing: 0.09em; color: var(--jc-text-4); text-transform: uppercase; }
+
+/* ---- Primitive surfaces ---------------------------------------------------------------- */
+[data-jc-theme] .jc-surface {
+  background: var(--jc-surface);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-lg);
+  box-shadow: var(--jc-shadow-1);
+}
+[data-jc-theme] .jc-surface-clay {
+  background: linear-gradient(180deg, var(--jc-surface-2), var(--jc-surface));
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-lg);
+  box-shadow: var(--jc-shadow-2), var(--jc-clay-inset);
+}
+
+/* ---- Command header ---------------------------------------------------------------- */
+[data-jc-theme] .jc-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+/* ---- Pipeline bar: claymorphic strip, each stage a compact tappable segment ------------ */
+[data-jc-theme] .jc-pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: var(--jc-border-soft);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-lg);
+  box-shadow: var(--jc-shadow-2), var(--jc-clay-inset);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+[data-jc-theme] .jc-pipeline-stage {
+  flex: 1 1 0;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--jc-surface);
+  border: 0;
+  cursor: default;
+  text-align: left;
+  transition: background 0.15s var(--jc-ease);
+}
+[data-jc-theme] .jc-pipeline-stage[data-clickable="true"] { cursor: pointer; }
+[data-jc-theme] .jc-pipeline-stage[data-clickable="true"]:hover { background: var(--jc-hover); }
+[data-jc-theme] .jc-pipeline-count { font: 800 20px/1 var(--mono); letter-spacing: -0.01em; }
+[data-jc-theme] .jc-pipeline-label { font: 700 10px/1 var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--jc-text-3); }
+
+/* ---- Search / filter command bar ------------------------------------------------------- */
+[data-jc-theme] .jc-searchbar {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  background: var(--jc-surface);
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-lg);
+  box-shadow: var(--jc-shadow-1);
+}
+[data-jc-theme] .jc-input {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--jc-r-sm);
+  background: var(--jc-bg-2);
+  border: 1px solid var(--jc-border);
+  box-shadow: var(--jc-neu-inset);
+  transition: border-color 0.15s var(--jc-ease), box-shadow 0.15s var(--jc-ease);
+}
+[data-jc-theme] .jc-input:focus-within {
+  border-color: var(--jc-accent-line);
+  box-shadow: var(--jc-neu-inset), 0 0 0 3px var(--jc-accent-glow);
+}
+[data-jc-theme] .jc-input input {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
+  color: var(--jc-text); font: 500 13px/1 var(--font);
+}
+[data-jc-theme] .jc-input input::placeholder { color: var(--jc-text-4); }
+[data-jc-theme] .jc-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; min-width: 18px; padding: 0 4px;
+  border-radius: 4px; background: var(--jc-bg); border: 1px solid var(--jc-border-strong);
+  font: 600 10px/1 var(--mono); color: var(--jc-text-4);
+}
+
+/* ---- Buttons ---------------------------------------------------------------------------- */
+[data-jc-theme] .jc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 38px; padding: 0 16px; border-radius: var(--jc-r-sm);
+  font: 700 12.5px/1 var(--font); cursor: pointer;
+  transition: transform 0.1s var(--jc-ease), box-shadow 0.15s var(--jc-ease), background 0.15s var(--jc-ease), border-color 0.15s var(--jc-ease);
+  border: 1px solid transparent;
+}
+[data-jc-theme] .jc-btn:active { transform: scale(0.97); }
+[data-jc-theme] .jc-btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+[data-jc-theme] .jc-btn-primary {
+  background: linear-gradient(180deg, var(--jc-accent-2), var(--jc-accent));
+  border-color: var(--jc-accent);
+  color: var(--jc-accent-ink);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset, var(--jc-shadow-1);
+}
+[data-jc-theme] .jc-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, var(--jc-shadow-2), 0 0 0 3px var(--jc-accent-glow);
+}
+[data-jc-theme] .jc-btn-secondary {
+  background: var(--jc-surface-2); border-color: var(--jc-border); color: var(--jc-text-2);
+}
+[data-jc-theme] .jc-btn-secondary:hover:not(:disabled) { background: var(--jc-hover); border-color: var(--jc-border-strong); color: var(--jc-text); }
+[data-jc-theme] .jc-btn-ghost {
+  background: transparent; border-color: transparent; color: var(--jc-text-3);
+}
+[data-jc-theme] .jc-btn-ghost:hover:not(:disabled) { background: var(--jc-surface-2); color: var(--jc-text-2); }
+
+/* ---- Chips (filters, tags, statuses) — neumorphic, pill-radius ------------------------- */
+[data-jc-theme] .jc-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 11px;
+  border-radius: var(--jc-r-pill); cursor: pointer; white-space: nowrap;
+  font: 600 11.5px/1 var(--font);
+  background: var(--jc-surface-2); border: 1px solid var(--jc-border); color: var(--jc-text-3);
+  box-shadow: var(--jc-neu-inset);
+  transition: all 0.15s var(--jc-ease);
+}
+[data-jc-theme] .jc-chip:hover { color: var(--jc-text-2); border-color: var(--jc-border-strong); }
+[data-jc-theme] .jc-chip[data-on="true"] {
+  /* A soft rgba tint over an already near-black surface barely shifts — measured
+     imperceptible against --jc-surface-2 at normal viewing size. A real background color
+     plus a light foreground gives the state actual contrast rather than a technicality. */
+  background: var(--jc-accent-primary); border-color: var(--jc-accent); color: var(--jc-text);
+  box-shadow: var(--jc-shadow-1);
+}
+[data-jc-theme] .jc-chip-sm { height: 24px; padding: 0 9px; font-size: 10.5px; }
+
+/* ---- Status badge — label + dot, never color alone ------------------------------------- */
+[data-jc-theme] .jc-status {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+  border-radius: var(--jc-r-pill); font: 700 10px/1 var(--font); letter-spacing: 0.02em;
+}
+[data-jc-theme] .jc-status-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+
+/* ---- Job card — claymorphic, strict internal hierarchy, hover elevation ---------------- */
+[data-jc-theme] .jc-card {
+  position: relative;
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, var(--jc-surface-2), var(--jc-surface));
+  border: 1px solid var(--jc-border);
+  border-radius: var(--jc-r-md);
+  box-shadow: var(--jc-shadow-1);
+  transition: transform 0.15s var(--jc-ease), box-shadow 0.15s var(--jc-ease), border-color 0.15s var(--jc-ease);
+}
+[data-jc-theme] .jc-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--jc-shadow-2);
+  border-color: var(--jc-border-strong);
+}
+[data-jc-theme] .jc-card[data-selected="true"] {
+  border-color: var(--jc-accent-line);
+  box-shadow: var(--jc-shadow-2), 0 0 0 1px var(--jc-accent-line) inset;
+}
+[data-jc-theme] .jc-card-title {
+  font: 700 14.5px/1.25 var(--font); color: var(--jc-text);
+  background: none; border: 0; padding: 0; text-align: left; cursor: pointer;
+}
+[data-jc-theme] .jc-card-title:hover { color: var(--jc-accent-2); }
+[data-jc-theme] .jc-fit-ring {
+  display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  font: 800 12px/1 var(--mono);
+  background: conic-gradient(var(--fit-color, var(--jc-accent)) calc(var(--fit-pct, 0) * 1%), var(--jc-surface-3) 0);
+}
+[data-jc-theme] .jc-fit-ring::before {
+  content: ''; position: absolute;
+}
+[data-jc-theme] .jc-fit-ring-inner {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--jc-surface); color: var(--fit-color, var(--jc-text));
+}
+
+/* ---- Drawer ----------------------------------------------------------------------------- */
+[data-jc-theme] .jc-drawer-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(2, 3, 2, 0.6); backdrop-filter: blur(3px);
+}
+[data-jc-theme] .jc-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 71;
+  width: min(96vw, 640px);
+  background: var(--jc-bg-2);
+  border-left: 1px solid var(--jc-border);
+  box-shadow: var(--jc-shadow-4);
+  display: flex; flex-direction: column;
+}
+[data-jc-theme] .jc-drawer-tab {
+  padding: 9px 14px; border-radius: var(--jc-r-sm); border: 1px solid transparent;
+  background: transparent; color: var(--jc-text-3); font: 700 12px/1 var(--font); cursor: pointer;
+  transition: all 0.15s var(--jc-ease);
+}
+[data-jc-theme] .jc-drawer-tab[data-on="true"] {
+  background: var(--jc-accent-soft); color: var(--jc-accent-2); border-color: var(--jc-accent-line);
+}
+[data-jc-theme] .jc-drawer-tab:hover:not([data-on="true"]) { background: var(--jc-surface-2); color: var(--jc-text-2); }
+
+/* ---- Focus ring, selection, scrollbar — themed rather than left to the browser default -- */
+[data-jc-theme] *:focus-visible { outline: 2px solid var(--jc-accent-2); outline-offset: 2px; }
+[data-jc-theme] ::selection { background: var(--jc-accent-soft); color: var(--jc-text); }
+[data-jc-theme] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-jc-theme] ::-webkit-scrollbar-thumb { background: var(--jc-border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+[data-jc-theme] ::-webkit-scrollbar-thumb:hover { background: var(--jc-accent-line); }
+[data-jc-theme] ::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes jcPop { 0% { opacity: 0; transform: translateY(10px) scale(0.985); } 100% { opacity: 1; transform: none; } }
+@keyframes jcSlide { 0% { transform: translateX(100%); } 100% { transform: none; } }
+@keyframes jcShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-jc-theme] * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* ---- Responsive: left rail collapses under 1024px, cards simplify under 640px ---------- */
+@media (max-width: 1024px) {
+  [data-jc-theme] .jc-layout { flex-direction: column; }
+  [data-jc-theme] .jc-rail { flex: 1 1 auto !important; width: 100%; }
+}
+@media (max-width: 640px) {
+  [data-jc-theme] .jc-pipeline { flex-wrap: wrap; }
+  [data-jc-theme] .jc-pipeline-stage { flex: 1 1 33%; min-width: 88px; }
+  [data-jc-theme] .jc-card { flex-wrap: wrap; }
+}

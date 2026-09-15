@@ -196,6 +196,50 @@ describe('JobSearchPage', () => {
     expect(body!.apply_mode).toBe('review');
   });
 
+  it('saves a job for later directly from the card', async () => {
+    // Previously there was no way to save a job at all, anywhere in the product.
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job({ status: 'new' })))));
+    let sentStatus: string | null = null;
+    server.use(
+      http.patch('/api/v1/jobs/:jobId', async ({ request }) => {
+        sentStatus = ((await request.json()) as { status: string }).status;
+        return HttpResponse.json(job({ status: sentStatus! }));
+      }),
+    );
+    renderJobs();
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+
+    await userEvent.click(screen.getByRole('button', { name: /save for later/i }));
+
+    await waitFor(() => expect(sentStatus).toBe('saved'));
+  });
+
+  it('a saved job stays visible even with "hide already applied" on by default', async () => {
+    // Regression: hideApplied used to hide anything that wasn't 'new'/'discovered',
+    // which caught the new 'saved' status too — saving a job for later immediately
+    // hid it, the opposite of the feature's purpose.
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job({ status: 'saved' })))));
+    renderJobs();
+
+    expect(await screen.findByRole('button', { name: 'Senior Product Manager' })).toBeInTheDocument();
+  });
+
+  it('an actually-applied job is still hidden by "hide already applied"', async () => {
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job({ status: 'applied' })))));
+    renderJobs();
+
+    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Senior Product Manager' })).not.toBeInTheDocument();
+  });
+
+  it('shows a job\'s real status as a badge on its card', async () => {
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job({ status: 'saved' })))));
+    renderJobs();
+
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
   it('opens the job as the decision centre when its title is clicked', async () => {
     // The drawer no longer fires an analysis on open. Analysing every job the operator
     // glances at would spend a model call per click; the CV is chosen first, in the drawer,
@@ -210,6 +254,28 @@ describe('JobSearchPage', () => {
     expect(await screen.findByLabelText('CV')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /analyse my fit/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /apply with agent/i })).toBeInTheDocument();
+  });
+
+  it('shows the real, backend-aggregated pipeline counts in the command header', async () => {
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job()))));
+    server.use(
+      http.get('/api/v1/analytics/dashboard', () =>
+        HttpResponse.json({
+          unique_jobs: 247, total_jobs_found: 300, applications_queued: 3,
+          applications_pending: 9, applications_applied: 32, applications_interview: 4,
+          applications_offer: 1, applications_rejected: 2, applications_applying: 0,
+          applications_failed: 0, submitted_today: 0, submitted_this_week: 0,
+          avg_ats_score: 0.7, total_llm_cost_usd: 0, jobs_found_today: 0,
+          total_applications: 51,
+        }),
+      ),
+    );
+    renderJobs();
+
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+    expect(screen.getByText('247')).toBeInTheDocument(); // Opportunities
+    expect(screen.getByText('32')).toBeInTheDocument(); // Applied
+    expect(screen.getByText('4')).toBeInTheDocument(); // Interview
   });
 
   it('a manual search respects sources disabled in Settings, not just adapter health', async () => {

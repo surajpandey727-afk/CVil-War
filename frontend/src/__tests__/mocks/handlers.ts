@@ -105,6 +105,11 @@ export const handlers = [
     return new HttpResponse(null, { status: 404 });
   }),
 
+  http.patch('/api/v1/jobs/:jobId', async ({ request, params }) => {
+    const body = (await request.json()) as { status: string };
+    return HttpResponse.json({ ...sampleJob, id: params['jobId'], status: body.status });
+  }),
+
   http.post('/api/v1/jobs/:jobId/analyze', () => {
     return HttpResponse.json({
       job_id: 'job-1',
