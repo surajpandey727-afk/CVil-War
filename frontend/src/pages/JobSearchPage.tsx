@@ -8,6 +8,7 @@ import JobDrawer from '@/components/jobs/JobDrawer';
 import { useJobs, useSearchJobs } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
 import { useResumes } from '@/hooks/useResumes';
+import { useSettings } from '@/hooks/useSettings';
 import { useSources } from '@/hooks/useSources';
 import { useAppStore } from '@/store/useAppStore';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
@@ -141,6 +142,7 @@ export default function JobSearchPage() {
   // The authoritative list of what exists, from the backend registry rather than the static
   // catalogue. Used only to decide whether a source is one the operator could have disabled.
   const { catalogue: liveCatalogue } = useSources();
+  const { data: settings } = useSettings();
   const search = useSearchJobs();
   const createApps = useCreateApplicationBatch();
 
@@ -261,9 +263,20 @@ export default function JobSearchPage() {
     // touched the per-device source filter got a dead-end "none of the enabled sources
     // have a working adapter yet" the moment they tried to search — discovery blocked
     // entirely, not merely narrowed, on a screen whose only job is to search.
+    //
+    // The fallback also intersects with the operator's backend `platforms_enabled`
+    // (Settings/Sources page) when it's been narrowed. Previously it only checked adapter
+    // health, so disabling a source in Settings — the control that also gates the
+    // background discovery worker — had no effect on a manual search here: a source the
+    // operator explicitly turned off kept getting searched anyway the moment the per-device
+    // filter was untouched, which is the opposite of what disabling it means.
+    const settingsEnabled = settings?.platforms_enabled;
+    const respectingSettings = settingsEnabled && settingsEnabled.length > 0
+      ? liveCatalogue.live_keys.filter((k) => settingsEnabled.includes(k))
+      : liveCatalogue.live_keys;
     const usable = enabledSources.length > 0
       ? enabledSources.filter((k) => SOURCE_BY_KEY[k]?.implemented)
-      : liveCatalogue.live_keys;
+      : respectingSettings;
     if (!usable.length) {
       notify('None of the enabled sources have a working adapter yet', 'warning');
       return;

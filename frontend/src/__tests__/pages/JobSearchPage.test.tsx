@@ -212,6 +212,39 @@ describe('JobSearchPage', () => {
     expect(screen.getByRole('button', { name: /apply with agent/i })).toBeInTheDocument();
   });
 
+  it('a manual search respects sources disabled in Settings, not just adapter health', async () => {
+    // Settings/Sources also gates the background discovery worker via `platforms_enabled`.
+    // Previously, the moment the per-device source filter (enabledSources) was untouched,
+    // a manual search here fell back to every adapter-healthy source regardless of that
+    // setting — disabling a source in Settings had no effect on what a manual search
+    // actually searched, which is the opposite of what disabling it means.
+    useDiscoveryStore.setState({ enabledSources: [] });
+    server.use(http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job()))));
+    server.use(
+      http.get('/api/v1/settings/', () =>
+        HttpResponse.json({
+          id: 'settings-1', default_template: 'modern', auto_apply: false,
+          platforms: [], llm_provider: 'openai', platforms_enabled: ['remotive'],
+        })),
+    );
+    let sentPlatforms: string[] | null = null;
+    server.use(
+      http.post('/api/v1/jobs/search', async ({ request }) => {
+        const b = (await request.json()) as { platforms?: string[] };
+        sentPlatforms = b.platforms ?? null;
+        return HttpResponse.json(listOf(job()));
+      }),
+    );
+    renderJobs();
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => expect(sentPlatforms).not.toBeNull());
+    expect(sentPlatforms).toContain('remotive');
+    expect(sentPlatforms).not.toContain('adzuna');
+  });
+
   describe('jobs are not hidden by a stale source catalogue', () => {
     // The defect these pin: the static catalogue in lib/sources marks every `careers:*`
     // entry not_implemented, which was false for nine of them. The page filtered against

@@ -54,7 +54,9 @@ describe('SettingsPage', () => {
     renderSettings();
     const select = (await screen.findByLabelText(/apply mode/i)) as HTMLSelectElement;
     await userEvent.selectOptions(select, 'autonomous');
-    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+    // Exact match: /save/i also matches AISettingsPanel's "Save key" button, which is a
+    // real, differently-labeled control on the same page, not a duplicate to fix in the UI.
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.apply_mode).toBe('autonomous');
