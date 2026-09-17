@@ -159,6 +159,18 @@ class TestScoreResume:
 
 
 class TestUploadResume:
+    def test_upload_dir_default_is_not_relative_to_the_working_directory(self):
+        """Every test in this class patches UPLOAD_DIR to a pytest tmp_path, which is exactly
+        why the real default value going stale was invisible here: it was "data/uploads",
+        relative to the process CWD. That directory sits inside the deployment bundle on
+        Vercel, which is read-only — every upload 500'd in production while every test using
+        the patched value stayed green. The default itself must be a real, writable, absolute
+        temp location (mirrors STORAGE__LOCAL_ROOT's own /tmp default), not just the tests."""
+        import tempfile
+
+        assert resume_service.UPLOAD_DIR.is_absolute()
+        assert resume_service.UPLOAD_DIR.is_relative_to(tempfile.gettempdir())
+
     async def test_upload_resume_creates_record(self, db_session, tmp_path):
         mock_file = MagicMock()
         mock_file.filename = "my_resume.pdf"

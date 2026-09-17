@@ -7,6 +7,7 @@ Uses DocumentParser for real file parsing and SkillMatcher for skill extraction.
 import asyncio
 import contextlib
 import re
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,7 +48,11 @@ from app.schemas.resume import (
 
 logger = structlog.get_logger(__name__)
 
-UPLOAD_DIR = Path("data/uploads")
+# Scratch space for parsing only — the persisted copy goes through StorageService below.
+# A project-relative path (the old "data/uploads") lives inside the deployment bundle, which
+# is read-only on Vercel; the OS temp dir is the one location guaranteed writable everywhere
+# (matches STORAGE__LOCAL_ROOT's own /tmp default for the same reason).
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "cvilwar-uploads"
 
 _parser = DocumentParser()
 
