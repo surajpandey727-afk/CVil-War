@@ -5,6 +5,7 @@ restored across agent invocations without re-authenticating.
 """
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,10 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-SESSION_DIR = Path("data/sessions")
+# Same reasoning as app.services.resume.UPLOAD_DIR: a project-relative path lives inside the
+# read-only deployment bundle on Vercel. (This class backs the legacy browser-scraper
+# platforms only — B14/BUG-015 — not the active platform_session.py assisted-login path.)
+SESSION_DIR = Path(tempfile.gettempdir()) / "cvilwar-sessions"
 
 
 class SessionManager:

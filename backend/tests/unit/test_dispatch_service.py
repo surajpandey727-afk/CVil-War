@@ -1,6 +1,6 @@
 """Phase 1.1: apply-mode dispatch + the enqueue producer."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from app.models.enums import ApplicationStatus, ApplyMode
 from app.models.job import Job
@@ -85,5 +85,25 @@ class TestBulkApprove:
 
 
 class TestEnqueueWithoutPool:
-    async def test_enqueue_without_pool_is_noop(self):
-        assert await dispatch.enqueue_apply(None, "app-1") is None
+    """No Redis configured (the serverless API deployment) used to mean an approved
+    application silently never processed — a 200 to the caller, no error anywhere, and the
+    status frozen forever. Reproduced live against production before this existed: approve an
+    application, poll it, watch it never leave "approved". Now it runs the real pipeline
+    inline instead of dropping it."""
+
+    async def test_runs_the_real_pipeline_inline_instead_of_dropping_it(self):
+        with patch("app.workers.tasks.run_apply_pipeline", new=AsyncMock()) as run:
+            result = await dispatch.enqueue_apply(None, "app-1")
+
+        run.assert_awaited_once_with({"job_try": 1, "redis": None}, "app-1")
+        assert result == "inline:app-1"
+
+    async def test_a_deferred_call_is_still_dropped_not_run_immediately(self):
+        """Only reached from inside an already-running apply (a policy hold re-queueing
+        itself for later) -- running it immediately here would recurse into the same apply
+        that is still on the stack, not defer it."""
+        with patch("app.workers.tasks.run_apply_pipeline", new=AsyncMock()) as run:
+            result = await dispatch.enqueue_apply(None, "app-1", defer=60)
+
+        run.assert_not_awaited()
+        assert result is None

@@ -181,6 +181,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/db/cvilwar.db"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Supabase project (used directly by app.core.storage.supabase when
+    # STORAGE__PROVIDER=supabase — the same project as database_url, over its REST Storage
+    # API rather than the S3-compatible one, since a service-role key is what we already
+    # provision this project with; no separate S3 access-key pair needed).
+    supabase_url: str = ""
+    supabase_secret_key: SecretStr = SecretStr("")
+
     # Application behavior
     apply_mode: ApplyMode = ApplyMode.REVIEW
     min_ats_score: float = 0.75

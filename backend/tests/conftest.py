@@ -23,6 +23,7 @@ os.environ.setdefault("BROWSER__LIVE_APPLY", "false")
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -178,6 +179,7 @@ def sample_job_data() -> dict:
 
 def _build_test_app(db_session: AsyncSession, *, authenticated: bool):
     """Build a FastAPI app wired to the test session, optionally pre-authenticated."""
+    from app.db.arq import get_arq_pool
     from app.main import create_app
 
     @asynccontextmanager
@@ -201,6 +203,25 @@ def _build_test_app(db_session: AsyncSession, *, authenticated: bool):
     app.dependency_overrides[get_tenant_db] = override_get_tenant_db
 
     if authenticated:
+        # A real deployment always has *some* answer for get_arq_pool — a real Redis pool, or
+        # (serverless, no Redis) None, which dispatch.enqueue_apply now treats as "run the
+        # apply pipeline inline, in this request" rather than silently dropping it (see
+        # dispatch.py). That inline path opens its own DB session via
+        # app.db.session.async_session_factory, bound to the real module-level engine, not
+        # this fixture's own per-test one — so letting get_arq_pool fall through to its real
+        # (None) implementation here would send every apply/approve test into a database with
+        # no tables. Every *authenticated* route test not specifically about the inline
+        # fallback (that has its own direct unit tests in test_dispatch_service.py) gets a
+        # fake pool instead. Scoped to `authenticated` only: anon_client backs
+        # test_internal_api.py's real "no queue configured -> 503" contract for the n8n
+        # webhook routes, a different, still-current behavior this must not paper over.
+        async def override_get_arq_pool():
+            pool = AsyncMock()
+            pool.enqueue_job = AsyncMock(return_value=None)
+            return pool
+
+        app.dependency_overrides[get_arq_pool] = override_get_arq_pool
+
         async def override_get_current_user():
             return User(id=TEST_USER_ID, email="test@example.com", is_active=True)
 

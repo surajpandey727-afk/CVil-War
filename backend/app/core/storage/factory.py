@@ -26,4 +26,13 @@ def get_storage() -> FileStorage:
             access_key_id=cfg.access_key_id.get_secret_value() or None,
             secret_access_key=cfg.secret_access_key.get_secret_value() or None,
         )
+    if cfg.provider == "supabase":
+        from app.core.storage.supabase import SupabaseStorage
+
+        settings = get_settings()
+        return SupabaseStorage(
+            base_url=settings.supabase_url,
+            service_key=settings.supabase_secret_key.get_secret_value(),
+            bucket=cfg.bucket or "cvilwar-files",
+        )
     raise ValueError(f"Unknown storage provider: {cfg.provider}")

@@ -153,7 +153,13 @@ class TestBulkApproveGuard:
         await db_session.refresh(pending)
         await db_session.refresh(applied)
 
-        count = await dispatch.bulk_approve(db_session, None, [pending.id, applied.id])
+        # A real pool, not None: this test is about which rows bulk_approve transitions, not
+        # about the no-queue inline-apply fallback (that has its own tests in
+        # test_dispatch_service.py) — a None pool now runs the real apply pipeline inline
+        # against a database this test never seeded for that.
+        pool = AsyncMock()
+        pool.enqueue_job = AsyncMock(return_value=None)
+        count = await dispatch.bulk_approve(db_session, pool, [pending.id, applied.id])
 
         assert count == 1
         await db_session.refresh(pending)

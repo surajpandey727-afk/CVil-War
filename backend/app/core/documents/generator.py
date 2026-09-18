@@ -8,6 +8,7 @@ to PDF + DOCX formats.
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,10 @@ from app.observability.metrics import documents_generated_total
 
 logger = structlog.get_logger(__name__)
 
-OUTPUT_DIR = Path("data/generated")
+# Render scratch space only — the same reasoning as app.services.resume.UPLOAD_DIR: a
+# project-relative path lives inside the read-only deployment bundle on Vercel: real output
+# is moved into StorageService (persist_generated_document) after rendering.
+OUTPUT_DIR = Path(tempfile.gettempdir()) / "cvilwar-generated"
 
 
 class GeneratedDocument(BaseModel):

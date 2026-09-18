@@ -42,16 +42,33 @@ async def enqueue_apply(
 
     Idempotent: the job id is derived from ``application_id`` so a duplicate enqueue
     (e.g. a double click or retry) is a no-op while a job is still pending. Returns the
-    job id, ``None`` on a dedup hit, or ``None`` (logged) if the queue is unavailable.
+    job id, ``None`` on a dedup hit, or a synthetic id if it ran inline (see below).
 
     ``job_id`` overrides that derivation. The policy gate needs it: re-queueing a held
     application happens from *inside* the run for that same application, and the default id
     is still held by the in-flight job, so the re-queue would be silently deduplicated away
     and the application would never wake up.
+
+    No queue configured (``pool is None`` — this deployment has no Redis, e.g. the serverless
+    API on its own) used to mean the apply silently never happened: the caller got a 200, the
+    application sat at "approved" forever, and nothing ever told the operator. A deferred
+    (``defer``) call is left alone rather than run immediately — this branch exists for
+    policy-hold re-queues from *inside* an already-running apply, and running synchronously
+    would recurse. Everything else runs the real pipeline inline, in this request, so the
+    status transition the API just promised actually happens before the response returns.
     """
     if pool is None:
-        logger.warning("enqueue_apply.queue_unavailable", application_id=application_id)
-        return None
+        if defer:
+            logger.warning(
+                "enqueue_apply.queue_unavailable_deferred_dropped",
+                application_id=application_id,
+            )
+            return None
+        logger.info("enqueue_apply.no_queue_running_inline", application_id=application_id)
+        from app.workers.tasks import run_apply_pipeline
+
+        await run_apply_pipeline({"job_try": 1, "redis": None}, application_id)
+        return f"inline:{application_id}"
     job = await pool.enqueue_job(
         APPLY_TASK,
         application_id,
