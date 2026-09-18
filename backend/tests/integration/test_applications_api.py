@@ -177,6 +177,54 @@ class TestApproveApplication:
         assert body["id"] == sample_application.id
         assert body["status"] == "approved"
 
+    async def test_approve_response_reflects_the_real_post_pipeline_status(
+        self, db_session, sample_application, monkeypatch
+    ):
+        """Reproduced live in production: approving an application with no queue configured
+        ran the real apply pipeline inline (through its own DB session -- see dispatch.py),
+        but the route kept returning the *pre*-pipeline "approved" snapshot, because that
+        session's changes never touched the route's own already-loaded ORM object. A user
+        approving an application would see "approved" in the response and then, on the very
+        next page load, watch it silently become something else -- this pins the fix
+        (db.refresh(app) after the pipeline runs) with a real pipeline run, not a mock.
+
+        No queue mocking here on purpose: app.workers.tasks.run_apply_pipeline opens its own
+        session via its own module-level async_session_factory binding, which is why the fix
+        needs `pool=None` reaching the *real* dispatch code, not the client fixture's fake
+        pool -- so this calls the route handler directly rather than through client, and
+        monkeypatches that one binding to this test's own seeded database.
+        """
+        from contextlib import asynccontextmanager
+
+        from app.api.v1 import applications as applications_route
+        from app.models.user_settings import UserSettings
+        from app.workers import tasks as tasks_module
+        from tests.conftest import TEST_USER_ID
+        from tests.unit.test_apply_worker import PERMISSIVE_POLICY
+
+        db_session.add(UserSettings(user_id=TEST_USER_ID, automation=PERMISSIVE_POLICY))
+        sample_application.ats_score = 0.9  # PERMISSIVE_POLICY still gates min_ats_score
+        await db_session.commit()
+
+        @asynccontextmanager
+        async def _reuse_test_session():
+            # tasks.py does `async with async_session_factory() as db`, which for a real
+            # sessionmaker closes the session on exit -- fine for a session made just for that
+            # one call, wrong for this test's own fixture session, which must survive past it.
+            yield db_session
+
+        monkeypatch.setattr(tasks_module, "async_session_factory", _reuse_test_session)
+
+        response = await applications_route.approve_application(
+            app_id=sample_application.id, db=db_session, pool=None
+        )
+
+        # PERMISSIVE_POLICY + BROWSER__LIVE_APPLY=false (conftest's env default) -> the real
+        # pipeline runs, the policy gate allows it, and the placeholder submission path
+        # completes -> "applied". Whatever the exact outcome, it must not still read the
+        # pre-pipeline "approved" the route saw before dispatching.
+        assert response.status == "applied"
+
 
 class TestUpdateApplicationStatus:
     """Tests for PUT /api/v1/applications/{app_id}/status."""

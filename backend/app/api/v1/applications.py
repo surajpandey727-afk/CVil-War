@@ -148,6 +148,14 @@ async def approve_application(
     """Approve a pending application and enqueue it for automated submission."""
     app = await app_service.approve_application(db, app_id)
     await dispatch.enqueue_apply(pool, app.id)
+    # When no queue is configured, enqueue_apply just ran the whole pipeline inline, through
+    # its own separate DB session (app.workers.tasks.run_apply_pipeline opens one to mirror
+    # exactly what a real worker does) — this `app` object's attributes are whatever they were
+    # before that ran, and SQLAlchemy's identity map won't pick up the other session's commit
+    # on its own. Refresh so the response reports the real, current status (e.g.
+    # "pending_review" with the policy gate's reason) instead of a stale "approved" that was
+    # already overtaken by the time this line returns.
+    await db.refresh(app)
     return app_service.application_to_response(app)
 
 

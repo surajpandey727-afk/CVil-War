@@ -18,6 +18,7 @@ import csv
 import io
 import json
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,7 +39,12 @@ PUBLICATION_URL = (
 )
 _CSV_LINK_RE = re.compile(r'href="(https://assets\.publishing\.service\.gov\.uk/[^"]+\.csv)"')
 
-_DATA_DIR = Path("data/reference")
+# Same reasoning as app.services.resume.UPLOAD_DIR: a project-relative path lives inside the
+# read-only deployment bundle on Vercel. Unlike that scratch space, this cache is meant to
+# persist across requests — /tmp doesn't survive a cold start, so a serverless deployment
+# re-downloads the (public, freely re-fetchable) register more often than STALE_AFTER_DAYS
+# implies, a real but acceptable cost against the alternative of crashing on every refresh.
+_DATA_DIR = Path(tempfile.gettempdir()) / "cvilwar-reference"
 _CSV_PATH = _DATA_DIR / "sponsors_register.csv"
 _META_PATH = _DATA_DIR / "sponsors_register.meta.json"
 
