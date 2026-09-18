@@ -5,7 +5,13 @@ import Icon from '@/components/ui/Icon';
 import EvidencePanel from '@/components/applications/EvidencePanel';
 import FillActivityPanel from '@/components/applications/FillActivityPanel';
 import RunTimeline from '@/components/applications/RunTimeline';
-import { useApplication, useApplicationEvidence, useUpdateApplicationStatus } from '@/hooks/useApplications';
+import {
+  useApplication,
+  useApplicationEvidence,
+  useGenerateCoverLetter,
+  useUpdateApplicationStatus,
+} from '@/hooks/useApplications';
+import { useLogRecruiterContact } from '@/hooks/useCommunications';
 import { useResumes } from '@/hooks/useResumes';
 import { useAppStore } from '@/store/useAppStore';
 import { buildAppTimeline } from '@/lib/timeline';
@@ -26,9 +32,13 @@ export default function AppDetailPage() {
     error: evidenceErr, refetch: reloadEvidence,
   } = useApplicationEvidence(id);
   const updateStatus = useUpdateApplicationStatus();
+  const generateCoverLetter = useGenerateCoverLetter();
+  const logRecruiterContact = useLogRecruiterContact();
   const { data: resumeData } = useResumes();
   const resumes = resumeData?.items ?? [];
   const [pickedResumeId, setPickedResumeId] = useState('');
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contact, setContact] = useState({ email: '', first_name: '', last_name: '', title: '' });
 
   const setStatus = (status: string, msg: string) =>
     app &&
@@ -45,6 +55,35 @@ export default function AppDetailPage() {
       {
         onSuccess: () => notify('Résumé attached', 'success'),
         onError: () => notify('Could not attach that résumé', 'error'),
+      },
+    );
+
+  const generateLetter = () =>
+    app &&
+    generateCoverLetter.mutate(app.id, {
+      onSuccess: () => {
+        void reloadEvidence();
+        notify(app.has_cover_letter ? 'Cover letter regenerated' : 'Cover letter generated', 'success');
+      },
+      onError: () => notify('Could not generate a cover letter', 'error'),
+    });
+
+  const submitContact = () =>
+    app &&
+    contact.email &&
+    logRecruiterContact.mutate(
+      { applicationId: app.id, ...contact },
+      {
+        onSuccess: (result) => {
+          void reloadEvidence();
+          setContactOpen(false);
+          setContact({ email: '', first_name: '', last_name: '', title: '' });
+          notify(
+            result.matched_existing ? 'Contact updated in Apollo and logged to the timeline' : 'Contact logged to Apollo and the timeline',
+            'success',
+          );
+        },
+        onError: () => notify('Could not log that contact', 'error'),
       },
     );
 
@@ -101,6 +140,18 @@ export default function AppDetailPage() {
                   {app.status === 'failed' && (
                     <ActionButton icon="refresh" label="Re-run" primary disabled={updateStatus.isPending} onClick={() => setStatus('queued', 'Re-queued — the agent will retry')} />
                   )}
+                  <ActionButton
+                    icon="file"
+                    label={generateCoverLetter.isPending ? 'Generating…' : app.has_cover_letter ? 'Regenerate cover letter' : 'Generate cover letter'}
+                    disabled={generateCoverLetter.isPending}
+                    onClick={generateLetter}
+                  />
+                  <ActionButton
+                    icon="mail"
+                    label="Log recruiter contact"
+                    disabled={logRecruiterContact.isPending}
+                    onClick={() => setContactOpen((o) => !o)}
+                  />
                   {ACTIVE.has(app.status) && (
                     <ActionButton icon="x" label="Withdraw" danger disabled={updateStatus.isPending} onClick={() => setStatus('withdrawn', 'Application withdrawn')} />
                   )}
@@ -108,6 +159,56 @@ export default function AppDetailPage() {
                       evidence panel's "Open job" opens the actual stored URL, so the
                       misleading duplicate is gone rather than sitting next to the real one. */}
                 </div>
+
+                {contactOpen && (
+                  <div style={{ marginTop: 14, padding: 14, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <div style={{ font: '700 12.5px/1 var(--font)', marginBottom: 10 }}>Log a recruiter contact</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
+                      <input
+                        type="email"
+                        placeholder="Email *"
+                        aria-label="Recruiter email"
+                        value={contact.email}
+                        onChange={(e) => setContact({ ...contact, email: e.target.value })}
+                        style={inputStyle}
+                      />
+                      <input
+                        type="text"
+                        placeholder="First name"
+                        aria-label="Recruiter first name"
+                        value={contact.first_name}
+                        onChange={(e) => setContact({ ...contact, first_name: e.target.value })}
+                        style={inputStyle}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Last name"
+                        aria-label="Recruiter last name"
+                        value={contact.last_name}
+                        onChange={(e) => setContact({ ...contact, last_name: e.target.value })}
+                        style={inputStyle}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Title"
+                        aria-label="Recruiter title"
+                        value={contact.title}
+                        onChange={(e) => setContact({ ...contact, title: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <ActionButton
+                        icon="mail"
+                        label={logRecruiterContact.isPending ? 'Logging…' : 'Log contact'}
+                        primary
+                        disabled={!contact.email || logRecruiterContact.isPending}
+                        onClick={submitContact}
+                      />
+                      <ActionButton icon="x" label="Cancel" onClick={() => setContactOpen(false)} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* The dashboard's "CV required" action lands here — this used to route to
@@ -185,7 +286,12 @@ export default function AppDetailPage() {
   );
 }
 
-function ActionButton({ icon, label, onClick, primary, danger, disabled }: { icon: 'refresh' | 'x' | 'briefcase'; label: string; onClick: () => void; primary?: boolean; danger?: boolean; disabled?: boolean }) {
+const inputStyle: React.CSSProperties = {
+  height: 32, padding: '0 10px', borderRadius: 'var(--r-sm)', background: 'var(--surface-3)',
+  border: '1px solid var(--border)', color: 'var(--text)', font: '500 12px/1 var(--font)', outline: 'none',
+};
+
+function ActionButton({ icon, label, onClick, primary, danger, disabled }: { icon: 'refresh' | 'x' | 'briefcase' | 'file' | 'mail'; label: string; onClick: () => void; primary?: boolean; danger?: boolean; disabled?: boolean }) {
   const bg = primary ? 'var(--accent)' : danger ? 'var(--rejected-soft)' : 'var(--surface-2)';
   const color = primary ? 'var(--accent-ink)' : danger ? 'var(--rejected)' : 'var(--text-2)';
   const border = primary ? 'var(--accent)' : danger ? 'var(--rejected)' : 'var(--border)';

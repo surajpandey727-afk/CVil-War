@@ -116,3 +116,22 @@ export function useDisconnectPlatform() {
     },
   });
 }
+
+/** Cached-file status of the sponsor register (row count, staleness). Cheap, no network fetch. */
+export function useSponsorshipRegisterStatus() {
+  return useQuery({
+    queryKey: [...SETTINGS_KEY, 'sponsorship-register'],
+    queryFn: () => settingsService.getSponsorshipRegisterStatus(),
+  });
+}
+
+/** Trigger a real download of the register. */
+export function useRefreshSponsorshipRegister() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (force: boolean) => settingsService.refreshSponsorshipRegister(force),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'sponsorship-register'] });
+    },
+  });
+}

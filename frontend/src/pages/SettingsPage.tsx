@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/Icon';
 import AISettingsPanel from '@/components/settings/AISettingsPanel';
 import PlatformsPanel from '@/components/settings/PlatformsPanel';
+import SponsorshipRegisterPanel from '@/components/settings/SponsorshipRegisterPanel';
 import { useSettings, useUpdateSettings } from '@/hooks/useSettings';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types/settings';
@@ -101,6 +102,10 @@ export default function SettingsPage() {
 
       {/* AI providers and usage — discovered from the gateway, summed from real calls. */}
       <AISettingsPanel />
+
+      {/* Sponsor register — the reference data behind the dashboard's "Sponsor confirmed"
+          stat and each job's sponsorship signal. */}
+      <SponsorshipRegisterPanel />
     </div>
   );
 }

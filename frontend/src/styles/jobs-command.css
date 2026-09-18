@@ -352,11 +352,17 @@
 }
 
 /* ---- Drawer ----------------------------------------------------------------------------- */
-[data-jc-theme] .jc-drawer-overlay {
+/* JobDrawer.tsx sets `data-jc-theme` on the overlay/aside themselves (they portal straight
+   into <body>, past any ancestor that could carry it) — `[data-jc-theme] .jc-drawer` is a
+   descendant combinator, so it never matches an element carrying both the attribute and the
+   class itself. Without the compound (no-space) form below, `position: fixed` never applied
+   at all: the drawer rendered inline in normal document flow, ~700px+ down the page, which
+   read as "opening a job does nothing" rather than a visible bug. */
+[data-jc-theme] .jc-drawer-overlay, .jc-drawer-overlay[data-jc-theme] {
   position: fixed; inset: 0; z-index: 70;
   background: rgba(2, 3, 2, 0.6); backdrop-filter: blur(3px);
 }
-[data-jc-theme] .jc-drawer {
+[data-jc-theme] .jc-drawer, .jc-drawer[data-jc-theme] {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 71;
   width: min(96vw, 640px);
   background: var(--jc-bg-2);

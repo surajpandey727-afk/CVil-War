@@ -625,6 +625,26 @@ export const handlers = [
     }),
   ),
 
+  http.get('/api/v1/settings/sponsorship-register/status', () =>
+    HttpResponse.json({ fetched_at: '2026-09-01T00:00:00Z', row_count: 143172, stale: false }),
+  ),
+
+  http.post('/api/v1/settings/sponsorship-register/refresh', () =>
+    HttpResponse.json({
+      fetched_at: '2026-09-01T00:00:00Z', row_count: 143172, stale: false,
+      refreshed: true, error: null,
+    }),
+  ),
+
+  // Apply readiness pre-check. Default handler says every job is ready — tests for the
+  // blocker UI override this per-test with a specific blocker list.
+  http.get('/api/v1/applications/readiness/:jobId', ({ params }) =>
+    HttpResponse.json({
+      job_id: params.jobId, platform: 'linkedin', ready: true, manual_possible: true,
+      blockers: [],
+    }),
+  ),
+
   http.delete('/api/v1/platform-sessions/:platform', () => new HttpResponse(null, { status: 204 })),
 
   // Interactive login capture. The default handler settles immediately as connected; tests

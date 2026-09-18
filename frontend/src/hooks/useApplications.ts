@@ -109,3 +109,23 @@ export function useApplicationEvidence(appId: string | undefined) {
     enabled: !!appId,
   });
 }
+
+/** Generate a cover letter for an application. Invalidates the app + its evidence bundle. */
+export function useGenerateCoverLetter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (appId: string) => appService.generateCoverLetter(appId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPS_KEY });
+    },
+  });
+}
+
+/** Whether the agent can apply to a job right now — re-fetches when the picked résumé changes. */
+export function useApplyReadiness(jobId: string | undefined, resumeId?: string) {
+  return useQuery({
+    queryKey: [...APPS_KEY, 'readiness', jobId, resumeId],
+    queryFn: () => appService.getApplyReadiness(jobId!, resumeId),
+    enabled: !!jobId,
+  });
+}

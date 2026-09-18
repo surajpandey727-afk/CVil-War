@@ -14,6 +14,8 @@ import type {
   PolicyPreview,
   Settings,
   SettingsUpdate,
+  SponsorshipRegisterRefreshResult,
+  SponsorshipRegisterStatus,
 } from '@/types/settings';
 
 /** Get the current user settings. */
@@ -128,5 +130,23 @@ export async function bulkUpdatePlatforms(
   enabled: boolean,
 ): Promise<PlatformsResponse> {
   const { data } = await api.put<PlatformsResponse>('/settings/platforms/bulk', { keys, enabled });
+  return data;
+}
+
+/** Cached-file status of the UK Skilled Worker sponsor register. Never fetches over the network. */
+export async function getSponsorshipRegisterStatus(): Promise<SponsorshipRegisterStatus> {
+  const { data } = await api.get<SponsorshipRegisterStatus>('/settings/sponsorship-register/status');
+  return data;
+}
+
+/** Download the current register if the cached copy is missing or stale (or always, if forced). */
+export async function refreshSponsorshipRegister(
+  force = false,
+): Promise<SponsorshipRegisterRefreshResult> {
+  const { data } = await api.post<SponsorshipRegisterRefreshResult>(
+    '/settings/sponsorship-register/refresh',
+    null,
+    { params: force ? { force: true } : undefined },
+  );
   return data;
 }

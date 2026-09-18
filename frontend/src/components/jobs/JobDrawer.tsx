@@ -10,6 +10,7 @@ import {
   useAnalyseFit, useCompanyProfile, useEnrichJob, useResumeRecommendation, useStoredFit,
   useUpdateJobStatus,
 } from '@/hooks/useJobs';
+import { useApplyReadiness } from '@/hooks/useApplications';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
 import { jcSponsorMeta, jobStatusMeta } from '@/lib/status';
@@ -74,6 +75,10 @@ export default function JobDrawer({
 
   const { data: stored } = useStoredFit(job.id, resumeId || undefined);
   const { data: company, isLoading: companyLoading } = useCompanyProfile(job.id);
+  // The worker already refuses to apply without a session/CV/model — asking here means a
+  // blocker surfaces with its fix *before* the click, not as a failed run afterward.
+  const { data: readiness } = useApplyReadiness(job.id, resumeId || undefined);
+  const blocked = readiness != null && !readiness.ready;
   const analyse = useAnalyseFit();
   const enrich = useEnrichJob();
   const updateStatus = useUpdateJobStatus();
@@ -298,10 +303,25 @@ export default function JobDrawer({
         </div>
 
         {/* ---- Actions: two distinguishable routes, plus save --------------------------- */}
+        {blocked && (
+          <div style={{ flex: '0 0 auto', margin: '0 24px', padding: '10px 12px', borderRadius: 'var(--r-md)', background: 'var(--jc-surface-3)', border: '1px solid var(--jc-border)' }}>
+            <div style={{ font: '700 11.5px/1.3 var(--font)', color: 'var(--jc-text-2)', marginBottom: 4 }}>
+              The agent can't apply here yet
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {readiness!.blockers.map((b) => (
+                <div key={b.code} style={{ font: '500 11px/1.4 var(--font)', color: 'var(--jc-text-3)' }}>
+                  · {b.message} — <span style={{ color: 'var(--jc-text-2)' }}>{b.action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ flex: '0 0 auto', display: 'flex', gap: 9, padding: '16px 24px', borderTop: '1px solid var(--jc-border)', flexWrap: 'wrap' }}>
           <button
             onClick={() => onApplyWithAgent(resumeId || null)}
-            disabled={applying}
+            disabled={applying || blocked}
+            title={blocked ? 'Resolve the blockers above first' : undefined}
             className="jc-btn jc-btn-primary"
             style={{ flex: '1 1 200px', height: 44 }}
           >

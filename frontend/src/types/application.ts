@@ -54,3 +54,26 @@ export interface ApplicationStatusUpdate {
 
 /** Paginated list of applications. */
 export type ApplicationListResponse = PaginatedResponse<Application>;
+
+/** Result of generating a cover letter for an application. */
+export interface CoverLetterResponse {
+  application_id: string;
+  cover_letter_path: string | null;
+}
+
+/** One blocker preventing an agent apply run, with the action that clears it. */
+export interface ApplyBlocker {
+  code: string;
+  message: string;
+  action: string;
+  platform: string | null;
+}
+
+/** Whether the agent can apply to a job right now, and what's missing if not. */
+export interface ApplyReadiness {
+  job_id: string;
+  platform: string;
+  ready: boolean;
+  manual_possible: boolean;
+  blockers: ApplyBlocker[];
+}

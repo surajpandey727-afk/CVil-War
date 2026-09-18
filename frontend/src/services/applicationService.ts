@@ -6,6 +6,8 @@ import type {
   ApplicationBatchCreate,
   ApplicationStatusUpdate,
   ApplicationListResponse,
+  ApplyReadiness,
+  CoverLetterResponse,
 } from '@/types/application';
 
 /** Create a single job application. */
@@ -91,5 +93,19 @@ export async function updateApplicationStatus(
  */
 export async function getApplicationEvidence(appId: string): Promise<ApplicationEvidence> {
   const { data } = await api.get<ApplicationEvidence>(`/applications/${appId}/evidence`);
+  return data;
+}
+
+/** Generate (LLM) and store a cover letter for the application's job + résumé. */
+export async function generateCoverLetter(appId: string): Promise<CoverLetterResponse> {
+  const { data } = await api.post<CoverLetterResponse>(`/applications/${appId}/cover-letter`);
+  return data;
+}
+
+/** Whether the agent can apply to this job right now, and what's missing if not. */
+export async function getApplyReadiness(jobId: string, resumeId?: string): Promise<ApplyReadiness> {
+  const { data } = await api.get<ApplyReadiness>(`/applications/readiness/${jobId}`, {
+    params: resumeId ? { resume_id: resumeId } : undefined,
+  });
   return data;
 }

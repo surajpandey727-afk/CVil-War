@@ -288,3 +288,16 @@ export interface BYOLLMKeyUpdate {
   make_active?: boolean;
   default_model?: string;
 }
+
+/** Cached-file status of the UK sponsor register. Never triggers a network fetch. */
+export interface SponsorshipRegisterStatus {
+  fetched_at: string | null;
+  row_count: number;
+  stale: boolean;
+}
+
+/** Result of an explicit refresh — never throws on a genuine download failure, reports it. */
+export interface SponsorshipRegisterRefreshResult extends SponsorshipRegisterStatus {
+  refreshed: boolean;
+  error: string | null;
+}
