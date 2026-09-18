@@ -110,6 +110,7 @@ export default function Sidebar() {
 
   return (
     <aside
+      className="leather-deep"
       style={{
         flex: '0 0 auto',
         width: expanded ? SIDEBAR_W_EXPANDED : SIDEBAR_W_COLLAPSED,
@@ -117,8 +118,10 @@ export default function Sidebar() {
         flexDirection: 'column',
         background: 'var(--bg-2)',
         borderRight: '1px solid var(--border)',
+        boxShadow: '2px 0 18px -6px rgba(0,0,0,.4)',
         transition: 'width .22s var(--ease)',
         zIndex: 20,
+        position: 'relative',
       }}
     >
       {/* Brand */}

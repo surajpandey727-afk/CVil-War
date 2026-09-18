@@ -1,74 +1,142 @@
 /* CVil-War — design tokens. Created by Suraj Pandey.
-   Dark is the default; [data-theme="light"] and [data-density="compact"] are set on the
-   app root by useUiStore. Everything downstream references these CSS variables only. */
 
-@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+   Direction: Dark Neomorphism on premium Italian leather. Forest-green ground (#0c2d1c) as
+   the dominant field, Crema (#FAE7C9) as the single warm highlight carrying every primary
+   action and number that matters. Surfaces are soft-UI: raised elements read as pressed
+   leather panels (dual light/dark shadow, low contrast, same-hue), never flat cards with a
+   drop shadow bolted on. Geist Sans throughout. Light theme inverts the same two-color story
+   — Crema ground, forest-green ink — rather than becoming a different palette.
+
+   Dark is the default; [data-theme="light"] and [data-density="compact"] are set on the app
+   root by useUiStore. Everything downstream references these CSS variables only. */
+
+@import './fonts.css';
+@import './leather.css';
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; padding: 0; height: 100%; }
-body { background: #0a0c0e; }
+body { background: #081f13; }
 
 :root {
-  --bg:#0a0c0e;--bg-2:#0c0f11;--surface:#131719;--surface-2:#181d20;--surface-3:#0e1214;--hover:#1b2125;
-  --border:rgba(255,255,255,.075);--border-2:rgba(255,255,255,.13);--border-3:rgba(255,255,255,.2);
-  --text:#e9eef1;--text-2:#a2acb2;--text-3:#69737a;--text-4:#495159;
-  /* Brand: ultramarine accent (#4166F5) with a royal-blue secondary.
-     accent-ink is white — white on #4166F5 is 4.7:1 (AA for body text), whereas near-black
-     on it is only 4.4:1, so the previous dark ink would have failed once the hue changed. */
-  --accent:#4166f5;--accent-2:#6d88f8;--accent-3:#2c4bd1;--accent-ink:#ffffff;
-  --accent-soft:rgba(65,102,245,.15);--accent-line:rgba(65,102,245,.38);--accent-glow:rgba(65,102,245,.34);
-  --secondary:#4169e1;--secondary-2:#6d8ae8;--secondary-ink:#ffffff;
-  --secondary-soft:rgba(65,105,225,.14);--secondary-line:rgba(65,105,225,.34);
-  --q:#7f8a99;--q-soft:rgba(127,138,153,.14);
-  --review:#f5b13f;--review-soft:rgba(245,177,63,.14);--review-line:rgba(245,177,63,.34);
-  /* Was #4f9cf9 — near-identical to the new blue accent, so an "approved" pill read as a
-     brand element. Shifted to sky/cyan to stay distinguishable from accent and secondary. */
-  --approved:#38bdf8;--approved-soft:rgba(56,189,248,.14);
-  --applied:#3ecf7a;--applied-soft:rgba(62,207,122,.14);
-  --interview:#a488fb;--interview-soft:rgba(164,136,251,.15);
-  --offer:#22e0a1;--offer-soft:rgba(34,224,161,.15);
-  --rejected:#fb7185;--rejected-soft:rgba(251,113,133,.13);
-  --withdrawn:#828a92;--failed:#f0563f;--failed-soft:rgba(240,86,63,.14);
-  --shadow-1:0 1px 2px rgba(0,0,0,.5),0 1px 1px rgba(0,0,0,.3);
-  --shadow-2:0 20px 44px -20px rgba(0,0,0,.72),0 4px 12px -6px rgba(0,0,0,.5);
-  --shadow-pop:0 30px 70px -22px rgba(0,0,0,.78),0 8px 20px -10px rgba(0,0,0,.5);
-  --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:18px;
+  /* --- Ground: forest-leather tonal ramp, each step close to its neighbor on purpose ---
+     neumorphism reads from a *soft* luminance step, not a hard one. */
+  --bg:#081f13;--bg-2:#0a2417;--surface:#0d2a1a;--surface-2:#103322;--surface-3:#091f14;--hover:#123a26;
+  --border:rgba(250,231,201,.07);--border-2:rgba(250,231,201,.13);--border-3:rgba(250,231,201,.21);
+  --text:#f4ecda;--text-2:#c6bea6;--text-3:#8f9686;--text-4:#5c6455;
+
+  /* Crema — the one highlight. Every primary action, every number that matters, reads in
+     this color and nothing else competes with it for that job. */
+  --accent:#fae7c9;--accent-2:#fff2de;--accent-3:#dfc196;--accent-ink:#0f2417;
+  --accent-soft:rgba(250,231,201,.13);--accent-line:rgba(250,231,201,.34);--accent-glow:rgba(250,231,201,.32);
+
+  /* Brass — the second material (buckles, rivets), used sparingly for a secondary emphasis
+     that must not be mistaken for the one true highlight. */
+  --secondary:#c9a24a;--secondary-2:#ddbb6c;--secondary-ink:#241a06;
+  --secondary-soft:rgba(201,162,74,.15);--secondary-line:rgba(201,162,74,.34);
+
+  --q:#8a9280;--q-soft:rgba(138,146,128,.14);
+  --review:#e3a94f;--review-soft:rgba(227,169,79,.15);--review-line:rgba(227,169,79,.34);
+  --approved:#7fb0d6;--approved-soft:rgba(127,176,214,.14);
+  --applied:#6fce93;--applied-soft:rgba(111,206,147,.15);
+  --interview:#b79ae6;--interview-soft:rgba(183,154,230,.16);
+  --offer:#4fe3a3;--offer-soft:rgba(79,227,163,.16);
+  --rejected:#e2735a;--rejected-soft:rgba(226,115,90,.14);
+  --withdrawn:#8d8676;--failed:#cf4a30;--failed-soft:rgba(207,74,48,.15);
+
+  /* --- Neumorphic pairs: light source top-left, tinted with the ground hue (never white —
+     white reads as plastic on a colored surface); shadow bottom-right, near-black. --- */
+  --neu-lite:rgba(96,168,124,.07);--neu-dark:rgba(0,0,0,.62);
+  --neu-out-sm:-3px -3px 7px var(--neu-lite),4px 4px 10px var(--neu-dark);
+  --neu-out:-7px -7px 15px var(--neu-lite),9px 9px 20px var(--neu-dark);
+  --neu-out-lg:-11px -11px 24px var(--neu-lite),15px 15px 32px var(--neu-dark);
+  --neu-in-sm:inset 2px 2px 5px var(--neu-dark),inset -2px -2px 5px var(--neu-lite);
+  --neu-in:inset 4px 4px 10px var(--neu-dark),inset -3px -3px 9px var(--neu-lite);
+  --neu-pressed:inset 5px 5px 12px rgba(0,0,0,.7),inset -4px -4px 10px var(--neu-lite);
+
+  /* --shadow-1 is what every card/panel in the app already asks for — pointed at the
+     neumorphic pair so the whole product goes soft-UI without touching each call site.
+     --shadow-2/--shadow-pop stay conventional cast shadows: modals, menus, toasts and the
+     command palette float *above* the page, which an embossed inset/outset pair can't sell —
+     only warmed to the leather palette instead of cool black. */
+  --shadow-1:var(--neu-out);
+  --shadow-2:0 20px 44px -20px rgba(0,0,0,.75),0 4px 12px -6px rgba(0,0,0,.55);
+  --shadow-pop:0 30px 74px -22px rgba(0,0,0,.82),0 10px 24px -10px rgba(0,0,0,.6);
+
+  --r-sm:10px;--r-md:14px;--r-lg:20px;--r-xl:27px;
   --row-h:44px;
   --ease:cubic-bezier(.22,1,.36,1);--ease-io:cubic-bezier(.65,0,.35,1);
-  --font:'Hanken Grotesk',system-ui,-apple-system,sans-serif;--mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --font:'Geist',system-ui,-apple-system,sans-serif;--mono:'Geist Mono',ui-monospace,Menlo,monospace;
 }
 
 [data-theme="light"] {
-  --bg:#f3f5f6;--bg-2:#eaedef;--surface:#ffffff;--surface-2:#f5f7f8;--surface-3:#eef1f3;--hover:#eef1f3;
-  --border:rgba(12,20,26,.09);--border-2:rgba(12,20,26,.15);--border-3:rgba(12,20,26,.26);
-  --text:#0e1518;--text-2:#4b565d;--text-3:#78838a;--text-4:#9aa4aa;
-  /* Light theme darkens the accent to #2f52d9: #4166F5 on white is only 4.7:1, and the accent
-     is used as text (links, active nav) — this lifts it to ~6.5:1 while staying the same hue. */
-  --accent:#2f52d9;--accent-2:#4166f5;--accent-3:#22409f;--accent-ink:#ffffff;
-  --accent-soft:rgba(47,82,217,.1);--accent-line:rgba(47,82,217,.3);--accent-glow:rgba(47,82,217,.22);
-  --secondary:#3a5fd0;--secondary-2:#4169e1;--secondary-ink:#ffffff;
-  --secondary-soft:rgba(58,95,208,.1);--secondary-line:rgba(58,95,208,.28);
-  --q:#6b7480;--q-soft:rgba(107,116,128,.1);
-  --review:#c4820a;--review-soft:rgba(196,130,10,.1);--review-line:rgba(196,130,10,.28);
-  --approved:#0e8fc4;--approved-soft:rgba(14,143,196,.1);
-  --applied:#12a259;--applied-soft:rgba(18,162,89,.1);
-  --interview:#7b5ce6;--interview-soft:rgba(123,92,230,.11);
-  --offer:#0bab72;--offer-soft:rgba(11,171,114,.11);
-  --rejected:#e14b62;--rejected-soft:rgba(225,75,98,.1);
-  --withdrawn:#7a838b;--failed:#dc4327;--failed-soft:rgba(220,67,39,.1);
-  --shadow-1:0 1px 2px rgba(15,30,40,.06),0 1px 1px rgba(15,30,40,.04);
-  --shadow-2:0 20px 44px -20px rgba(15,30,40,.18),0 3px 10px -5px rgba(15,30,40,.1);
-  --shadow-pop:0 30px 70px -20px rgba(15,30,40,.22),0 8px 20px -10px rgba(15,30,40,.12);
+  /* Same two colors, inverted roles: Crema is now the ground (leather in daylight), forest
+     green is now the ink and the accent. */
+  --bg:#f1e4c9;--bg-2:#eddec1;--surface:#fae7c9;--surface-2:#fdf1dc;--surface-3:#f2ddbc;--hover:#f6edd4;
+  --border:rgba(12,45,28,.1);--border-2:rgba(12,45,28,.16);--border-3:rgba(12,45,28,.26);
+  --text:#12291b;--text-2:#3d5644;--text-3:#69806f;--text-4:#8fa196;
+
+  --accent:#0e3320;--accent-2:#164229;--accent-3:#082014;--accent-ink:#fbeed9;
+  --accent-soft:rgba(14,51,32,.1);--accent-line:rgba(14,51,32,.3);--accent-glow:rgba(14,51,32,.22);
+
+  --secondary:#8a6a1f;--secondary-2:#a37f2c;--secondary-ink:#fff8ea;
+  --secondary-soft:rgba(138,106,31,.12);--secondary-line:rgba(138,106,31,.3);
+
+  --q:#6b7460;--q-soft:rgba(107,116,96,.11);
+  --review:#a8710f;--review-soft:rgba(168,113,15,.11);--review-line:rgba(168,113,15,.3);
+  --approved:#2f6f96;--approved-soft:rgba(47,111,150,.1);
+  --applied:#227a4c;--applied-soft:rgba(34,122,76,.11);
+  --interview:#6c48b8;--interview-soft:rgba(108,72,184,.12);
+  --offer:#0e9a63;--offer-soft:rgba(14,154,99,.12);
+  --rejected:#b8452e;--rejected-soft:rgba(184,69,46,.11);
+  --withdrawn:#756f5f;--failed:#a3341e;--failed-soft:rgba(163,52,30,.11);
+
+  --neu-lite:rgba(255,255,255,.75);--neu-dark:rgba(120,88,42,.26);
+  --neu-out-sm:-3px -3px 7px var(--neu-lite),4px 4px 9px var(--neu-dark);
+  --neu-out:-7px -7px 15px var(--neu-lite),9px 9px 19px var(--neu-dark);
+  --neu-out-lg:-11px -11px 23px var(--neu-lite),14px 14px 30px var(--neu-dark);
+  --neu-in-sm:inset 2px 2px 5px var(--neu-dark),inset -2px -2px 5px var(--neu-lite);
+  --neu-in:inset 4px 4px 9px var(--neu-dark),inset -3px -3px 8px var(--neu-lite);
+  --neu-pressed:inset 5px 5px 11px rgba(120,88,42,.32),inset -4px -4px 9px var(--neu-lite);
+
+  --shadow-1:var(--neu-out);
+  --shadow-2:0 20px 44px -20px rgba(70,48,20,.22),0 3px 10px -5px rgba(70,48,20,.13);
+  --shadow-pop:0 30px 70px -20px rgba(70,48,20,.26),0 8px 20px -10px rgba(70,48,20,.15);
 }
 
 [data-density="compact"] { --row-h:37px; }
 
 body {
   font-family: var(--font);
+  font-feature-settings: 'ss01' 1, 'cv01' 1;
   color: var(--text);
+  background-color: var(--bg);
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -.01em;
+  letter-spacing: -.011em;
 }
+
+/* The whole canvas is leather, not just the cards on it — the base coat under every page. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(140% 100% at 15% -15%, rgba(250, 231, 201, 0.06), transparent 60%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-size: auto, 340px 340px, 150px 150px;
+  background-blend-mode: normal, soft-light, overlay;
+  background-repeat: no-repeat, repeat, repeat;
+}
+[data-theme="light"] body::before {
+  background-image:
+    radial-gradient(140% 100% at 15% -15%, rgba(12, 45, 28, 0.045), transparent 60%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-blend-mode: normal, multiply, soft-light;
+}
+#root { position: relative; z-index: 1; }
 
 ::selection { background: var(--accent-soft); }
 ::-webkit-scrollbar { width:10px; height:10px; }

@@ -1,0 +1,69 @@
+/* Premium Italian leather — a layered, CSS-only material, not a stock photo tile.
+   Three SVG-turbulence layers, each doing one job real leather does:
+     1. grain   — fine, high-frequency pore texture (the thing your thumb feels)
+     2. hide    — slow, large-scale tonal mottling (no two patches of a real hide match)
+     3. sheen   — a soft directional highlight (leather catches light, it doesn't scatter it)
+
+   Applied via a ::before overlay rather than the element's own `background-image`: nearly
+   every surface in this app sets `background: var(--surface)` inline, and the `background`
+   shorthand — even color-only — resets background-image to `none` as part of the shorthand,
+   which an external stylesheet rule can never out-specificity (inline always wins). A
+   pseudo-element sidesteps that entirely: it paints in its own box, in DOM order below real
+   children, so it never has to fight — or wait on — whatever background an inline style set. */
+
+:root {
+  --leather-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch' seed='7'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.75 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  --leather-hide: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='h'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.018' numOctaves='3' stitchTiles='stitch' seed='23'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23h)'/%3E%3C/svg%3E");
+}
+
+.leather, .leather-deep {
+  position: relative;
+  isolation: isolate;
+}
+.leather::before, .leather-deep::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background-repeat: no-repeat, repeat, repeat;
+}
+/* Real children need to explicitly sit above the overlay — painting order alone handles
+   siblings with no z-index, but any child that later gains a stacking context (a button
+   with its own z-index, a dropdown) must not end up underneath the grain. */
+.leather > *, .leather-deep > * { position: relative; z-index: 1; }
+
+.leather::before {
+  background-image:
+    radial-gradient(120% 90% at 18% -10%, rgba(250, 231, 201, 0.05), transparent 55%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-size: auto, 380px 380px, 170px 170px;
+  background-blend-mode: normal, soft-light, overlay;
+}
+[data-theme="light"] .leather::before {
+  background-image:
+    radial-gradient(120% 90% at 18% -10%, rgba(12, 45, 28, 0.04), transparent 55%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-blend-mode: normal, multiply, soft-light;
+}
+
+/* Stronger cut for hero/ambient chrome (sidebar rail, auth shell) where the material itself
+   is the point, not just a texture hint on a content card. */
+.leather-deep::before {
+  background-image:
+    radial-gradient(140% 100% at 15% -15%, rgba(250, 231, 201, 0.07), transparent 60%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-size: auto, 340px 340px, 150px 150px;
+  background-blend-mode: normal, soft-light, overlay;
+}
+[data-theme="light"] .leather-deep::before {
+  background-image:
+    radial-gradient(140% 100% at 15% -15%, rgba(12, 45, 28, 0.05), transparent 60%),
+    var(--leather-hide),
+    var(--leather-grain);
+  background-blend-mode: normal, multiply, soft-light;
+}
