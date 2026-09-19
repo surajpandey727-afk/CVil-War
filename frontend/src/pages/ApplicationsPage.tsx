@@ -7,9 +7,10 @@ import {
   useApplications, useApproveApplication, useBulkApprove, useUpdateApplicationStatus,
 } from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
-import { useResumes } from '@/hooks/useResumes';
+import { useResumeJobMatch, useResumes } from '@/hooks/useResumes';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAppStore } from '@/store/useAppStore';
+import { useFocusStore } from '@/store/useFocusStore';
 import { statusMeta, atsColor, atsPercent, isApprovable, relativeTime } from '@/lib/status';
 import { buildAppTimeline, type TimelineState } from '@/lib/timeline';
 import type { Application } from '@/types/application';
@@ -234,6 +235,7 @@ export default function ApplicationsPage() {
           emptyTitle="No run in progress"
           emptyBody="Select roles on the Jobs screen and start a run. Every step the agent takes appears here."
           approve={undefined}
+          showTimeline
         />
       )}
 
@@ -275,6 +277,8 @@ export default function ApplicationsPage() {
               onError: () => notify('Could not approve this application', 'error'),
             })}
             approving={approve.isPending}
+            showTimeline={false}
+            matchResumeId={bulkResumeId || undefined}
           />
         </>
       )}
@@ -353,6 +357,7 @@ export default function ApplicationsPage() {
 
 function ActiveOrNeedsActionView({
   items, isLoading, isError, navigate, emptyTitle, emptyBody, approve, approving,
+  showTimeline, matchResumeId,
 }: {
   items: Application[];
   isLoading: boolean;
@@ -362,6 +367,13 @@ function ActiveOrNeedsActionView({
   emptyBody: string;
   approve?: (a: Application) => void;
   approving?: boolean;
+  /** Active has genuinely varied per-row stages (queued/approved/applying) — worth the space.
+   *  Needs action is every row at the same stage by construction, so the same 7-chip strip
+   *  repeated 30 times carries zero differentiating information; dropped there. */
+  showTimeline: boolean;
+  /** The bulk-apply résumé picker's current choice, if any — drives a live per-row match
+   *  preview so picking a résumé once shows how it scores against every listed job. */
+  matchResumeId?: string;
 }) {
   if (isError) return <div style={card}><Notice text="Couldn't load applications. Retry in a moment." /></div>;
 
@@ -401,25 +413,38 @@ function ActiveOrNeedsActionView({
           onOpen={() => navigate(`/applications/${a.id}`)}
           onApprove={approve ? () => approve(a) : undefined}
           approving={approving}
+          showTimeline={showTimeline}
+          matchResumeId={matchResumeId}
         />
       ))}
     </div>
   );
 }
 
-function RunRow({ app, onOpen, onApprove, approving }: {
+function RunRow({ app, onOpen, onApprove, approving, showTimeline, matchResumeId }: {
   app: Application; onOpen: () => void; onApprove?: () => void; approving?: boolean;
+  showTimeline: boolean; matchResumeId?: string;
 }) {
   const meta = statusMeta(app.status);
-  const steps = buildAppTimeline(app.apply_mode, app.status);
+  const steps = showTimeline ? buildAppTimeline(app.apply_mode, app.status) : [];
   const pct = atsPercent(app.ats_score);
+  const setFocusedJob = useFocusStore((s) => s.setFocusedJob);
   const borderColor =
     app.status === 'failed' ? 'var(--failed-soft)'
       : app.status === 'pending_review' ? 'var(--review-line)'
         : 'var(--border)';
 
+  // A live preview of a résumé that isn't necessarily the one attached — how would the
+  // bulk-picker's choice score against this job? Skipped when it's the same résumé already
+  // attached: app.ats_score already answers that, no need for a second, redundant fetch.
+  const previewingDifferentResume = !!matchResumeId && matchResumeId !== app.resume_id;
+  const { data: preview, isLoading: previewLoading } = useResumeJobMatch(
+    previewingDifferentResume ? matchResumeId : undefined,
+    previewingDifferentResume ? app.job_id : undefined,
+  );
+
   return (
-    <div style={{ ...card, padding: '14px 16px', borderColor }}>
+    <div style={{ ...card, padding: showTimeline ? '14px 16px' : '11px 14px', borderColor }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <CompanyLogo name={app.company ?? '—'} size={34} radius={9} />
         <button
@@ -431,9 +456,22 @@ function RunRow({ app, onOpen, onApprove, approving }: {
             {app.company ?? '—'} · {app.apply_mode} mode · updated {relativeTime(app.updated_at)}
           </div>
         </button>
-        {app.ats_score != null && (
+
+        {/* One score slot, not two: a live preview (bulk-picker résumé, not yet attached) wins
+            over the persisted ats_score when both could apply — showing both would just be two
+            numbers answering slightly different questions in the same 80px. */}
+        {previewingDifferentResume ? (
+          previewLoading ? (
+            <span style={{ font: '600 11px/1 var(--font)', color: 'var(--text-4)' }}>scoring…</span>
+          ) : preview ? (
+            <span title={`Preview: how ${matchResumeId ? 'this résumé' : ''} would score`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, font: '700 12px/1 var(--mono)', color: atsColor(atsPercent(preview.overall_score)) }}>
+              <Icon name="wand" size={11} /> {atsPercent(preview.overall_score)}%
+            </span>
+          ) : null
+        ) : app.ats_score != null ? (
           <span style={{ font: '700 12px/1 var(--mono)', color: atsColor(pct) }}>{pct}%</span>
-        )}
+        ) : null}
+
         {app.resume_id ? (
           <span
             title={app.resume_archived ? 'This résumé has since been archived' : undefined}
@@ -461,6 +499,13 @@ function RunRow({ app, onOpen, onApprove, approving }: {
         <span style={{ display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 10px', borderRadius: 999, font: '700 11px/1 var(--font)', color: meta.color, background: meta.soft }}>
           {meta.label}
         </span>
+        <button
+          onClick={() => setFocusedJob(app.job_id, app.job_title ?? 'This role', { openWidget: true })}
+          title="Open the AI ATS review for this job"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-3)', cursor: 'pointer' }}
+        >
+          <Icon name="sparkle" size={12} />
+        </button>
         {onApprove && app.status === 'pending_review' && (
           <button
             onClick={onApprove} disabled={approving}
@@ -471,33 +516,43 @@ function RunRow({ app, onOpen, onApprove, approving }: {
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 13, flexWrap: 'wrap' }}>
-        {steps.map((s) => {
-          const lit = s.state !== 'upcoming';
-          return (
-            <span
-              key={s.key}
-              title={s.diag ?? s.desc}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 9px',
-                borderRadius: 999, font: '600 11px/1 var(--font)',
-                color: lit ? 'var(--text-2)' : 'var(--text-4)',
-                background: s.state === 'current' || s.state === 'failed' ? 'var(--surface-2)' : 'transparent',
-                border: `1px solid ${s.state === 'current' || s.state === 'failed' ? 'var(--border-2)' : 'var(--border)'}`,
-              }}
-            >
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: STEP_COLOR[s.state] }} />
-              {s.label}
-            </span>
-          );
-        })}
-      </div>
+      {showTimeline && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 13, flexWrap: 'wrap' }}>
+          {steps.map((s) => {
+            const lit = s.state !== 'upcoming';
+            return (
+              <span
+                key={s.key}
+                title={s.diag ?? s.desc}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 9px',
+                  borderRadius: 999, font: '600 11px/1 var(--font)',
+                  color: lit ? 'var(--text-2)' : 'var(--text-4)',
+                  background: s.state === 'current' || s.state === 'failed' ? 'var(--surface-2)' : 'transparent',
+                  border: `1px solid ${s.state === 'current' || s.state === 'failed' ? 'var(--border-2)' : 'var(--border)'}`,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: STEP_COLOR[s.state] }} />
+                {s.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
-      {steps.some((s) => s.diag) && (
+      {showTimeline && steps.some((s) => s.diag) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, padding: '10px 12px', borderRadius: 'var(--r-md)', background: 'var(--failed-soft)' }}>
           <span style={{ font: '600 11.5px/1.4 var(--font)', color: 'var(--failed)' }}>
             {steps.find((s) => s.diag)?.diag}
           </span>
+        </div>
+      )}
+
+      {/* Needs action's own reason for waiting — the one piece of per-row information that
+          matters here, so it stays even without the full timeline strip above it. */}
+      {!showTimeline && app.notes && (
+        <div style={{ marginTop: 9, font: '500 11.5px/1.45 var(--font)', color: 'var(--text-3)' }}>
+          {app.notes}
         </div>
       )}
     </div>

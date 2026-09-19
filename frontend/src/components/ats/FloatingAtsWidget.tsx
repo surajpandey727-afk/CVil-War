@@ -15,14 +15,26 @@ interface Position {
   y: number;
 }
 
+/** Clamp so a position saved from a larger window (or a different device) can never place the
+ *  widget partly or fully off the CURRENT viewport — the widget existing but being unreachable
+ *  off-screen is indistinguishable from it not existing at all. */
+function clampToViewport(pos: Position): Position {
+  const w = 320;
+  const h = 60; // collapsed height is small; a generous floor still keeps the header grabbable
+  return {
+    x: Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w)),
+    y: Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - h)),
+  };
+}
+
 function loadPosition(): Position {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Position;
+    if (raw) return clampToViewport(JSON.parse(raw) as Position);
   } catch {
     // localStorage can throw in a private window or with site data blocked — fall through.
   }
-  return { x: window.innerWidth - 320, y: window.innerHeight - 220 };
+  return { x: window.innerWidth - 336, y: window.innerHeight - 236 };
 }
 
 function loadCollapsed(): boolean {
@@ -44,6 +56,7 @@ function loadCollapsed(): boolean {
 export default function FloatingAtsWidget() {
   const focusedJobId = useFocusStore((s) => s.focusedJobId);
   const focusedJobTitle = useFocusStore((s) => s.focusedJobTitle);
+  const openSignal = useFocusStore((s) => s.openSignal);
   const { data: recommendation, isLoading } = useResumeRecommendation(focusedJobId ?? undefined);
   const navigate = useNavigate();
   const notify = useAppStore((s) => s.showNotification);
@@ -100,6 +113,21 @@ export default function FloatingAtsWidget() {
     aiReview.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedJobId]);
+
+  // An explicit "show me this job" trigger (a list row's own AI-review button, not just
+  // JobDrawer opening) un-collapses the widget and re-clamps its position — the operator just
+  // asked for it, so a collapsed pill or a position stranded by an earlier resize must not be
+  // the answer they get.
+  const isFirstOpenSignal = useRef(true);
+  useEffect(() => {
+    if (isFirstOpenSignal.current) {
+      isFirstOpenSignal.current = false;
+      return;
+    }
+    setCollapsed(false);
+    setPosition((prev) => clampToViewport(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSignal]);
 
   const startDrag = (e: React.MouseEvent) => {
     dragState.current = {

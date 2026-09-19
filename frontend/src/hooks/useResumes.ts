@@ -43,6 +43,19 @@ export function useScoreResume() {
   });
 }
 
+/** Live match preview for one (résumé, job) pair — a query, not a mutation, so a list of rows
+ *  can each ask "how would this résumé score against THIS job" and cache per pair. Used by the
+ *  Applications list to show a match column for every row against whichever résumé is picked
+ *  in the bulk-apply selector, without waiting for that application to go through approval. */
+export function useResumeJobMatch(resumeId: string | undefined, jobId: string | undefined) {
+  return useQuery({
+    queryKey: [...RESUMES_KEY, 'match', resumeId, jobId],
+    queryFn: () => resumeService.scoreResume(resumeId!, jobId!),
+    enabled: !!resumeId && !!jobId,
+    staleTime: 60_000,
+  });
+}
+
 /** Optimize a resume for ATS. */
 export function useOptimizeResume() {
   const queryClient = useQueryClient();
