@@ -384,3 +384,40 @@ class TestPolicyGateRouting:
         await tasks._apply(db_session, CTX, app.id)
         await db_session.refresh(app)
         assert app.status != ApplicationStatus.APPLYING
+
+
+class TestAtsScorePersistence:
+    """Root-cause regression: _enforce_policy computed a fresh ATS score on every run and
+    used it only in-memory for the gate decision — app.ats_score itself was never assigned,
+    so the Applications list, evidence panel, and analytics all read a column that stayed
+    null forever no matter how many times an application went through the pipeline."""
+
+    async def test_a_freshly_scored_resume_persists_its_score_on_the_application(
+        self, db_session, sample_job_data
+    ):
+        from app.models.resume import Resume
+
+        resume = Resume(
+            user_id=TEST_USER_ID, name="Base", type="base", template_id="modern",
+            content_text="Experienced Python developer with FastAPI and PostgreSQL skills",
+        )
+        db_session.add(resume)
+        await db_session.flush()
+
+        job = Job(**sample_job_data)
+        db_session.add(job)
+        await db_session.flush()
+        app = Application(
+            user_id=TEST_USER_ID, job_id=job.id, resume_id=resume.id,
+            status=ApplicationStatus.QUEUED, apply_mode=ApplyMode.AUTONOMOUS,
+            ats_score=None,
+        )
+        db_session.add(app)
+        db_session.add(UserSettings(user_id=TEST_USER_ID, automation=PERMISSIVE_POLICY))
+        await db_session.commit()
+        await db_session.refresh(app)
+
+        await tasks._apply(db_session, CTX, app.id)
+
+        await db_session.refresh(app)
+        assert app.ats_score is not None

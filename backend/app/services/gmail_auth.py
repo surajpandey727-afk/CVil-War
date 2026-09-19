@@ -1,12 +1,18 @@
 """Gmail OAuth: the one-time consent flow, and keeping the resulting token usable.
 
-The operator authorises this app to read their Gmail exactly once, in their own browser, on
-Google's own consent screen — the same "human does the actual sign-in" principle
+The operator authorises this app to read and send their Gmail exactly once, in their own
+browser, on Google's own consent screen — the same "human does the actual sign-in" principle
 ``core.automation.connect`` uses for platform sessions, just via OAuth's standard redirect
 dance instead of a captured browser session. Nothing here ever sees a Google password.
 
-Read-only scope only (``gmail.readonly``): this integration detects replies, it never sends,
-labels, or deletes anything in the operator's mailbox.
+Two scopes, both narrow: ``gmail.readonly`` (detects replies — see ``services.inbox_sync``)
+and ``gmail.send`` (application-confirmation notifications — see ``services.gmail_send``).
+Never labels, deletes, or modifies anything in the operator's mailbox. A token issued before
+``gmail.send`` was added does not carry it — Google scopes a grant to what was requested at
+consent time, so an existing connection must be reconnected once to pick up the new scope;
+``services.gmail_send`` treats an insufficient-scope error as "not connected" rather than a
+hard failure, so a stale connection degrades to "no email sent" instead of crashing the apply
+pipeline.
 """
 
 from __future__ import annotations
@@ -27,7 +33,10 @@ logger = structlog.get_logger(__name__)
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+_SCOPE = (
+    "https://www.googleapis.com/auth/gmail.readonly "
+    "https://www.googleapis.com/auth/gmail.send"
+)
 _TIMEOUT = 15.0
 #: Refresh this long before the token's own expiry — never let a sync fail mid-run on an
 #: access token that expires between the readiness check and the actual API call.

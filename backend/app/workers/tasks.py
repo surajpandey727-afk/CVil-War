@@ -202,6 +202,13 @@ async def _enforce_policy(
     from app.services.policy import gate
 
     score = await _ats_score(db, app)
+    # Persisted, not just used in-memory for the gate decision below: every list/detail view
+    # that reads app.ats_score (Applications list, evidence panel, analytics) was reading a
+    # column this function computed a fresh value for on every single run and then discarded
+    # — the field stayed null forever unless something else happened to set it. `_ats_score`
+    # always returns either a genuinely fresh score or the column's own prior value unchanged
+    # (see its docstring), so this assignment is never a regression, only ever a fill-in.
+    app.ats_score = score
     decision = await gate(db, app, ats_score=score)
     if decision.verdict is Verdict.ALLOW:
         await db.commit()
@@ -431,6 +438,18 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         applications_total.labels(status="applied", platform=platform).inc()
         await _publish(ctx, app.user_id, application_id, ApplicationStatus.APPLIED.value)
         logger.info("apply.applied", application_id=application_id, confirmation=confirmation)
+
+        # Best-effort: a notification email failing must never undo or flag an otherwise
+        # successful submission — see services.gmail_send's own docstring.
+        with contextlib.suppress(Exception):
+            from app.services.gmail_send import send_application_confirmation
+
+            await send_application_confirmation(
+                db, app.user_id,
+                job_title=(job.title if job else "this role"),
+                company=(job.company if job else "the employer"),
+                platform=platform,
+            )
     finally:
         current_user_id.reset(token)
 

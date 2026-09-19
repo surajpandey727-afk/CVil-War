@@ -3,6 +3,7 @@
 Handles creating, listing, approving, and updating job applications.
 """
 
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -327,6 +328,7 @@ async def update_status(
         RecordNotFoundError: If application does not exist.
     """
     app = await get_application(db, app_id)
+    was_applied = app.status == ApplicationStatus.APPLIED
     app.status = update.status
     if update.notes is not None:
         app.notes = update.notes
@@ -345,4 +347,18 @@ async def update_status(
     await db.commit()
     await db.refresh(app)
     logger.info("application_status_updated", app_id=app_id, status=update.status)
+
+    # Only the transition INTO applied fires a notification — not every subsequent edit to an
+    # already-applied row (e.g. adding notes later). Best-effort, mirrors workers.tasks._apply.
+    if update.status == ApplicationStatus.APPLIED and not was_applied:
+        with contextlib.suppress(Exception):
+            from app.services.gmail_send import send_application_confirmation
+
+            job = await db.get(Job, app.job_id)
+            await send_application_confirmation(
+                db, app.user_id,
+                job_title=(job.title if job else "this role"),
+                company=(job.company if job else "the employer"),
+                platform=(job.platform if job else "manual"),
+            )
     return app

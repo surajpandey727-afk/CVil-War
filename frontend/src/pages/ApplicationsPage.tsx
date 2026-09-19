@@ -3,8 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
-import { useApplications, useApproveApplication, useBulkApprove } from '@/hooks/useApplications';
+import {
+  useApplications, useApproveApplication, useBulkApprove, useUpdateApplicationStatus,
+} from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
+import { useResumes } from '@/hooks/useResumes';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAppStore } from '@/store/useAppStore';
 import { statusMeta, atsColor, atsPercent, isApprovable, relativeTime } from '@/lib/status';
@@ -84,6 +87,11 @@ export default function ApplicationsPage() {
   const { data, isLoading, isError } = useApplications(1, 100);
   const approve = useApproveApplication();
   const bulkApprove = useBulkApprove();
+  const updateStatus = useUpdateApplicationStatus();
+  const { data: resumeData } = useResumes();
+  const resumes = resumeData?.items ?? [];
+  const [bulkResumeId, setBulkResumeId] = useState('');
+  const [autoApplying, setAutoApplying] = useState(false);
 
   const apps = useMemo(() => data?.items ?? [], [data]);
   const active = useMemo(() => apps.filter((a) => ACTIVE_STATUSES.has(a.status)), [apps]);
@@ -107,6 +115,36 @@ export default function ApplicationsPage() {
       onSuccess: (r) => notify(`${r.approved} approved · queued for the agent`, 'success'),
       onError: () => notify('Could not approve the staged applications', 'error'),
     });
+  };
+
+  // One résumé, attached to every needs-action app that doesn't already have one, then the
+  // whole batch approved together — the point is skipping the "open each app, pick a résumé,
+  // approve" loop for a run where every role gets the same CV.
+  const autoApplyAll = async () => {
+    if (!bulkResumeId || !needsAction.length) return;
+    setAutoApplying(true);
+    const toAttach = needsAction.filter((a) => !a.resume_id);
+    try {
+      const results = await Promise.allSettled(
+        toAttach.map((a) =>
+          updateStatus.mutateAsync({ appId: a.id, update: { status: a.status, resume_id: bulkResumeId } }),
+        ),
+      );
+      const attachFailures = results.filter((r) => r.status === 'rejected').length;
+      const approveResult = await bulkApprove.mutateAsync(needsAction.map((a) => a.id));
+      if (attachFailures > 0) {
+        notify(
+          `${approveResult.approved} approved · ${attachFailures} résumé attachment(s) failed`,
+          'warning',
+        );
+      } else {
+        notify(`Résumé attached and ${approveResult.approved} approved · queued for the agent`, 'success');
+      }
+    } catch {
+      notify('Auto-apply could not complete — some applications may be unchanged', 'error');
+    } finally {
+      setAutoApplying(false);
+    }
   };
 
   const approveSelected = () => {
@@ -202,7 +240,24 @@ export default function ApplicationsPage() {
       {tab === 'needs_action' && (
         <>
           {needsAction.length > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <select
+                aria-label="Résumé for auto-apply"
+                value={bulkResumeId}
+                onChange={(e) => setBulkResumeId(e.target.value)}
+                style={{ height: 34, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', minWidth: 180 }}
+              >
+                <option value="">Auto-apply with résumé…</option>
+                {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              <button
+                onClick={() => void autoApplyAll()}
+                disabled={!bulkResumeId || autoApplying}
+                title="Attach this résumé to every needs-action application that doesn't have one, then approve all"
+                style={{ height: 34, padding: '0 14px', borderRadius: 'var(--r-md)', background: bulkResumeId ? 'var(--surface-2)' : 'var(--surface-3)', border: '1px solid var(--border-2)', color: bulkResumeId ? 'var(--text)' : 'var(--text-4)', font: '700 12.5px/1 var(--font)', cursor: bulkResumeId ? 'pointer' : 'default' }}
+              >
+                {autoApplying ? 'Applying…' : `Auto-apply all ${needsAction.length}`}
+              </button>
               <button
                 onClick={approveAll} disabled={bulkApprove.isPending}
                 style={{ height: 34, padding: '0 14px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
@@ -378,6 +433,30 @@ function RunRow({ app, onOpen, onApprove, approving }: {
         </button>
         {app.ats_score != null && (
           <span style={{ font: '700 12px/1 var(--mono)', color: atsColor(pct) }}>{pct}%</span>
+        )}
+        {app.resume_id ? (
+          <span
+            title={app.resume_archived ? 'This résumé has since been archived' : undefined}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, padding: '0 9px',
+              borderRadius: 999, font: '600 11px/1 var(--font)',
+              color: app.resume_archived ? 'var(--review)' : 'var(--text-3)',
+              background: app.resume_archived ? 'var(--review-soft)' : 'var(--surface-2)',
+              maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
+            <Icon name="file" size={11} /> {app.resume_name ?? 'Résumé'}
+          </span>
+        ) : (
+          <span
+            title="No résumé attached — this application cannot be scored or reliably submitted"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, padding: '0 9px',
+              borderRadius: 999, font: '700 11px/1 var(--font)', color: 'var(--rejected)', background: 'var(--rejected-soft)',
+            }}
+          >
+            <Icon name="alert" size={11} /> No résumé
+          </span>
         )}
         <span style={{ display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 10px', borderRadius: 999, font: '700 11px/1 var(--font)', color: meta.color, background: meta.soft }}>
           {meta.label}
