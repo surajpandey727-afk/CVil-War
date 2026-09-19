@@ -791,6 +791,12 @@ def _score_with_text_fallback(
         suggestions.append(
             "Mirror more terminology from the job description in your resume."
         )
+    # Pure regex, no spaCy — this is the path production actually runs (spaCy is deliberately
+    # excluded from the serverless bundle, see requirements.txt), so this is the only place a
+    # deployed instance ever gets the bullet-quality check without an explicit AI review call.
+    from app.core.ats.impact_matrix import check_bullet_impact_from_text
+
+    suggestions += check_bullet_impact_from_text(resume_text)
 
     return ResumeScoreResponse(
         resume_id=resume_id,

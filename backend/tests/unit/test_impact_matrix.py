@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.ats.impact_matrix import check_bullet_impact
+from app.core.ats.impact_matrix import check_bullet_impact, check_bullet_impact_from_text
 
 
 class TestCheckBulletImpact:
@@ -62,3 +62,25 @@ class TestCheckBulletImpact:
             {"title": "Engineer", "company": "Acme", "responsibilities": ["Handled it"]},
         ])
         assert result == []
+
+
+class TestCheckBulletImpactFromText:
+    """The text-only variant — what production's spaCy-free fallback scorer actually calls
+    (see services.resume._score_with_text_fallback: spaCy is not in the serverless bundle)."""
+
+    def test_no_text_returns_no_suggestions(self) -> None:
+        assert check_bullet_impact_from_text("") == []
+
+    def test_weak_line_in_raw_resume_text_is_flagged(self) -> None:
+        text = (
+            "PROFESSIONAL EXPERIENCE\n"
+            "Responsible for managing the local cloud infrastructure across three regions\n"
+            "Led a team of five engineers to deliver the platform migration"
+        )
+        result = check_bullet_impact_from_text(text)
+        assert len(result) == 1
+        assert "cloud infrastructure" in result[0]
+
+    def test_strong_resume_produces_no_suggestion(self) -> None:
+        text = "Cut cloud infrastructure spend 22% by migrating to spot instances"
+        assert check_bullet_impact_from_text(text) == []

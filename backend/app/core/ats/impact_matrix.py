@@ -50,6 +50,36 @@ def _is_weak(bullet: str) -> bool:
     return starts_weak and not has_metric
 
 
+def _format_suggestion(weak_examples: list[str]) -> list[str]:
+    if not weak_examples:
+        return []
+    quoted = "; ".join(f'"{e}"' for e in weak_examples)
+    return [
+        f"{len(weak_examples)} bullet point(s) describe a duty with no measurable result — "
+        f"{quoted}. Rewrite each as Action verb + what you did + a number: e.g. "
+        '"Responsible for managing cloud infrastructure" -> '
+        '"Cut cloud infrastructure spend 22% by migrating to spot instances."'
+    ]
+
+
+def check_bullet_impact_from_text(resume_text: str) -> list[str]:
+    """Same check, run directly on raw résumé text — no structured profile required.
+
+    ``check_bullet_impact`` below needs ``candidate_profile.experience`` entries, which only
+    exist once the operator has a stored work history (Settings, or the LLM extraction flow).
+    This variant is what the text-overlap fallback scorer uses instead: it has nothing but the
+    résumé's raw text either way (no spaCy, no structured profile), and a weak bullet reads
+    the same whether it came from a parsed entry or a raw line.
+    """
+    weak_examples: list[str] = []
+    for bullet in _split_bullets(resume_text):
+        if len(weak_examples) >= _MAX_EXAMPLES:
+            break
+        if _is_weak(bullet):
+            weak_examples.append(bullet[:140])
+    return _format_suggestion(weak_examples)
+
+
 def check_bullet_impact(candidate_experience: list[dict]) -> list[str]:
     """Scan every experience entry's bullets; return 0-2 suggestions naming real examples.
 
@@ -74,13 +104,4 @@ def check_bullet_impact(candidate_experience: list[dict]) -> list[str]:
         if len(weak_examples) >= _MAX_EXAMPLES:
             break
 
-    if not weak_examples:
-        return []
-
-    quoted = "; ".join(f'"{e}"' for e in weak_examples)
-    return [
-        f"{len(weak_examples)} bullet point(s) describe a duty with no measurable result — "
-        f"{quoted}. Rewrite each as Action verb + what you did + a number: e.g. "
-        '"Responsible for managing cloud infrastructure" -> '
-        '"Cut cloud infrastructure spend 22% by migrating to spot instances."'
-    ]
+    return _format_suggestion(weak_examples)

@@ -158,6 +158,19 @@ class TestScoreResume:
         assert result.experience_score == 0.5
 
 
+class TestTextFallbackScorer:
+    """The spaCy-free path — what production actually runs (spaCy is deliberately excluded
+    from the serverless bundle, see requirements.txt), not just the local-dev fallback."""
+
+    def test_weak_bullet_suggestion_survives_the_fallback_path(self) -> None:
+        result = resume_service._score_with_text_fallback(
+            "r1", "j1",
+            "Responsible for managing the local cloud infrastructure across three regions",
+            "Looking for a cloud engineer with Python and AWS experience.",
+        )
+        assert any("measurable result" in s for s in result.suggestions)
+
+
 class TestUploadResume:
     def test_upload_dir_default_is_not_relative_to_the_working_directory(self):
         """Every test in this class patches UPLOAD_DIR to a pytest tmp_path, which is exactly
