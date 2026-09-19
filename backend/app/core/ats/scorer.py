@@ -13,6 +13,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.ats.experience_analyzer import ExperienceAnalyzer
+from app.core.ats.impact_matrix import check_bullet_impact
 from app.core.ats.keyword_analyzer import KeywordAnalyzer
 from app.core.ats.skill_matcher import SkillMatcher
 
@@ -149,6 +150,10 @@ class ResumeScorer:
             skill_score, exp_score, edu_score, keyword_score,
             missing_req, missing_pref,
         )
+        # Free, always-on — no LLM call — see impact_matrix's own docstring for why this
+        # doesn't just fold into _generate_suggestions above (it needs the raw bullet text,
+        # not the aggregate scores those suggestions are keyed on).
+        suggestions += check_bullet_impact(candidate_profile.get("experience", []))
 
         details = ScoreDetails(
             overall_score=round(overall, 4),

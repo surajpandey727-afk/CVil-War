@@ -312,3 +312,95 @@ class TestExtractCandidateProfileFromResume:
 
         assert result.profile_updated is False
         assert "no parsed text" in result.detail.lower()
+
+
+class TestReviewResumeWithLLM:
+    """The on-demand deep review — separate from score_resume, which stays algorithmic-only
+    so every passive view (recommendation ranking, floating widget, the policy gate) doesn't
+    pay for an LLM call it never asked for."""
+
+    def _fake_llm(self, review):
+        client = AsyncMock()
+        client.complete_with_structured_output = AsyncMock(return_value=review)
+        return client
+
+    async def _seed(self, db_session, job_data):
+        r = Resume(
+            user_id=TEST_USER_ID, name="CV", type="base", template_id="modern",
+            content_text="Senior Engineer with Jenkins and GitHub Actions experience.",
+        )
+        db_session.add(r)
+        job = Job(**job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(r)
+        await db_session.refresh(job)
+        return r, job
+
+    async def test_returns_the_llm_review_when_available(self, db_session, sample_job_data):
+        from app.schemas.resume import LLMAtsReview
+
+        r, job = await self._seed(db_session, sample_job_data)
+        review = LLMAtsReview(
+            semantic_score=0.82,
+            contextually_satisfied_skills=["CI/CD pipelines"],
+            still_missing_skills=["Kubernetes"],
+            recency_note="Most recent role is current.",
+            seniority_note="Titles support the required seniority.",
+            weak_bullets=[],
+            verdict="Strong contextual fit despite no exact CI/CD keyword.",
+        )
+        with patch.object(
+            resume_service, "build_llm_client_for_user",
+            AsyncMock(return_value=self._fake_llm(review)),
+        ):
+            result = await resume_service.review_resume_with_llm(
+                db_session, r.id, job.id, TEST_USER_ID,
+            )
+
+        assert result.available is True
+        assert result.review is not None
+        assert result.review.semantic_score == 0.82
+        assert "CI/CD pipelines" in result.review.contextually_satisfied_skills
+
+    async def test_llm_failure_reports_unavailable_not_an_exception(
+        self, db_session, sample_job_data
+    ):
+        from app.core.exceptions import LLMProviderError
+
+        r, job = await self._seed(db_session, sample_job_data)
+        failing_client = AsyncMock()
+        failing_client.complete_with_structured_output = AsyncMock(
+            side_effect=LLMProviderError("gateway unreachable")
+        )
+        with patch.object(
+            resume_service, "build_llm_client_for_user",
+            AsyncMock(return_value=failing_client),
+        ):
+            result = await resume_service.review_resume_with_llm(
+                db_session, r.id, job.id, TEST_USER_ID,
+            )
+
+        assert result.available is False
+        assert result.review is None
+        assert result.detail
+
+    async def test_empty_resume_text_is_unavailable_without_calling_the_llm(
+        self, db_session, sample_job_data,
+    ):
+        r = Resume(user_id=TEST_USER_ID, name="CV", type="base", template_id="modern")
+        db_session.add(r)
+        job = Job(**sample_job_data)
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(r)
+        await db_session.refresh(job)
+
+        never_called = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+        with patch.object(resume_service, "build_llm_client_for_user", never_called):
+            result = await resume_service.review_resume_with_llm(
+                db_session, r.id, job.id, TEST_USER_ID,
+            )
+
+        assert result.available is False
+        never_called.assert_not_called()

@@ -61,6 +61,16 @@ export function useExtractProfile() {
   });
 }
 
+/** On-demand deep AI ATS review. A mutation, not a query — it costs an LLM call, so it only
+ *  runs when the operator explicitly asks, never passively on mount/focus like useScoreResume
+ *  consumers such as the floating widget. */
+export function useAiAtsReview() {
+  return useMutation({
+    mutationFn: ({ resumeId, jobId }: { resumeId: string; jobId: string }) =>
+      resumeService.reviewResumeWithAI(resumeId, jobId),
+  });
+}
+
 /** Fetch where one résumé has been used. Only enabled once an id is chosen. */
 export function useResumeUsage(resumeId: string | null) {
   return useQuery({

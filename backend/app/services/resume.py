@@ -35,6 +35,8 @@ from app.models.user_settings import UserSettings
 from app.schemas.resume import (
     ExtractedProfileData,
     ExtractProfileResponse,
+    LLMAtsReview,
+    ResumeAtsReviewResponse,
     ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
@@ -523,6 +525,53 @@ async def score_resume(
         return _score_with_text_fallback(
             resume_id, request.job_id, resume_text, job_description,
         )
+
+
+async def review_resume_with_llm(
+    db: AsyncSession, resume_id: str, job_id: str, user_id: str,
+) -> ResumeAtsReviewResponse:
+    """On-demand deep ATS review: semantic skill matching, recency, and bullet rewrites.
+
+    Explicit and user-triggered by design — never called from the passive scoring paths
+    (résumé recommendation ranking, the dispatch pipeline's policy gate, the floating widget)
+    that run ``score_resume`` automatically on every job view. Those need to stay fast and
+    free; this is the "read it like a real reviewer would" pass the operator asks for when
+    they want to know why a score is what it is. See ``core.llm.prompts.ats_review`` for the
+    standardization rules this asks the model to follow.
+    """
+    resume = await get_resume(db, resume_id)
+    job = await _get_job(db, job_id)
+    resume_text = resume.content_text or ""
+    if not resume_text.strip():
+        return ResumeAtsReviewResponse(
+            resume_id=resume_id, job_id=job_id, available=False,
+            detail="This résumé has no parsed text to review.",
+        )
+
+    from app.core.exceptions import LLMError
+    from app.core.llm.prompts.ats_review import (
+        ATS_REVIEW_SYSTEM_PROMPT,
+        render_ats_review_prompt,
+    )
+
+    llm = await build_llm_client_for_user(db, user_id)
+    try:
+        review = await llm.complete_with_structured_output(
+            prompt=render_ats_review_prompt(resume_text, job.description or "", job.title),
+            output_schema=LLMAtsReview,
+            system_prompt=ATS_REVIEW_SYSTEM_PROMPT,
+            purpose="ats_review",
+        )
+    except LLMError as exc:
+        logger.warning("ats_review.llm_unavailable", resume_id=resume_id, error=str(exc))
+        return ResumeAtsReviewResponse(
+            resume_id=resume_id, job_id=job_id, available=False,
+            detail="The AI reviewer isn't reachable right now — try again shortly.",
+        )
+
+    return ResumeAtsReviewResponse(
+        resume_id=resume_id, job_id=job_id, available=True, review=review,
+    )
 
 
 def _parse_year(date_text: str) -> int | None:

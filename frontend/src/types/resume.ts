@@ -90,6 +90,34 @@ export interface ResumeScoreResponse {
   suggestions: string[];
 }
 
+/** One résumé line the AI reviewer judged weak, with a concrete rewrite. */
+export interface WeakBullet {
+  original: string;
+  why_weak: string;
+  rewrite: string;
+}
+
+/** The on-demand LLM read: semantic skill matching, recency, seniority, bullet rewrites —
+ *  everything the always-on algorithmic score (above) can't do. */
+export interface LLMAtsReview {
+  semantic_score: number;
+  contextually_satisfied_skills: string[];
+  still_missing_skills: string[];
+  recency_note: string;
+  seniority_note: string;
+  weak_bullets: WeakBullet[];
+  verdict: string;
+}
+
+export interface ResumeAtsReviewResponse {
+  resume_id: string;
+  job_id: string;
+  review: LLMAtsReview | null;
+  /** False when no LLM was reachable — render "unavailable", not an empty review. */
+  available: boolean;
+  detail: string;
+}
+
 /** Request to score a resume against a job listing. */
 export interface ResumeScoreRequest {
   job_id: string;

@@ -1,6 +1,7 @@
 import api from './api';
 import type {
   Resume,
+  ResumeAtsReviewResponse,
   ResumeDeleteResponse,
   ResumeUploadResponse,
   ResumeScoreResponse,
@@ -46,6 +47,18 @@ export async function scoreResume(
 /** Optimize a resume for ATS keyword matching. */
 export async function optimizeResume(resumeId: string): Promise<Resume> {
   const { data } = await api.post<Resume>(`/resumes/${resumeId}/optimize`);
+  return data;
+}
+
+/** On-demand deep AI review: semantic skill matching, recency, seniority, bullet rewrites.
+ *  Costs an LLM call — unlike scoreResume above, only call this from an explicit user action. */
+export async function reviewResumeWithAI(
+  resumeId: string,
+  jobId: string,
+): Promise<ResumeAtsReviewResponse> {
+  const { data } = await api.post<ResumeAtsReviewResponse>(`/resumes/${resumeId}/ats-review`, {
+    job_id: jobId,
+  });
   return data;
 }
 

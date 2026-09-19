@@ -230,6 +230,24 @@ export const handlers = [
     });
   }),
 
+  http.post('/api/v1/resumes/:resumeId/ats-review', () => {
+    return HttpResponse.json({
+      resume_id: 'resume-1',
+      job_id: 'job-1',
+      available: true,
+      review: {
+        semantic_score: 0.8,
+        contextually_satisfied_skills: [],
+        still_missing_skills: [],
+        recency_note: '',
+        seniority_note: '',
+        weak_bullets: [],
+        verdict: 'Solid fit.',
+      },
+      detail: '',
+    });
+  }),
+
   http.post('/api/v1/resumes/:resumeId/optimize', () => {
     return HttpResponse.json({
       id: 'resume-1',

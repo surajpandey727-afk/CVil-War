@@ -53,6 +53,54 @@ class ResumeOptimizeRequest(BaseModel):
     job_id: str | None = None
 
 
+class WeakBullet(BaseModel):
+    """One résumé line the reviewer judged weak, with a concrete rewrite."""
+
+    original: str
+    why_weak: str
+    rewrite: str
+
+
+class LLMAtsReview(BaseModel):
+    """An on-demand, LLM-read second opinion layered on top of the algorithmic ATS score.
+
+    Deliberately NOT folded into the always-on ``ResumeScoreResponse`` — that score runs on
+    every passive view (the résumé recommendation ranking, the floating widget, the dispatch
+    pipeline's policy gate) and an LLM call on every one of those would be slow and expensive
+    for no benefit most of the time. This is the explicit, user-triggered "read it like a real
+    reviewer would" pass: contextual skill inference an exact-string matcher cannot do (e.g.
+    crediting "CI/CD" for a résumé that only says "Jenkins, GitHub Actions"), recency judgment
+    an aggregate years-of-experience number cannot express, and bullet-level rewrites.
+    """
+
+    semantic_score: float = Field(ge=0.0, le=1.0)
+    #: Skills the job asks for that the algorithmic matcher already found present or absent
+    #: exactly — this is only what the LLM additionally judged present via a DIFFERENT term
+    #: than the job posting used (so the UI can say *why* an "already missing" skill is
+    #: actually covered), not a full second skills list.
+    contextually_satisfied_skills: list[str] = Field(default_factory=list)
+    #: Skills still genuinely absent even after contextual/synonym reasoning — the reviewer's
+    #: real gap list, replacing the algorithmic matcher's exact-string one for display.
+    still_missing_skills: list[str] = Field(default_factory=list)
+    recency_note: str = Field(default="")
+    seniority_note: str = Field(default="")
+    weak_bullets: list[WeakBullet] = Field(default_factory=list)
+    #: One paragraph, the way a real recruiter reads a résumé in the first ten seconds.
+    verdict: str = Field(default="")
+
+
+class ResumeAtsReviewResponse(BaseModel):
+    """What the on-demand deep review found, plus whether it actually ran."""
+
+    resume_id: str
+    job_id: str
+    review: LLMAtsReview | None = None
+    #: False when no LLM key/gateway was reachable — the caller renders "unavailable", not a
+    #: silently empty review that reads as "found nothing wrong".
+    available: bool
+    detail: str = ""
+
+
 class ResumeResponse(BaseModel):
     """Single resume in API responses."""
 

@@ -15,6 +15,7 @@ from app.core.ratelimit import rate_limit
 from app.core.storage import StorageService, get_storage
 from app.schemas.resume import (
     ExtractProfileResponse,
+    ResumeAtsReviewResponse,
     ResumeDeleteResponse,
     ResumeGenerateRequest,
     ResumeListResponse,
@@ -215,6 +216,26 @@ async def score_resume(
 ) -> ResumeScoreResponse:
     """Score a resume's ATS compatibility against a specific job."""
     return await resume_service.score_resume(db, resume_id, request)
+
+
+@router.post(
+    "/{resume_id}/ats-review",
+    response_model=ResumeAtsReviewResponse,
+    dependencies=[_COSTLY],
+    summary="On-demand deep ATS review (semantic skill matching, recency, bullet rewrites)",
+)
+async def ats_review(
+    resume_id: str,
+    user: CurrentUser,
+    request: ResumeScoreRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ResumeAtsReviewResponse:
+    """The explicit, LLM-read second opinion on top of the always-on algorithmic score.
+
+    Costs an LLM call, unlike ``/score`` — triggered by the operator, never by a passive
+    view. See ``services.resume.review_resume_with_llm`` for why the two are kept separate.
+    """
+    return await resume_service.review_resume_with_llm(db, resume_id, request.job_id, user.id)
 
 
 @router.post(
