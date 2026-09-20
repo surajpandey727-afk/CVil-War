@@ -9,6 +9,7 @@ import ApplicationsPage from '@/pages/ApplicationsPage';
 import AppDetailPage from '@/pages/AppDetailPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
 import ResumesPage from '@/pages/ResumesPage';
+import ResumeIntelligencePage from '@/pages/ResumeIntelligencePage';
 import RoleTargetsPage from '@/pages/RoleTargetsPage';
 import SourcesPage from '@/pages/SourcesPage';
 import AutomationPage from '@/pages/AutomationPage';
@@ -52,6 +53,7 @@ function App() {
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/applications/:id" element={<AppDetailPage />} />
           <Route path="/resumes" element={<ResumesPage />} />
+          <Route path="/resume-intelligence" element={<ResumeIntelligencePage />} />
           <Route path="/communications" element={<CommunicationsPage />} />
           <Route path="/targets" element={<RoleTargetsPage />} />
           <Route path="/sources" element={<SourcesPage />} />

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import CompanyPanel from '@/components/jobs/CompanyPanel';
@@ -48,6 +49,7 @@ export default function JobDrawer({
   job, resumes, onClose, onApplyWithAgent, applying, onApplyManually, onOpenJobId,
 }: JobDrawerProps) {
   const notify = useAppStore((s) => s.showNotification);
+  const navigate = useNavigate();
   const setFocusedJob = useFocusStore((s) => s.setFocusedJob);
   const [tab, setTab] = useState<Tab>('fit');
   const [resumeId, setResumeId] = useState<string>('');
@@ -326,6 +328,15 @@ export default function JobDrawer({
             style={{ flex: '1 1 200px', height: 44 }}
           >
             <Icon name="cpu" size={14} /> {applying ? 'Queueing…' : 'Apply with agent'}
+          </button>
+
+          <button
+            onClick={() => navigate(`/resume-intelligence?tailorJobId=${job.id}`)}
+            className="jc-btn jc-btn-secondary"
+            style={{ flex: '0 0 auto', height: 44 }}
+            title="Analyse this job against a role résumé and propose evidence-grounded changes"
+          >
+            <Icon name="wand" size={14} /> Tailor résumé
           </button>
 
           {applyUrl ? (

@@ -1,4 +1,4 @@
-import api from './api';
+import api, { LLM_CALL_TIMEOUT_MS } from './api';
 import type {
   Resume,
   ResumeAtsReviewResponse,
@@ -58,7 +58,7 @@ export async function reviewResumeWithAI(
 ): Promise<ResumeAtsReviewResponse> {
   const { data } = await api.post<ResumeAtsReviewResponse>(`/resumes/${resumeId}/ats-review`, {
     job_id: jobId,
-  });
+  }, { timeout: LLM_CALL_TIMEOUT_MS });
   return data;
 }
 

@@ -28,7 +28,7 @@ from app.core.storage.documents import (
     persist_generated_document,
 )
 from app.models.application import Application
-from app.models.enums import ApplicationStatus
+from app.models.enums import ApplicationStatus, LLMPurpose
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user_settings import UserSettings
@@ -560,7 +560,7 @@ async def review_resume_with_llm(
             prompt=render_ats_review_prompt(resume_text, job.description or "", job.title),
             output_schema=LLMAtsReview,
             system_prompt=ATS_REVIEW_SYSTEM_PROMPT,
-            purpose="ats_review",
+            purpose=LLMPurpose.ATS_REVIEW.value,
         )
     except LLMError as exc:
         logger.warning("ats_review.llm_unavailable", resume_id=resume_id, error=str(exc))

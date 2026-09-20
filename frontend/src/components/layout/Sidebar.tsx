@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { to: '/jobs', label: 'Jobs', icon: 'briefcase' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },
   { to: '/resumes', label: 'Résumés', icon: 'file' },
+  { to: '/resume-intelligence', label: 'Resume Intelligence', icon: 'wand' },
   { to: '/communications', label: 'Communications', icon: 'mail' },
   { to: '/analytics', label: 'Insights', icon: 'chart' },
 ];

@@ -13,6 +13,7 @@ import {
 } from '@/hooks/useApplications';
 import { useLogRecruiterContact } from '@/hooks/useCommunications';
 import { useResumes } from '@/hooks/useResumes';
+import { useApplicationResumeVersion } from '@/hooks/useResumeIntelligence';
 import { useAppStore } from '@/store/useAppStore';
 import { buildAppTimeline } from '@/lib/timeline';
 import { statusMeta, atsColor, atsPercent, relativeTime } from '@/lib/status';
@@ -127,6 +128,7 @@ export default function AppDetailPage() {
                     <p style={{ margin: '7px 0 0', font: '500 13px/1.4 var(--font)', color: 'var(--text-3)' }}>
                       {app.company ?? '—'} · {app.apply_mode} mode · {app.applied_at ? `applied ${relativeTime(app.applied_at)}` : `created ${relativeTime(app.created_at)}`}
                     </p>
+                    {app.resume_version_id && <ResumeVersionBadge applicationId={app.id} />}
                   </div>
                   {app.ats_score != null && (
                     <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
@@ -290,6 +292,29 @@ const inputStyle: React.CSSProperties = {
   height: 32, padding: '0 10px', borderRadius: 'var(--r-sm)', background: 'var(--surface-3)',
   border: '1px solid var(--border)', color: 'var(--text)', font: '500 12px/1 var(--font)', outline: 'none',
 };
+
+/** "This application used AI-PM v1.3" — the Resume Intelligence acceptance-test requirement:
+ *  a later résumé edit must never leave an already-submitted application's own record
+ *  ambiguous about which structured version it actually went out with. */
+function ResumeVersionBadge({ applicationId }: { applicationId: string }) {
+  const navigate = useNavigate();
+  const { data } = useApplicationResumeVersion(applicationId);
+  if (!data?.version_label) return null;
+  return (
+    <button
+      onClick={() => navigate('/resume-intelligence')}
+      title="Open in Resume Intelligence"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px', marginTop: 8,
+        borderRadius: 999, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)',
+        color: 'var(--accent)', font: '700 11px/1 var(--font)', cursor: 'pointer',
+      }}
+    >
+      <Icon name="wand" size={11} />
+      {data.branch_role_name ? `${data.branch_role_name} · ` : ''}{data.version_label}
+    </button>
+  );
+}
 
 function ActionButton({ icon, label, onClick, primary, danger, disabled }: { icon: 'refresh' | 'x' | 'briefcase' | 'file' | 'mail'; label: string; onClick: () => void; primary?: boolean; danger?: boolean; disabled?: boolean }) {
   const bg = primary ? 'var(--accent)' : danger ? 'var(--rejected-soft)' : 'var(--surface-2)';

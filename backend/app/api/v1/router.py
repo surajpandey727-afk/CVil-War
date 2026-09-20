@@ -14,6 +14,7 @@ from app.api.v1.communications import router as communications_router
 from app.api.v1.internal import router as internal_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.platform_sessions import router as platform_sessions_router
+from app.api.v1.resume_intelligence import router as resume_intelligence_router
 from app.api.v1.resumes import router as resumes_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.sources import router as sources_router
@@ -30,6 +31,10 @@ v1_router.include_router(
     applications_router, prefix="/applications", tags=["Applications"], dependencies=_auth
 )
 v1_router.include_router(resumes_router, prefix="/resumes", tags=["Resumes"], dependencies=_auth)
+v1_router.include_router(
+    resume_intelligence_router, prefix="/resume-intelligence", tags=["Resume Intelligence"],
+    dependencies=_auth,
+)
 v1_router.include_router(
     command_centre_router,
     prefix="/command-centre",

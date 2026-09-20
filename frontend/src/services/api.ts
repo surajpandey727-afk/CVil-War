@@ -13,6 +13,16 @@ const api = axios.create({
   withCredentials: true,
 });
 
+/**
+ * Per-request timeout override for endpoints that make a real LLM call (résumé tailoring,
+ * ATS deep review, ...). The default 30s instance timeout is sized for ordinary CRUD calls;
+ * a real LLM completion through the local gateway has been observed to take 90-180s. Without
+ * this override, axios aborts the request client-side while the backend is still working,
+ * and the UI is left showing a spinner forever with no error (the abort never surfaces as a
+ * rejected promise the way a normal timeout does).
+ */
+export const LLM_CALL_TIMEOUT_MS = 180_000;
+
 /** Attach a trace-id and the bearer token to every outgoing request. */
 api.interceptors.request.use((config) => {
   config.headers['X-Trace-Id'] = crypto.randomUUID();

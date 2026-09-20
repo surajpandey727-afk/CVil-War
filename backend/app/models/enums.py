@@ -107,10 +107,12 @@ class LLMPurpose(StrEnum):
     RESUME_TAILOR = "resume_tailor"
     COVER_LETTER = "cover_letter"
     ATS_OPTIMIZE = "ats_optimize"
+    ATS_REVIEW = "ats_review"
     JOB_ANALYSIS = "job_analysis"
     HARNESS_JUDGE = "harness_judge"
     SKILL_DISTILL = "skill_distill"
     GENERAL = "general"
+    RESUME_INTELLIGENCE_TAILOR = "resume_intelligence_tailor"
 
 
 class RunVerdictResult(StrEnum):
@@ -299,3 +301,56 @@ class ConfirmationState(StrEnum):
     PENDING = "pending"
     #: The attempt failed before any submission could be confirmed.
     FAILED = "failed"
+
+
+class RoleFamily(StrEnum):
+    """Groups a résumé branch's target role for coarse market-signal matching and display.
+
+    Mirrors ``frontend/src/lib/roleTargets.ts``'s existing, already-curated taxonomy for this
+    product's one real user — reused rather than inventing a second grouping scheme.
+    """
+
+    PRODUCT = "product"
+    ENGINEERING = "engineering"
+    ARCHITECTURE = "architecture"
+    DATA = "data"
+
+
+class ResumeVersionSource(StrEnum):
+    """Where a résumé version's content actually came from — never left implicit, because
+    "who/what changed this" is a first-class product requirement (Resume Intelligence)."""
+
+    #: The very first version of a master or branch.
+    INITIAL = "initial"
+    #: The operator edited content directly.
+    USER_EDIT = "user_edit"
+    #: Committed from an accepted job-tailoring review.
+    AI_SUGGESTION = "ai_suggestion"
+    #: Created by restoring an earlier version (restoration is a new version, never a delete).
+    RESTORED = "restored"
+
+
+class ResumeChangeType(StrEnum):
+    """What kind of edit one résumé-change entry represents — shown verbatim in the change log
+    so "what changed" is never just a diff, it's a classified, explainable edit."""
+
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+    REORDERED = "reordered"
+    REPHRASED = "rephrased"
+    ROLE_POSITIONING = "role_positioning"
+    ATS_ALIGNMENT = "ats_alignment"
+    MARKET_SIGNAL = "market_signal"
+    USER_EDIT = "user_edit"
+    AI_SUGGESTION = "ai_suggestion"
+    RESTORED = "restored"
+
+
+class ResumeChangeStatus(StrEnum):
+    """A proposed change's review state. PROPOSED changes are never applied to content until
+    the operator explicitly accepts them — see Resume Intelligence's commit flow."""
+
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"

@@ -17,6 +17,8 @@ export interface Application {
   /** True when that CV has since been archived. The application still points at it. */
   resume_archived: boolean;
   has_cover_letter: boolean;
+  /** The Resume Intelligence structured version behind resume_id, if any. */
+  resume_version_id: string | null;
   status: string;
   apply_mode: string;
   ats_score: number | null;

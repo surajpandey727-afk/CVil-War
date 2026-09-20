@@ -47,6 +47,18 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
         ForeignKey("resumes.id", ondelete="SET NULL"),
         nullable=True,
     )
+    #: The Resume Intelligence structured version behind whatever file resume_id points to,
+    #: if any — distinct from resume_id (the actual file attached/submitted). Never mutated
+    #: after the fact: a later résumé edit must not silently rewrite what this application
+    #: actually used (see Resume Intelligence's application-linkage requirement).
+    #: No DB-level ForeignKey, deliberately — matches document_version_id just above on this
+    #: same table: a hard FK here forces SQLite's migration batch mode to fully recreate
+    #: `applications` (SQLite can't ALTER TABLE ADD CONSTRAINT), which re-emits every existing
+    #: column's DDL and trips a pre-existing, unrelated bug in how this table's enum columns'
+    #: server_default values render on recreate. Referential integrity is enforced at the
+    #: application layer (resume_intelligence's own tenant-scoped lookups), same as
+    #: document_version_id already does.
+    resume_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Application state
     status: Mapped[ApplicationStatus] = mapped_column(

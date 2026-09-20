@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 
 import { server } from '@/__tests__/mocks/server';
 import JobDrawer from '@/components/jobs/JobDrawer';
@@ -38,13 +39,15 @@ function renderDrawer(props: Partial<Parameters<typeof JobDrawer>[0]> = {}) {
   };
   render(
     <QueryClientProvider client={qc}>
-      <JobDrawer
-        job={job()}
-        resumes={resumes}
-        applying={false}
-        {...handlers}
-        {...props}
-      />
+      <MemoryRouter>
+        <JobDrawer
+          job={job()}
+          resumes={resumes}
+          applying={false}
+          {...handlers}
+          {...props}
+        />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return handlers;

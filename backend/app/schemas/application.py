@@ -72,6 +72,11 @@ class ApplicationResponse(BaseModel):
     #: is why archiving exists instead of deletion.
     resume_archived: bool = False
     has_cover_letter: bool = False
+    #: The Resume Intelligence structured version behind resume_id, if any — see
+    #: models.application.Application.resume_version_id's own comment for why this carries
+    #: no DB-level ForeignKey. Lets the frontend deep-link "this application used AI-PM v1.3"
+    #: back to Resume Intelligence without a second lookup.
+    resume_version_id: str | None = None
     status: str
     apply_mode: str
     ats_score: float | None = None
