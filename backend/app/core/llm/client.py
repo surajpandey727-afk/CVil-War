@@ -376,6 +376,7 @@ class LLMClient:
         system_prompt: str = "",
         model: str | None = None,
         purpose: str = "structured",
+        temperature: float | None = None,
     ) -> BaseModel:
         """Get structured JSON output parsed into a Pydantic model.
 
@@ -385,6 +386,9 @@ class LLMClient:
             system_prompt: Optional system prompt.
             model: Override model identifier.
             purpose: Label for metrics.
+            temperature: Sampling temperature override. Structured extraction and careful
+                editing want a low value; the account-wide default is tuned for prose and
+                makes a precision task non-reproducible run to run.
 
         Returns:
             Instance of ``output_schema`` populated from the LLM response.
@@ -406,6 +410,7 @@ class LLMClient:
             model=model,
             response_format={"type": "json_object"},
             purpose=purpose,
+            temperature=temperature,
         )
 
         try:
