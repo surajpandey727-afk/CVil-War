@@ -123,9 +123,26 @@ class TestUploadResumeAPI:
         assert resp.status_code == 201
 
 
+CV_TEXT = """Alex Morgan
+London, UK
+M: 07700 900123 | E: alex.morgan@example.com
+Data Scientist and Product Manager with 4 years building production ML systems.
+KEY SKILLS
+Python, SQL, PostgreSQL, semantic search, embeddings
+WORK EXPERIENCE
+Northwind Labs, London, (Platform Team)
+Data Scientist to Product Manager March 2022 - Present
+- Built vector search across 400K customer records using embeddings and PostgreSQL.
+EDUCATION
+University of Leeds, MSc Data Science Sept 2020 - Sept 2021
+"""
+
+
 class TestGenerateResumeAPI:
     async def test_generate_resume_returns_201(self, client, db_session):
         resume = await _create_base_resume(db_session)
+        resume.content_text = CV_TEXT
+        await db_session.commit()
         job = await _create_job(db_session)
 
         resp = await client.post(
@@ -139,6 +156,23 @@ class TestGenerateResumeAPI:
         assert resp.status_code == 201
         data = resp.json()
         assert data["type"] == "tailored"
+        # The change log travels with the document, so the operator can interrogate it.
+        assert data["tailoring_audit"]["structure_preserved"] is True
+        assert data["tailoring_audit"]["fabrication_check"] == "PASSED"
+
+    async def test_an_unreadable_base_resume_gives_an_actionable_error(
+        self, client, db_session
+    ):
+        """A 500 tells the person clicking "Generate tailored" nothing they can act on."""
+        resume = await _create_base_resume(db_session)  # no content_text
+        job = await _create_job(db_session)
+
+        resp = await client.post(
+            "/api/v1/resumes/generate",
+            json={"base_resume_id": resume.id, "job_id": job.id},
+        )
+        assert resp.status_code == 422
+        assert "no readable content" in resp.json()["detail"].lower()
 
 
 class TestScoreResumeAPI:

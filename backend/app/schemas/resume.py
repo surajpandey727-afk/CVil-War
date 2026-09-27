@@ -115,6 +115,11 @@ class ResumeResponse(BaseModel):
     has_pdf: bool = False
     has_docx: bool = False
     ats_score: float | None = None
+    #: What the tailoring pass changed and why: before/after score with components, each
+    #: edited bullet with its evidence, the edits that were rejected, and the requirements
+    #: the CV could not support. ``None`` for uploaded resumes. Carried on the response so
+    #: the operator can interrogate the document rather than having to trust it.
+    tailoring_audit: dict | None = None
     #: Applications this CV is attached to, and how many of those actually went out.
     #: Shown on the card so deleting is an informed decision rather than a surprise.
     used_in_applications: int = 0

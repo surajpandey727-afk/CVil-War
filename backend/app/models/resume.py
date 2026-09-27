@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
@@ -45,6 +45,11 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
 
     # Extracted text for search and analysis
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: What a tailoring pass changed and why: before/after score with components, each edited
+    #: bullet with its evidence, the edits that were rejected, and the requirements the CV
+    #: could not support. ``None`` on an uploaded or pre-audit résumé.
+    tailoring_audit: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     #: Set when the user removed this CV from their working list while it was still attached
     #: to a submitted application.

@@ -15,7 +15,12 @@ from app.api.v1.router import v1_router
 from app.api.websocket.endpoint import router as ws_router
 from app.config.constants import API_V1_PREFIX, APP_TITLE, APP_VERSION
 from app.config.settings import Environment, get_settings
-from app.core.exceptions import CVilWarError, RecordNotFoundError
+from app.core.exceptions import (
+    CVilWarError,
+    GenerationError,
+    ParseError,
+    RecordNotFoundError,
+)
 from app.db import tenant as _tenant_filter  # noqa: F401  # registers do_orm_execute
 from app.db.arq import close_arq_pool, init_arq_pool
 from app.db.redis import close_redis_pool, init_redis_pool
@@ -149,6 +154,11 @@ def create_app() -> FastAPI:
             status_code = 429
         elif exc.code.endswith("INTEGRITY_ERROR"):
             status_code = 409
+        elif isinstance(exc, ParseError | GenerationError):
+            # The caller gave us something we cannot work with - an unreadable resume, a
+            # posting with no text. That is a 422 they can act on, not a 500 that reads as
+            # "the server is broken" and tells them nothing about what to fix.
+            status_code = 422
 
         logger.warning(
             "domain_error",

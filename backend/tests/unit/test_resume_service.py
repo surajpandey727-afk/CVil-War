@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import select
 
-from app.core.exceptions import RecordNotFoundError
+from app.core.exceptions import GenerationError, RecordNotFoundError
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user_settings import UserSettings
@@ -39,23 +39,116 @@ class TestListResumes:
         assert result.total == 0
 
 
+REAL_CV = """Alex Morgan
+London, UK
+M: 07700 900123 | E: alex.morgan@example.com
+Data Scientist and Product Manager with 4 years of experience building production ML systems.
+KEY SKILLS
+Python, SQL, PostgreSQL, Airflow, semantic search, embeddings
+WORK EXPERIENCE
+Northwind Labs, London, (Platform Team)
+Data Scientist to Product Manager March 2022 - Present
+Atlas - Internal Data Platform
+- Built vector search across 400K customer records using embeddings and PostgreSQL.
+- Defined and monitored the data pipeline architecture across analytics and backend teams.
+EDUCATION
+University of Leeds, MSc Data Science Sept 2020 - Sept 2021
+"""
+
+
 class TestGenerateTailoredResume:
-    async def test_generate_tailored_resume(self, db_session, sample_job_data):
+    """The endpoint behind the "Generate tailored" button.
+
+    The engine this replaced rebuilt the CV from a whitelist of 24 section headings and asked
+    a model to rewrite every bullet. On a CV headed "KEY SKILLS" and "WORK EXPERIENCE" it
+    kept nothing, and the document it produced named employers the candidate never had. These
+    assert the opposite property: what comes out is the same CV.
+    """
+
+    async def test_a_resume_with_no_readable_content_is_refused(
+        self, db_session, sample_job_data
+    ):
+        """Silently producing a document from nothing is how the old path invented a career."""
         base = await _create_base_resume(db_session)
         job = await _create_job(db_session, sample_job_data)
 
-        request = ResumeGenerateRequest(
-            base_resume_id=base.id,
-            job_id=job.id,
-            template_id="classic",
+        with pytest.raises(GenerationError):
+            await resume_service.generate_tailored_resume(
+                db_session,
+                ResumeGenerateRequest(base_resume_id=base.id, job_id=job.id),
+                TEST_USER_ID,
+            )
+
+    async def test_the_tailored_resume_is_still_the_candidates_resume(
+        self, db_session, sample_job_data
+    ):
+        base = await _create_base_resume(db_session)
+        base.content_text = REAL_CV
+        await db_session.commit()
+        job = await _create_job(db_session, sample_job_data)
+
+        result = await resume_service.generate_tailored_resume(
+            db_session,
+            ResumeGenerateRequest(base_resume_id=base.id, job_id=job.id, template_id="classic"),
+            TEST_USER_ID,
         )
-        result = await resume_service.generate_tailored_resume(db_session, request, TEST_USER_ID)
 
         assert result.type == "tailored"
         assert result.base_resume_id == base.id
         assert result.job_id == job.id
-        assert result.template_id == "classic"
-        assert "Tailored" in result.name
+
+        # Runs without a model configured, so no wording changes: the point here is that the
+        # career survives the round trip, which is exactly what the old path destroyed.
+        stored = await db_session.get(Resume, result.id)
+        text = stored.content_text or ""
+        for fact in (
+            "Northwind Labs", "University of Leeds", "Alex Morgan",
+            "March 2022 - Present", "Sept 2020 - Sept 2021", "Atlas",
+        ):
+            assert fact in text, f"{fact} was lost by the tailoring pass"
+
+    async def test_the_change_log_is_recorded_on_the_resume(
+        self, db_session, sample_job_data
+    ):
+        """A tailored CV the operator cannot interrogate is one they have to take on trust."""
+        base = await _create_base_resume(db_session)
+        base.content_text = REAL_CV
+        await db_session.commit()
+        job = await _create_job(db_session, sample_job_data)
+
+        result = await resume_service.generate_tailored_resume(
+            db_session,
+            ResumeGenerateRequest(base_resume_id=base.id, job_id=job.id),
+            TEST_USER_ID,
+        )
+
+        audit = (await db_session.get(Resume, result.id)).tailoring_audit
+        assert audit is not None
+        assert audit["structure_preserved"] is True
+        assert audit["fabrication_check"] == "PASSED"
+        assert audit["preserved_ratio"] >= 0.8
+        assert "original_ats_score" in audit and "final_ats_score" in audit
+        assert isinstance(audit["changes"], list)
+
+    async def test_the_stored_text_is_the_tailored_text_not_the_base(
+        self, db_session, sample_job_data
+    ):
+        """The previous implementation wrote base.content_text onto the tailored record, so
+        the saved document never reflected the tailoring at all."""
+        base = await _create_base_resume(db_session)
+        base.content_text = REAL_CV
+        await db_session.commit()
+        job = await _create_job(db_session, sample_job_data)
+
+        result = await resume_service.generate_tailored_resume(
+            db_session,
+            ResumeGenerateRequest(base_resume_id=base.id, job_id=job.id),
+            TEST_USER_ID,
+        )
+        stored = await db_session.get(Resume, result.id)
+        assert stored.content_text
+        assert stored.ats_score is not None
+        assert stored.file_path_docx, "a tailored resume must produce a document"
 
 
 class TestScoreResume:

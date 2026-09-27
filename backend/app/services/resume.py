@@ -19,8 +19,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.documents.generator import DocumentGenerator
 from app.core.documents.parser import DocumentParser, ParsedResume
-from app.core.exceptions import ParseError, RecordNotFoundError
+from app.core.exceptions import GenerationError, ParseError, RecordNotFoundError
 from app.core.llm.factory import build_llm_client_for_user
+from app.core.resume_tailoring.engine import tailor
+from app.core.resume_tailoring.extract import (
+    extract_from_docx,
+    extract_from_pdf,
+    parse_resume_text,
+)
+from app.core.resume_tailoring.model import ResumeDocument
+from app.core.resume_tailoring.render import (
+    edit_docx_in_place,
+    render_docx,
+    verify_rendered,
+)
 from app.core.storage import StorageService, get_storage, keys
 from app.core.storage.documents import (
     DOCX_CONTENT_TYPE,
@@ -387,53 +399,110 @@ def _parse_education_section(text: str) -> list[dict]:
     return entries
 
 
+async def _load_base_document(base: Resume, user_id: str) -> tuple[ResumeDocument, str | None]:
+    """Parse the base resume, preferring the file the candidate actually uploaded.
+
+    Order matters. A DOCX source can be edited in place later, which keeps the candidate's
+    own fonts, spacing and layout; a PDF gives faithful structure but not visual design; the
+    stored text is the last resort because extraction has already flattened it once.
+
+    Returns the parsed document and, when the source was a DOCX, the local path to it so the
+    renderer can write the edits back into that very file.
+    """
+    storage = StorageService(get_storage(), user_id)
+
+    if base.file_path_docx:
+        try:
+            local = await storage.materialize_to_temp(base.file_path_docx, suffix=".docx")
+            return extract_from_docx(local), local
+        except Exception:
+            logger.warning("resume_docx_unreadable", resume_id=base.id)
+
+    if base.file_path_pdf:
+        try:
+            local = await storage.materialize_to_temp(base.file_path_pdf, suffix=".pdf")
+            return extract_from_pdf(local), None
+        except Exception:
+            logger.warning("resume_pdf_unreadable", resume_id=base.id)
+
+    return parse_resume_text(base.content_text or "", source_format="text"), None
+
+
 async def generate_tailored_resume(
     db: AsyncSession,
     request: ResumeGenerateRequest,
     user_id: str,
 ) -> ResumeResponse:
-    """Generate a tailored resume for a specific job using LLM.
+    """Produce a job-specific version of the candidate's own resume.
 
-    Loads the base resume and target job, tailors the content via LLM,
-    renders to PDF/DOCX, and stores the result.
+    A targeted edit, not a regeneration. The base document is parsed with its sections under
+    their own names and in their own order, a short list of changes is proposed and then
+    filtered by rules the planner cannot talk its way past, and anything that survives is
+    applied to a copy. If the pass disturbs anything structural the original is returned
+    untouched and the failure is recorded on the audit.
 
-    Args:
-        db: Async database session.
-        request: Generation parameters (base_resume_id, job_id, template, formats).
-
-    Returns:
-        The generated tailored resume response.
+    This replaces a path that rebuilt the resume from a 24-heading whitelist and asked a model
+    to rewrite every bullet. On a real CV none of the headings matched, the model received a
+    name and an email address, and it invented the rest.
     """
     base = await get_resume(db, request.base_resume_id)
     job = await _get_job(db, request.job_id)
 
-    # Build structured data from base resume text
-    resume_data = _build_resume_data_from_text(base.content_text or "")
+    original, docx_source = await _load_base_document(base, user_id)
+    if not original.all_lines():
+        raise GenerationError("The base resume has no readable content to tailor.")
 
-    # Generate via DocumentGenerator (LLM tailoring + rendering)
     llm = await build_llm_client_for_user(db, user_id)
-    generator = DocumentGenerator(llm_client=llm)
-    doc = await generator.generate_resume(
-        resume_data=resume_data,
-        job_description=job.description or "",
-        template_name=request.template_id,
-        formats=request.output_formats,
+    result = await tailor(
+        original,
+        job.description or "",
+        job_title=job.title or "",
+        llm=llm,
     )
 
-    # Move rendered files into per-tenant storage; columns hold the storage keys.
-    pdf_key, docx_key = await persist_generated_document(user_id, doc)
+    document_id = uuid.uuid4().hex
+    out_dir = Path(tempfile.gettempdir()) / "cvilwar-tailored"
+    out_path = out_dir / f"{document_id}.docx"
 
-    # Create the tailored resume record
+    if docx_source:
+        render = edit_docx_in_place(docx_source, original, result.tailored, out_path)
+    else:
+        render = render_docx(result.tailored, out_path)
+
+    # The document that gets submitted must be the document that was validated, so the
+    # written file is read back rather than the in-memory model being trusted.
+    export_problems = verify_rendered(out_path, result.tailored)
+    if export_problems:
+        logger.error(
+            "tailored_resume_export_lost_content",
+            resume_id=base.id,
+            problems=export_problems[:5],
+        )
+
+    storage = StorageService(get_storage(), user_id)
+    docx_key = keys.resume_key(user_id, document_id, "docx")
+    await storage.put(docx_key, out_path.read_bytes(), content_type=DOCX_CONTENT_TYPE)
+    with contextlib.suppress(OSError):
+        out_path.unlink()
+
+    audit = result.audit.to_dict()
+    audit["export_problems"] = export_problems
+    audit["formatting_preserved"] = render.formatting_preserved
+    audit["render_note"] = render.note
+
     tailored = Resume(
         user_id=user_id,
-        name=f"Tailored - {base.name}",
+        name=f"{base.name} - {job.title}" if job.title else f"Tailored - {base.name}",
         type="tailored",
         template_id=request.template_id,
         base_resume_id=request.base_resume_id,
         job_id=request.job_id,
-        file_path_pdf=pdf_key,
         file_path_docx=docx_key,
-        content_text=base.content_text,
+        # The tailored text, not the base's. The previous implementation stored
+        # base.content_text here, so the saved record never reflected the tailoring at all.
+        content_text=result.tailored.to_text(),
+        ats_score=float(result.after.total),
+        tailoring_audit=audit,
     )
     db.add(tailored)
     await db.commit()
@@ -444,8 +513,11 @@ async def generate_tailored_resume(
         resume_id=tailored.id,
         base_id=request.base_resume_id,
         job_id=request.job_id,
-        has_pdf=doc.pdf_path is not None,
-        has_docx=doc.docx_path is not None,
+        ats_before=result.before.total,
+        ats_after=result.after.total,
+        bullets_changed=result.audit.bullets_changed,
+        preserved=round(result.audit.preserved_ratio, 3),
+        ready=result.audit.ready_for_review,
     )
     return ResumeResponse.model_validate(tailored)
 

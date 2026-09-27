@@ -745,6 +745,56 @@ function SearchField({ icon, label, placeholder, value, onChange, grow }: {
   );
 }
 
+/** Tone decides how loudly a pill reads. Pay is the number candidates look for first. */
+const PILL_TONE: Record<string, { bg: string; fg: string; border: string }> = {
+  money: { bg: 'var(--applied-soft, var(--jc-surface-3))', fg: 'var(--applied, var(--jc-text-2))', border: 'transparent' },
+  bar: { bg: 'var(--accent-soft, var(--jc-surface-3))', fg: 'var(--accent, var(--jc-text-2))', border: 'transparent' },
+  remote: { bg: 'var(--jc-surface-3)', fg: 'var(--jc-text-2)', border: 'transparent' },
+  plain: { bg: 'var(--jc-surface-3)', fg: 'var(--jc-text-3)', border: 'transparent' },
+  absent: { bg: 'transparent', fg: 'var(--jc-text-4)', border: 'var(--jc-border, rgba(255,255,255,.12))' },
+};
+
+/**
+ * One labelled fact about a role.
+ *
+ * A missing value is rendered rather than hidden. "Not published" and "Not fetched yet" are
+ * different facts about a salary, and both are things the candidate wants to know — an empty
+ * space tells them neither, and silently dropping the pill makes two very different jobs look
+ * identical on the list.
+ */
+function MetaPill({
+  label, value, tone, hint, absent,
+}: {
+  label: string;
+  value: string | null | undefined;
+  tone: keyof typeof PILL_TONE;
+  hint: string;
+  absent?: string;
+}) {
+  const missing = !value;
+  if (missing && !absent) return null;
+  // `plain` is always defined; the fallback keeps an unknown tone from rendering unstyled.
+  const palette = PILL_TONE[missing ? 'absent' : tone] ?? PILL_TONE['plain']!;
+
+  return (
+    <span
+      title={hint}
+      style={{
+        height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', gap: 5,
+        borderRadius: 6, background: palette.bg, color: palette.fg,
+        border: `1px solid ${palette.border}`, font: '600 10.5px/1 var(--font)',
+        maxWidth: 220, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+      }}
+    >
+      {label && (
+        <span style={{ opacity: 0.62, fontWeight: 700, letterSpacing: '.03em' }}>{label}</span>
+      )}
+      <span>{missing ? absent : value}</span>
+    </span>
+  );
+}
+
+
 function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
   job: Job; selected: boolean; onToggle: () => void; onOpen: () => void; onApply: () => void;
   onSave: () => void; saving: boolean;
@@ -753,8 +803,11 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
   const src = SOURCE_BY_KEY[job.platform];
   // Level 4 metadata — everything that answers "is this worth reading further" without
   // being a decision signal itself.
-  const tags = [job.salary_range, job.job_type, job.experience_level, job.remote ? 'Remote' : null]
-    .filter(Boolean) as string[];
+  // Salary, the experience bar and employment type each answer a different question, and
+  // pouring them into one undifferentiated row of grey pills made the card unreadable at a
+  // glance — the number a candidate most wants (pay) looked identical to the one they care
+  // least about. Each now carries its own label, its own tone and its own tooltip.
+  const yearsRequired = job.posting_data?.years_required ?? null;
   const fitColor = job.match_score == null ? 'var(--jc-text-4)' : atsColor(pct);
   const statusMetaJob = jobStatusMeta(job.status);
   const isSaved = job.status === 'saved';
@@ -782,7 +835,11 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
       {/* Level 1 — identity. */}
       <div style={{ flex: '1 1 auto', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={onOpen} className="jc-card-title">
+          <button
+            onClick={onOpen}
+            title={`Open ${job.title} - fit, company and the full posting`}
+            className="jc-card-title"
+          >
             {job.title}
           </button>
           {/* Level 3 — status, always visible, never color-only (label + dot). */}
@@ -794,11 +851,44 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
           {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
-          {tags.map((t) => (
-            <span key={t} style={{ height: 22, padding: '0 8px', display: 'inline-flex', alignItems: 'center', borderRadius: 6, background: 'var(--jc-surface-3)', color: 'var(--jc-text-3)', font: '600 10.5px/1 var(--font)' }}>
-              {t}
-            </span>
-          ))}
+          <MetaPill
+            label="Salary"
+            value={job.salary_range}
+            tone="money"
+            absent="Not published"
+            hint={
+              job.salary_range
+                ? `Salary as the posting states it: ${job.salary_range}`
+                : 'This posting does not publish a salary'
+            }
+          />
+          <MetaPill
+            label="Experience"
+            value={yearsRequired ? `${yearsRequired}+ yrs` : null}
+            tone="bar"
+            absent={job.enriched_at ? 'Not stated' : 'Not fetched'}
+            hint={
+              yearsRequired
+                ? `The posting asks for ${yearsRequired}+ years. Taken from its own wording.`
+                : job.enriched_at
+                  ? 'The posting was read and states no minimum years of experience'
+                  : 'Open this job to fetch the full posting and read its experience bar'
+            }
+          />
+          {job.job_type && (
+            <MetaPill label="Type" value={job.job_type} tone="plain" hint="Employment type" />
+          )}
+          {job.experience_level && (
+            <MetaPill
+              label="Level"
+              value={job.experience_level}
+              tone="plain"
+              hint="Seniority as the posting labels it"
+            />
+          )}
+          {job.remote && (
+            <MetaPill label="" value="Remote" tone="remote" hint="This role is remote or hybrid" />
+          )}
           {/* "Unknown" is the common case (most postings never mention sponsorship) and
               would be pure noise repeated on every row — the drawer shows it explicitly
               for anyone who opens the job. Here, only a genuine signal earns a badge. */}
@@ -811,11 +901,23 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
             );
           })()}
           {job.posted_date && (
-            <span className="jc-meta" style={{ height: 22, display: 'inline-flex', alignItems: 'center' }}>
+            <span
+              className="jc-meta"
+              title={`Posted ${new Date(job.posted_date).toLocaleDateString()}`}
+              style={{ height: 22, display: 'inline-flex', alignItems: 'center' }}
+            >
               {relativeTime(job.posted_date)}
             </span>
           )}
-          <span className="jc-meta" style={{ height: 22, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span
+            className="jc-meta"
+            title={
+              src
+                ? `Found on ${sourceLabel(job.platform)} - source is ${HEALTH_META[src.health].label.toLowerCase()}`
+                : `Found on ${sourceLabel(job.platform)}`
+            }
+            style={{ height: 22, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+          >
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: src ? HEALTH_META[src.health].color : 'var(--jc-text-4)' }} />
             {sourceLabel(job.platform)}
           </span>
@@ -835,10 +937,22 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
           <Icon name="bookmark" size={15} sw={isSaved ? 2.4 : 1.8} />
         </button>
         <div style={{ display: 'flex', gap: 7 }}>
-          <a href={job.url} target="_blank" rel="noreferrer" className="jc-btn jc-btn-secondary" style={{ height: 30, padding: '0 11px', textDecoration: 'none' }}>
+          <a
+            href={job.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open the original posting for ${job.title} at ${job.company}`}
+            className="jc-btn jc-btn-secondary"
+            style={{ height: 30, padding: '0 11px', textDecoration: 'none' }}
+          >
             Posting
           </a>
-          <button onClick={onApply} className="jc-btn jc-btn-primary" style={{ height: 30, padding: '0 13px' }}>
+          <button
+            onClick={onApply}
+            title={`Start an application for ${job.title} at ${job.company}`}
+            className="jc-btn jc-btn-primary"
+            style={{ height: 30, padding: '0 13px' }}
+          >
             Apply
           </button>
         </div>
