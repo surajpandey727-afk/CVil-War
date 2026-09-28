@@ -357,6 +357,7 @@ function PlatformRow({
           )}
           {disconnectAction?.available && (
             <button
+              title={`Disconnect ${platform.label}. The stored sign-in is deleted; discovery keeps working.`}
               onClick={onDisconnect}
               disabled={busy}
               style={{ height: 27, padding: '0 11px', borderRadius: 'var(--r-md)', cursor: 'pointer', font: '600 11px/1 var(--font)', border: '1px solid var(--border)', background: 'var(--surface-3)', color: 'var(--rejected)' }}

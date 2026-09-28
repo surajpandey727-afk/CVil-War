@@ -165,6 +165,7 @@ export default function AutomationPage() {
         </div>
         <button
           onClick={runPreview} disabled={preview.isPending}
+          title="Dry-run these rules against every application currently waiting. Nothing is submitted and no rule is saved."
           style={{ ...ghost, height: 36, padding: '0 14px', width: 'auto' }}
         >
           {preview.isPending ? 'Checking…' : 'Test against my queue'}

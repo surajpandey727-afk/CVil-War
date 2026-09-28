@@ -59,7 +59,10 @@ export default function BranchDetail({ branchId, onBack, tailorJobId }: {
             {branch.description || 'Derived from your master résumé, positioned for this role.'}
           </p>
         </div>
-        <button onClick={confirmDelete} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--rejected)', font: '600 11.5px/1 var(--font)', cursor: 'pointer' }}>
+        <button
+          onClick={confirmDelete}
+          title="Delete this role branch and every version under it. This cannot be undone."
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 11px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--rejected)', font: '600 11.5px/1 var(--font)', cursor: 'pointer' }}>
           <Icon name="trash" size={12} /> Delete branch
         </button>
       </div>

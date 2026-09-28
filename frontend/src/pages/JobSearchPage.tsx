@@ -106,6 +106,7 @@ function FilterCulprits({ rejected }: { rejected: Record<string, number> }) {
             {`−${count} hidden`}
           </span>
           <button
+            title="Clear this filter and bring the roles it is hiding back into the list."
             onClick={LABELS[key]!.clear}
             className="jc-btn"
             style={{
@@ -442,7 +443,13 @@ export default function JobSearchPage() {
             <CheckRow label="Published salary only" on={filters.publishedSalaryOnly} onClick={() => patchFilters({ publishedSalaryOnly: !filters.publishedSalaryOnly })} />
           </div>
 
-          <button onClick={resetFilters} style={ghostBtn}>Reset filters</button>
+          <button
+            onClick={resetFilters}
+            title="Return every filter to its default. No roles or applications are affected."
+            style={ghostBtn}
+          >
+            Reset filters
+          </button>
         </div>
 
         <div style={{ ...card, padding: 14 }}>
@@ -559,7 +566,13 @@ export default function JobSearchPage() {
             </span>
             {allJobs.length > 0 && <FilterCulprits rejected={rejected} />}
             {allJobs.length > 0 && (
-              <button onClick={resetFilters} style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}>Clear every filter</button>
+              <button
+                onClick={resetFilters}
+                title="Clear every filter at once and show all stored roles."
+                style={{ ...ghostBtn, width: 'auto', padding: '0 14px', marginTop: 6 }}
+              >
+                Clear every filter
+              </button>
             )}
           </div>
         ) : (
@@ -610,7 +623,12 @@ export default function JobSearchPage() {
               {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
-          <button onClick={clearSelection} className="jc-btn jc-btn-ghost" style={{ height: 34, padding: '0 12px' }}>
+          <button
+            onClick={clearSelection}
+            title="Deselect every role. Nothing is applied to or discarded."
+            className="jc-btn jc-btn-ghost"
+            style={{ height: 34, padding: '0 12px' }}
+          >
             Clear
           </button>
           <button

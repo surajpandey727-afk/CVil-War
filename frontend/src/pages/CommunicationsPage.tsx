@@ -160,7 +160,12 @@ function GmailCard({ status, loading, onDisconnect, onSync, syncing, disconnecti
           <button onClick={onSync} disabled={syncing} style={{ ...ghost, padding: '0 14px' }}>
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
-          <button onClick={onDisconnect} disabled={disconnecting} style={{ ...ghost, padding: '0 14px', color: 'var(--rejected)' }}>
+          <button
+            onClick={onDisconnect}
+            disabled={disconnecting}
+            title="Disconnect this mailbox. Stored messages stay; no new mail is synced."
+            style={{ ...ghost, padding: '0 14px', color: 'var(--rejected)' }}
+          >
             Disconnect
           </button>
         </div>

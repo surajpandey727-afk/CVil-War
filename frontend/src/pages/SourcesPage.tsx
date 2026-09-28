@@ -61,6 +61,7 @@ export default function SourcesPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             onClick={() => setEnabledKeys(catalogue.live_keys)}
+            title="Switch discovery to only the sources answering right now, and switch the rest off. Nothing is deleted."
             style={{ height: 36, padding: '0 15px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
           >
             Enable only working sources

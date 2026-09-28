@@ -261,6 +261,7 @@ export default function ApplicationsPage() {
                 {autoApplying ? 'Applying…' : `Auto-apply all ${needsAction.length}`}
               </button>
               <button
+                title="Approve every application waiting for review and release them to the agent."
                 onClick={approveAll} disabled={bulkApprove.isPending}
                 style={{ height: 34, padding: '0 14px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
               >
@@ -307,7 +308,11 @@ export default function ApplicationsPage() {
               <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--accent)' }}>{selected.size} selected</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setSelected(new Set())} style={{ height: 32, padding: '0 12px', borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer' }}>Clear</button>
-                <button onClick={approveSelected} disabled={bulkApprove.isPending} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}>
+                <button
+                  onClick={approveSelected}
+                  disabled={bulkApprove.isPending}
+                  title="Approve every selected application and release it to the agent to submit."
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}>
                   <Icon name="check" size={13} sw={2.2} /> Approve {selected.size}
                 </button>
               </div>

@@ -17,7 +17,14 @@ module.exports = {
     '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/no-unused-vars': [
       'error',
-      { argsIgnorePattern: '^_' },
+      {
+        argsIgnorePattern: '^_',
+        // `const { [key]: _drop, ...rest } = obj` is how you omit a property without
+        // mutating the original. The binding is unused by design -- naming it is the
+        // mechanism, not an oversight -- and this option exists for exactly that idiom.
+        ignoreRestSiblings: true,
+        varsIgnorePattern: '^_',
+      },
     ],
   },
 };

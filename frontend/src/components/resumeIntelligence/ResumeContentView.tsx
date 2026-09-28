@@ -179,7 +179,11 @@ function ExperienceEditor({ entry, onChange, onRemove }: {
           >
             <Icon name="plus" size={11} /> Add achievement
           </button>
-          <button onClick={onRemove} style={{ ...ghostBtn, color: 'var(--rejected)', marginLeft: 'auto' }}>
+          <button
+            onClick={onRemove}
+            title="Remove this role from the master résumé. Saved versions keep it."
+            style={{ ...ghostBtn, color: 'var(--rejected)', marginLeft: 'auto' }}
+          >
             <Icon name="trash" size={11} /> Remove role
           </button>
         </div>
