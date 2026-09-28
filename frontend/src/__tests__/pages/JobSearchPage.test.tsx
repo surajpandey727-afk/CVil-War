@@ -53,6 +53,9 @@ describe('JobSearchPage', () => {
       selectedJobIds: [],
       location: 'London, UK',
       query: '',
+      // Also persisted, and also leaks: a test that runs a search leaves an entry behind,
+      // and the next test then finds a "Clear all" button it never expected.
+      recentSearches: [],
       appliedLocation: '',
       appliedQuery: '',
     });

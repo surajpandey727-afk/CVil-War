@@ -13,13 +13,16 @@ import { useSettings } from '@/hooks/useSettings';
 import { useSources } from '@/hooks/useSources';
 import { useAppStore } from '@/store/useAppStore';
 import { useDiscoveryStore } from '@/store/useDiscoveryStore';
-import { atsColor, atsPercent, relativeTime, jcSponsorMeta, jobStatusMeta } from '@/lib/status';
-import { ROLE_FAMILIES, familyForTitle, queryForTitles, type RoleFamily } from '@/lib/roleTargets';
+import { atsColor, atsPercent, relativeTime, jobStatusMeta } from '@/lib/status';
+import { ROLE_FAMILIES, queryForTitles, type RoleFamily } from '@/lib/roleTargets';
+import { HEALTH_META, sourceLabel } from '@/lib/sources';
 import {
-  HEALTH_META, SOURCE_BY_KEY, SOURCE_TIERS, sourceLabel, sourcesInTier,
-} from '@/lib/sources';
+  SALARY_BRACKETS, SPONSORSHIP_META, formatSalary, salaryBand, sponsorshipStatus,
+} from '@/lib/jobModel';
+import { POSTED_WINDOWS, applyJobFilters } from '@/lib/jobFilter';
 import '@/styles/jobs-command.css';
-import type { Job } from '@/types/job';
+import type { Job, SponsorshipStatus } from '@/types/job';
+import type { SourceRecord } from '@/types/source';
 
 const card: React.CSSProperties = {
   background: 'var(--jc-surface)', border: '1px solid var(--jc-border)',
@@ -27,31 +30,8 @@ const card: React.CSSProperties = {
 };
 
 const SENIORITY = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
-const POSTED: { key: '24h' | '7d' | '30d' | 'any'; label: string; days: number }[] = [
-  { key: '24h', label: '24h', days: 1 },
-  { key: '7d', label: '7d', days: 7 },
-  { key: '30d', label: '30d', days: 30 },
-  { key: 'any', label: 'Any', days: 3650 },
-];
 
-/** Lowest number in a salary string, in thousands. `null` when no band is published. */
-function salaryK(range: string | null): number | null {
-  if (!range) return null;
-  const nums = range.match(/\d[\d,.]*/g);
-  if (!nums) return null;
-  const values = nums.map((n) => {
-    const v = Number(n.replace(/[,]/g, ''));
-    return v > 1000 ? v / 1000 : v;
-  });
-  return Math.min(...values);
-}
-
-function ageInDays(iso: string | null): number {
-  if (!iso) return 9999;
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return 9999;
-  return (Date.now() - t) / 86_400_000;
-}
+const SPONSORSHIP_ORDER: SponsorshipStatus[] = ['available', 'not_specified', 'none'];
 
 /**
  * Which filter is hiding the jobs, and the button that undoes it.
@@ -72,7 +52,14 @@ function FilterCulprits({ rejected }: { rejected: Record<string, number> }) {
     publishedSalaryOnly: {
       label: 'Published salary only', clear: () => patchFilters({ publishedSalaryOnly: false }),
     },
-    minSalaryK: { label: 'Minimum salary', clear: () => patchFilters({ minSalaryK: 0 }) },
+    salaryBrackets: {
+      label: 'Salary brackets', clear: () => patchFilters({ salaryBrackets: [] }),
+    },
+    salaryCustom: {
+      label: 'Custom salary range',
+      clear: () => patchFilters({ salaryCustomMinK: null, salaryCustomMaxK: null }),
+    },
+    sponsorship: { label: 'Visa sponsorship', clear: () => patchFilters({ sponsorship: [] }) },
     seniority: { label: 'Seniority', clear: () => patchFilters({ seniority: [] }) },
     roleTargets: {
       label: 'Role target chips',
@@ -130,8 +117,9 @@ export default function JobSearchPage() {
   const {
     query, location, appliedLocation, appliedQuery, activeTitles, activeFamilies,
     enabledSources, filters, selectedJobIds,
-    setQuery, setLocation, commitSearch, toggleFamily, toggleSource, patchFilters, resetFilters,
+    setQuery, setLocation, commitSearch, toggleFamily, setSources, patchFilters, resetFilters,
     toggleJob, setSelected, clearSelection,
+    recordSearch, setRecentResultCount, restoreSearch,
   } = useDiscoveryStore();
 
   // The location and title filters go to the server, which matches them against the stored
@@ -161,6 +149,8 @@ export default function JobSearchPage() {
 
   const resumes = useMemo(() => resumeData?.items ?? [], [resumeData]);
   const allJobs = useMemo(() => data?.items ?? [], [data]);
+  /** Everything the server holds for this search, as opposed to the page fetched above. */
+  const stored = data?.total ?? allJobs.length;
   // An empty selection means "no restriction", not "exclude everything" — the operator has
   // simply never narrowed the list.
   const restrictSources = enabledSources.length > 0;
@@ -168,69 +158,47 @@ export default function JobSearchPage() {
     () => new Set(liveCatalogue.tiers.flatMap((t) => t.sources.map((src) => src.key))),
     [liveCatalogue],
   );
+  const sourceByKey = useMemo(
+    () => {
+      const map: Record<string, SourceRecord> = {};
+      for (const tier of liveCatalogue.tiers) for (const src of tier.sources) map[src.key] = src;
+      return map;
+    },
+    [liveCatalogue],
+  );
 
-  /** Client-side filtering. The backend returns the stored corpus; these are the operator's
-   *  standing preferences, applied to whatever is in it.
+  /**
+   * The sources the rail shows, grouped by tier.
    *
-   *  Alongside the surviving jobs this counts *which* control rejected each one. An empty
-   *  screen that says "23 roles were filtered out" and leaves you to guess which of eight
-   *  controls did it is barely better than showing nothing: the operator's actual question is
-   *  "what is hiding my jobs, and how do I undo it". Each job is charged to the first filter
-   *  that rejects it, so the counts sum to the number hidden rather than double-counting. */
-  const { jobs, rejected } = useMemo(() => {
-    const maxAge = POSTED.find((p) => p.key === filters.postedWithin)?.days ?? 3650;
-    const rejected: Record<string, number> = {};
-    const reject = (key: string) => {
-      rejected[key] = (rejected[key] ?? 0) + 1;
-      return false;
-    };
-    const out = allJobs.filter((j) => {
-      // Only exclude a source the operator has actually switched off. A job whose source
-      // the frontend catalogue does not recognise must never be dropped silently: the static
-      // catalogue in lib/sources marks every `careers:*` entry not_implemented, which was
-      // false for nine of them and hid 28 of 55 London jobs. The live registry decides what
-      // exists; this filter only applies the operator's own choices on top of it.
-      if (restrictSources && knownKeys.has(j.platform) && !enabledSources.includes(j.platform)) {
-        return reject('sources');
-      }
-      if (atsPercent(j.match_score) < filters.minAtsScore && j.match_score != null) {
-        return reject('minAtsScore');
-      }
-      if (filters.remoteOnly && !j.remote) return reject('remoteOnly');
-      // Was `status !== 'new' && status !== 'discovered'`, which also caught 'saved' —
-      // added by this same redesign as a genuinely distinct, still-relevant status. That
-      // meant saving a job for later immediately hid it from the default view (hideApplied
-      // is on by default), the opposite of what "save for later" is for. Only an actual
-      // 'applied' status is what this filter's own label promises to hide.
-      if (filters.hideApplied && j.status === 'applied') {
-        return reject('hideApplied');
-      }
-      // A missing posted_date is unknown, not old: excluding it would silently drop every
-      // source that does not publish one (Arbeitnow, several career pages).
-      if (j.posted_date && ageInDays(j.posted_date) > maxAge) return reject('postedWithin');
-      const band = salaryK(j.salary_range);
-      if (filters.publishedSalaryOnly && band == null) return reject('publishedSalaryOnly');
-      if (filters.minSalaryK > 0 && band != null && band < filters.minSalaryK) {
-        return reject('minSalaryK');
-      }
-      if (filters.seniority.length) {
-        const level = (j.experience_level ?? '').toLowerCase();
-        if (!filters.seniority.some((s) => level.includes(s.toLowerCase()))) {
-          return reject('seniority');
-        }
-      }
-      if (activeFamilies.length && !activeFamilies.includes(familyForTitle(j.title))) {
-        return reject('roleTargets');
-      }
-      return true;
-    });
-    out.sort((a, b) => {
-      if (filters.sort === 'match') return atsPercent(b.match_score) - atsPercent(a.match_score);
-      if (filters.sort === 'newest') return ageInDays(a.posted_date) - ageInDays(b.posted_date);
-      return (salaryK(b.salary_range) ?? 0) - (salaryK(a.salary_range) ?? 0);
-    });
-    return { jobs: out, rejected };
-  }, [allJobs, enabledSources, restrictSources, knownKeys, filters, activeFamilies]);
+   * Only sources that can actually return a result right now, and that Settings has not
+   * switched off. Everything else — unbuilt adapters, sources behind a sign-in, ones the
+   * operator disabled — lives on the Manage screen, which is where you go to change that.
+   * The rail previously listed all of them inline, tagged "SOON", and then truncated each
+   * tier to its first six entries: of 69 career-page sources, six were reachable and the
+   * other 63 could not be seen or toggled at all.
+   */
+  const { railTiers, hiddenSourceCount } = useMemo(() => {
+    const settingsEnabled = settings?.platforms_enabled;
+    const permitted = (key: string) =>
+      liveCatalogue.live_keys.includes(key)
+      && (!settingsEnabled?.length || settingsEnabled.includes(key));
+
+    let hidden = 0;
+    const tiers = liveCatalogue.tiers
+      .map((tier) => {
+        const shown = tier.sources.filter((src) => permitted(src.key));
+        hidden += tier.sources.length - shown.length;
+        return { id: tier.id, name: tier.name, sources: shown };
+      })
+      .filter((tier) => tier.sources.length > 0);
+
+    return { railTiers: tiers, hiddenSourceCount: hidden };
+  }, [liveCatalogue, settings]);
+
+  const { jobs, rejected } = useMemo(
+    () => applyJobFilters(allJobs, { filters, activeFamilies, enabledSources, knownKeys }),
+    [allJobs, enabledSources, knownKeys, filters, activeFamilies],
+  );
 
   const selected = selectedJobIds.filter((id) => jobs.some((j) => j.id === id));
   const allSelected = jobs.length > 0 && selected.length === jobs.length;
@@ -279,6 +247,25 @@ export default function JobSearchPage() {
   };
 
 
+  /**
+   * Include or exclude one source.
+   *
+   * An empty selection means "every source", which is the right default but makes the first
+   * click ambiguous: adding the source you just switched *off* is the opposite of what the
+   * operator asked for. So the first exclusion writes the implied list down and removes one
+   * from it, and re-selecting everything collapses back to the empty list — which keeps
+   * sources added to the registry later switched on rather than silently excluded.
+   */
+  const toggleSourceExplicit = (key: string) => {
+    const railKeys = railTiers.flatMap((t) => t.sources.map((s) => s.key));
+    const next = restrictSources
+      ? (enabledSources.includes(key)
+          ? enabledSources.filter((k) => k !== key)
+          : [...enabledSources, key])
+      : railKeys.filter((k) => k !== key);
+    setSources(railKeys.every((k) => next.includes(k)) ? [] : next);
+  };
+
   const runSearch = () => {
     const effective = query.trim() || queryForTitles(activeTitles);
     if (!effective) {
@@ -302,8 +289,11 @@ export default function JobSearchPage() {
     const respectingSettings = settingsEnabled && settingsEnabled.length > 0
       ? liveCatalogue.live_keys.filter((k) => settingsEnabled.includes(k))
       : liveCatalogue.live_keys;
+    // The live registry decides what can be searched, not the static catalogue in lib/sources:
+    // that file is an offline fallback, and a source the backend had shipped but it had not
+    // caught up with was silently dropped from every manual search.
     const usable = enabledSources.length > 0
-      ? enabledSources.filter((k) => SOURCE_BY_KEY[k]?.implemented)
+      ? enabledSources.filter((k) => liveCatalogue.live_keys.includes(k))
       : respectingSettings;
     if (!usable.length) {
       notify('None of the enabled sources have a working adapter yet', 'warning');
@@ -312,10 +302,43 @@ export default function JobSearchPage() {
     // Promote the typed boxes to the filter the list is fetched with, so the results shown
     // after a search are the results of *that* search.
     commitSearch();
+    // Recorded before the request, not after it: a search that fails or is still running is
+    // still one the operator ran, and the history is most useful precisely then.
+    const recentId = recordSearch({
+      query: effective,
+      location: location.trim(),
+      sources: usable,
+      filters,
+    });
     search.mutate(
       { query: effective, location: location.trim() || undefined, platforms: usable, limit: 100 },
       {
-        onSuccess: (r) => notify(`Found ${r.total} matching roles across ${usable.length} sources`, 'success'),
+        onSuccess: (r) => {
+          setRecentResultCount(recentId, r.total);
+          notify(`Found ${r.total} matching roles across ${usable.length} sources`, 'success');
+        },
+        onError: () => notify('Search failed — try again', 'error'),
+      },
+    );
+  };
+
+  /** Re-run a search from the history, under the conditions it was originally run with. */
+  const runRecentSearch = (id: string) => {
+    const entry = restoreSearch(id);
+    if (!entry) return;
+    commitSearch();
+    search.mutate(
+      {
+        query: entry.query,
+        location: entry.location || undefined,
+        platforms: entry.sources.filter((k) => liveCatalogue.live_keys.includes(k)),
+        limit: 100,
+      },
+      {
+        onSuccess: (r) => {
+          setRecentResultCount(id, r.total);
+          notify(`Found ${r.total} matching roles`, 'success');
+        },
         onError: () => notify('Search failed — try again', 'error'),
       },
     );
@@ -341,9 +364,6 @@ export default function JobSearchPage() {
       },
     );
   };
-
-  const enabledInTier = (tier: (typeof SOURCE_TIERS)[number]['id']) =>
-    sourcesInTier(tier).filter((s) => enabledSources.includes(s.key)).length;
 
   // Real, backend-computed pipeline stages — never a fabricated "shortlisted"/"ready"
   // bucket with no field behind it. Opportunities is the deduped corpus size; the rest
@@ -406,11 +426,59 @@ export default function JobSearchPage() {
             min={0} max={95} step={5} current={filters.minAtsScore}
             onChange={(v) => patchFilters({ minAtsScore: v })}
           />
-          <RangeRow
-            label="MIN SALARY" value={filters.minSalaryK ? `£${filters.minSalaryK}k` : 'Any'}
-            min={0} max={150} step={5} current={filters.minSalaryK}
-            onChange={(v) => patchFilters({ minSalaryK: v })}
-          />
+          <FieldLabel>SALARY</FieldLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 9 }}>
+            {SALARY_BRACKETS.map((b) => (
+              <Chip
+                key={b.id} small on={filters.salaryBrackets.includes(b.id)}
+                title={`Show roles whose published band overlaps ${b.label}. Roles that publish no salary are never hidden by this.`}
+                onClick={() => patchFilters({
+                  salaryBrackets: filters.salaryBrackets.includes(b.id)
+                    ? filters.salaryBrackets.filter((x) => x !== b.id)
+                    : [...filters.salaryBrackets, b.id],
+                })}
+              >
+                {b.label}
+              </Chip>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <KRange
+              label="Custom minimum salary in thousands" placeholder="Min"
+              value={filters.salaryCustomMinK}
+              onChange={(v) => patchFilters({ salaryCustomMinK: v })}
+            />
+            <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>to</span>
+            <KRange
+              label="Custom maximum salary in thousands" placeholder="Max"
+              value={filters.salaryCustomMaxK}
+              onChange={(v) => patchFilters({ salaryCustomMaxK: v })}
+            />
+          </div>
+          {/* Said once, here, rather than left for the operator to deduce from an empty list:
+              most UK postings publish no salary, and a window that dropped them would remove
+              the majority of the market. "Published salary only" below is the control for
+              that, and it is a separate decision. */}
+          <div style={{ font: '500 10.5px/1.45 var(--font)', color: 'var(--text-4)', marginBottom: 16 }}>
+            Roles with no published salary are kept. Use “Published salary only” to exclude them.
+          </div>
+
+          <FieldLabel>VISA SPONSORSHIP</FieldLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+            {SPONSORSHIP_ORDER.map((s) => (
+              <Chip
+                key={s} small on={filters.sponsorship.includes(s)}
+                title={SPONSORSHIP_META[s].hint}
+                onClick={() => patchFilters({
+                  sponsorship: filters.sponsorship.includes(s)
+                    ? filters.sponsorship.filter((x) => x !== s)
+                    : [...filters.sponsorship, s],
+                })}
+              >
+                {SPONSORSHIP_META[s].chip}
+              </Chip>
+            ))}
+          </div>
 
           <FieldLabel>SENIORITY</FieldLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
@@ -430,7 +498,7 @@ export default function JobSearchPage() {
 
           <FieldLabel>POSTED WITHIN</FieldLabel>
           <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-            {POSTED.map((p) => (
+            {POSTED_WINDOWS.map((p) => (
               <Chip key={p.key} small on={filters.postedWithin === p.key} onClick={() => patchFilters({ postedWithin: p.key })}>
                 {p.label}
               </Chip>
@@ -456,42 +524,65 @@ export default function JobSearchPage() {
           {/* Deep link, not a bare /settings: "Manage" landing at the top of a long page with
               no indication of where to look is what made this flow a dead end. */}
           <RailHead label="Sources" action="Manage" onAction={() => navigate('/settings?section=platforms')} />
-          {SOURCE_TIERS.map((tier) => (
-            <div key={tier.id} style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '6px 2px' }}>
-                <span style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)' }}>
-                  {tier.name.replace(/ —.*/, '').toUpperCase()}
-                </span>
-                <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)' }}>
-                  {enabledInTier(tier.id)}/{sourcesInTier(tier.id).length}
-                </span>
-              </div>
-              {sourcesInTier(tier.id).slice(0, 6).map((src) => {
-                const on = enabledSources.includes(src.key);
-                const meta = HEALTH_META[src.health];
-                return (
-                  <button
-                    key={src.key} onClick={() => toggleSource(src.key)} title={src.note ?? meta.label}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 30,
-                      padding: '0 8px', borderRadius: 'var(--r-sm)', border: 0, cursor: 'pointer',
-                      background: 'transparent', font: '600 11.5px/1 var(--font)',
-                      color: on ? 'var(--text-2)' : 'var(--text-4)',
-                    }}
-                  >
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? meta.color : 'var(--text-4)', flex: '0 0 auto' }} />
-                    <span style={{ flex: '1 1 auto', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {src.label}
-                    </span>
-                    {!src.implemented && (
-                      <span style={{ font: '600 9px/1 var(--mono)', color: 'var(--text-4)' }}>SOON</span>
-                    )}
-                  </button>
-                );
-              })}
+          {railTiers.length === 0 ? (
+            <div style={{ font: '500 11.5px/1.45 var(--font)', color: 'var(--text-4)' }}>
+              No source can return results right now. Open Manage to connect or re-enable one.
             </div>
-          ))}
+          ) : (
+            railTiers.map((tier) => (
+              <div key={tier.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '6px 2px' }}>
+                  <span style={{ font: '600 10px/1 var(--mono)', letterSpacing: '.12em', color: 'var(--text-4)' }}>
+                    {/* Never `tier.name.replace(...)` unguarded: one tier arriving without a
+                        name would take the whole Jobs page down, which is how an unknown
+                        health value once took down SourcesPage entirely. */}
+                    {(tier.name ?? tier.id).replace(/ —.*/, '').toUpperCase()}
+                  </span>
+                  <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)' }}>
+                    {tier.sources.filter((s) => enabledSources.includes(s.key)).length}/{tier.sources.length}
+                  </span>
+                </div>
+                {tier.sources.map((src) => {
+                  // An empty selection means "all of them", so every row reads as on until
+                  // the operator narrows it. Rendering them all grey until something is
+                  // ticked said the opposite of what the search actually does.
+                  const on = !restrictSources || enabledSources.includes(src.key);
+                  const meta = HEALTH_META[src.health] ?? HEALTH_META.live;
+                  return (
+                    <button
+                      key={src.key}
+                      onClick={() => toggleSourceExplicit(src.key)}
+                      aria-pressed={on}
+                      title={src.note || `${src.label} — ${meta.label}. Click to ${on ? 'exclude from' : 'include in'} searches.`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 30,
+                        padding: '0 8px', borderRadius: 'var(--r-sm)', border: 0, cursor: 'pointer',
+                        background: 'transparent', font: '600 11.5px/1 var(--font)',
+                        color: on ? 'var(--text-2)' : 'var(--text-4)',
+                      }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? meta.color : 'var(--text-4)', flex: '0 0 auto' }} />
+                      <span style={{ flex: '1 1 auto', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {src.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          )}
+          {hiddenSourceCount > 0 && (
+            <button
+              onClick={() => navigate('/settings?section=platforms')}
+              title="Sources with no working adapter, or ones you have switched off, are managed here rather than listed above."
+              style={{ ...ghostBtn, marginTop: 4 }}
+            >
+              {hiddenSourceCount} more in Manage
+            </button>
+          )}
         </div>
+
+        <RecentSearches onRun={runRecentSearch} />
       </div>
 
       {/* ---- Results ------------------------------------------------------------------ */}
@@ -521,6 +612,18 @@ export default function JobSearchPage() {
               {jobs.length} roles · {selected.length} selected
             </span>
           </button>
+          {/* The list endpoint is fetched one page deep, so filters run over the first 100
+              stored roles rather than the whole corpus. Said out loud: a candidate filtering
+              to "£75k+" and seeing four results should know whether that is the market or
+              the page size. Silence here reads as the former. */}
+          {stored > allJobs.length && (
+            <span
+              className="jc-meta"
+              title={`Filters run over the ${allJobs.length} most recent stored roles. ${stored - allJobs.length} older ones are not on this page.`}
+            >
+              of {stored} stored
+            </span>
+          )}
           <div style={{ flex: '1 1 auto' }} />
           <div style={{ display: 'flex', gap: 6 }}>
             {(['match', 'newest', 'salary'] as const).map((k) => (
@@ -580,6 +683,7 @@ export default function JobSearchPage() {
             {jobs.map((j) => (
               <JobRow
                 key={j.id} job={j} selected={selected.includes(j.id)}
+                sourceMeta={sourceByKey[j.platform]}
                 onToggle={() => toggleJob(j.id)} onOpen={() => openDrawer(j)}
                 onApply={() => { setSelected([j.id]); notify(`Selected · ${j.title}`, 'success'); }}
                 onSave={() => toggleSaveJob(j)} saving={updateJobStatus.isPending}
@@ -705,6 +809,119 @@ function RangeRow({ label, value, min, max, step, current, onChange }: {
   );
 }
 
+/** One end of the custom salary window, in thousands.
+ *
+ *  Empty means unbounded, and is stored as `null` rather than `0`: a filter reading "£0k and
+ *  above" is indistinguishable on screen from no filter at all, but excludes every posting
+ *  that publishes no salary the moment anything else reads it as a floor.
+ */
+function KRange({ label, placeholder, value, onChange }: {
+  label: string; placeholder: string; value: number | null; onChange: (v: number | null) => void;
+}) {
+  return (
+    <div className="jc-input" style={{ flex: '1 1 0', height: 30, minWidth: 0, gap: 2 }}>
+      <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>£</span>
+      <input
+        aria-label={label} placeholder={placeholder} inputMode="numeric" value={value ?? ''}
+        onChange={(e) => {
+          const raw = e.target.value.replace(/[^\d]/g, '');
+          onChange(raw === '' ? null : Number(raw));
+        }}
+        style={{
+          flex: '1 1 auto', minWidth: 0, background: 'transparent', border: 0, outline: 'none',
+          color: 'var(--text)', font: '600 11.5px/1 var(--font)',
+        }}
+      />
+      <span style={{ font: '600 11px/1 var(--mono)', color: 'var(--text-4)' }}>k</span>
+    </div>
+  );
+}
+
+/**
+ * The searches the operator has actually run, most recent first.
+ *
+ * Restores the whole search, not just its words: the same query means something different
+ * against a different location, a different set of sources and a different salary window, so
+ * re-running one puts those conditions back before it fires. Re-running a search you already
+ * ran updates its entry rather than adding a second copy — checking a saved search for new
+ * postings is the normal way to use this, and a history that fills up with ten copies of the
+ * same search is not a history.
+ */
+function RecentSearches({ onRun }: { onRun: (id: string) => void }) {
+  const { recentSearches, removeRecentSearch, clearRecentSearches } = useDiscoveryStore();
+
+  if (!recentSearches.length) {
+    return (
+      <div style={{ ...card, padding: 14 }}>
+        <div style={{ font: '700 12.5px/1 var(--font)', marginBottom: 8 }}>Recent searches</div>
+        <div style={{ font: '500 11.5px/1.45 var(--font)', color: 'var(--text-4)' }}>
+          Searches you run appear here, with the location, sources and filters they used.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...card, padding: 14 }}>
+      {/* "Clear all", not "Clear": the filter diagnostic on this same screen puts a "Clear"
+          button beside every filter that is hiding jobs, and two controls with one label that
+          do very different things is how you delete your search history meaning to unset a
+          filter. */}
+      <RailHead label="Recent searches" action="Clear all" onAction={clearRecentSearches} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {recentSearches.map((r) => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={() => onRun(r.id)}
+              // The visible text is the query alone, which on its own does not say what the
+              // button will do. The accessible name spells out the whole search, and still
+              // contains the visible words so speaking the label matches what is on screen.
+              aria-label={`Re-run this search: ${r.query}${r.location ? ` in ${r.location}` : ''}`}
+              title={`Re-run this search: ${r.query}${r.location ? ` in ${r.location}` : ''}, across ${r.sources.length} source${r.sources.length === 1 ? '' : 's'}, with the filters it was run under.`}
+              style={{
+                flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column',
+                alignItems: 'flex-start', gap: 2, padding: '6px 8px', borderRadius: 'var(--r-sm)',
+                border: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span
+                style={{
+                  maxWidth: '100%', font: '600 11.5px/1.3 var(--font)', color: 'var(--text-2)',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}
+              >
+                {r.query}
+              </span>
+              <span style={{ font: '500 10px/1.3 var(--mono)', color: 'var(--text-4)' }}>
+                {[
+                  r.location || 'Anywhere',
+                  `${r.sources.length} src`,
+                  // "running" is a real third state, not zero: a search whose count has not
+                  // come back yet is not a search that found nothing.
+                  r.resultCount === null ? 'running' : `${r.resultCount} found`,
+                  relativeTime(new Date(r.at).toISOString()),
+                ].join(' · ')}
+              </span>
+            </button>
+            <button
+              onClick={() => removeRecentSearch(r.id)}
+              title="Remove this search from the history. Nothing else is affected."
+              aria-label={`Remove ${r.query} from recent searches`}
+              style={{
+                flex: '0 0 auto', width: 22, height: 22, display: 'grid', placeItems: 'center',
+                borderRadius: 'var(--r-sm)', border: 0, background: 'transparent',
+                color: 'var(--text-4)', cursor: 'pointer',
+              }}
+            >
+              <Icon name="trash" size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CheckBox({ on }: { on: boolean }) {
   return (
     <span
@@ -727,10 +944,12 @@ function CheckRow({ label, on, onClick }: { label: string; on: boolean; onClick:
   );
 }
 
-function Chip({ on, small, onClick, children }: { on: boolean; small?: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ on, small, title, onClick, children }: {
+  on: boolean; small?: boolean; title?: string; onClick: () => void; children: React.ReactNode;
+}) {
   return (
     <button
-      onClick={onClick} aria-pressed={on}
+      onClick={onClick} aria-pressed={on} title={title}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, height: small ? 26 : 28,
         padding: `0 ${small ? 9 : 11}px`, borderRadius: 999, cursor: 'pointer',
@@ -813,12 +1032,21 @@ function MetaPill({
 }
 
 
-function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
-  job: Job; selected: boolean; onToggle: () => void; onOpen: () => void; onApply: () => void;
+function JobRow({ job, selected, sourceMeta, onToggle, onOpen, onApply, onSave, saving }: {
+  job: Job; selected: boolean;
+  /** From the live registry, not the static catalogue — `undefined` for a source the
+   *  registry has never heard of, which is shown by name rather than dropped. */
+  sourceMeta: SourceRecord | undefined;
+  onToggle: () => void; onOpen: () => void; onApply: () => void;
   onSave: () => void; saving: boolean;
 }) {
   const pct = atsPercent(job.match_score);
-  const src = SOURCE_BY_KEY[job.platform];
+  const src = sourceMeta;
+  const band = salaryBand(job);
+  const sponsorship = sponsorshipStatus(job);
+  // The registry's own label when it knows the source, the static catalogue next, and the
+  // raw key last. A source the catalogue has not caught up with is named, not hidden.
+  const label = src?.label ?? sourceLabel(job.platform);
   // Level 4 metadata — everything that answers "is this worth reading further" without
   // being a decision signal itself.
   // Salary, the experience bar and employment type each answer a different question, and
@@ -869,15 +1097,21 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
           {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
+          {/* The same band the salary filter and the salary sort read, so a card can never
+              show a figure the filter behind it disagrees with. It used to: this pill
+              rendered the posting's raw text while the filter re-parsed that text for
+              itself and got a different number. */}
           <MetaPill
             label="Salary"
-            value={job.salary_range}
+            value={formatSalary(band) ?? job.salary_range}
             tone="money"
             absent="Not published"
             hint={
-              job.salary_range
-                ? `Salary as the posting states it: ${job.salary_range}`
-                : 'This posting does not publish a salary'
+              band.published
+                ? `The posting states ${job.salary_range}.${band.annualised ? ' Shown as a yearly equivalent.' : ''}`
+                : job.salary_range
+                  ? `The posting says “${job.salary_range}” and gives no figure`
+                  : 'This posting does not publish a salary'
             }
           />
           <MetaPill
@@ -907,17 +1141,21 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
           {job.remote && (
             <MetaPill label="" value="Remote" tone="remote" hint="This role is remote or hybrid" />
           )}
-          {/* "Unknown" is the common case (most postings never mention sponsorship) and
-              would be pure noise repeated on every row — the drawer shows it explicitly
-              for anyone who opens the job. Here, only a genuine signal earns a badge. */}
-          {job.sponsor_confidence !== 'unknown' && (() => {
-            const sm = jcSponsorMeta(job.sponsor_confidence);
-            return (
-              <span title={job.sponsor_evidence ?? undefined} className="jc-status" style={{ background: sm.soft, color: sm.color }}>
-                {sm.label}
-              </span>
-            );
-          })()}
+          {/* Shown on every card, including "not specified", and read from the same field
+              the sponsorship filter matches on. Hiding the common case was defensible as
+              noise reduction right up until sponsorship became a filter: a candidate who
+              filters for "not specified" then had no way to see, on the card, why a row
+              was in their results. */}
+          <MetaPill
+            label="Visa"
+            value={SPONSORSHIP_META[sponsorship].card}
+            tone={sponsorship === 'available' ? 'bar' : 'plain'}
+            hint={
+              job.sponsor_evidence
+                ? `${SPONSORSHIP_META[sponsorship].label} — ${job.sponsor_evidence}`
+                : SPONSORSHIP_META[sponsorship].hint
+            }
+          />
           {job.posted_date && (
             <span
               className="jc-meta"
@@ -931,13 +1169,13 @@ function JobRow({ job, selected, onToggle, onOpen, onApply, onSave, saving }: {
             className="jc-meta"
             title={
               src
-                ? `Found on ${sourceLabel(job.platform)} - source is ${HEALTH_META[src.health].label.toLowerCase()}`
-                : `Found on ${sourceLabel(job.platform)}`
+                ? `Found on ${label} - source is ${(HEALTH_META[src.health] ?? HEALTH_META.live).label.toLowerCase()}`
+                : `Found on ${label}`
             }
             style={{ height: 22, display: 'inline-flex', alignItems: 'center', gap: 5 }}
           >
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: src ? HEALTH_META[src.health].color : 'var(--jc-text-4)' }} />
-            {sourceLabel(job.platform)}
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: src ? (HEALTH_META[src.health] ?? HEALTH_META.live).color : 'var(--jc-text-4)' }} />
+            {label}
           </span>
         </div>
       </div>

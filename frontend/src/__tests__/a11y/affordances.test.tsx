@@ -215,7 +215,11 @@ describe('the job card shows what a candidate decides on', () => {
             id: 'j1', platform: 'remotive', platform_job_id: 'rm1',
             title: 'Senior Product Manager', company: 'Northwind Labs',
             location: 'London, UK', url: 'https://x', description: 'Own the roadmap.',
-            salary_range: '£90,000 - £110,000', job_type: 'Full-time', remote: true,
+            salary_range: '£90,000 - £110,000',
+            salary_min: 90000, salary_max: 110000, salary_currency: 'GBP',
+            salary_period: 'year', salary_annualised: false,
+            sponsorship_status: 'not_specified',
+            job_type: 'Full-time', remote: true,
             posted_date: null, experience_level: 'Senior', match_score: 0.9,
             skills_required: null, status: 'new', sponsor_confidence: 'unknown',
             posting_data: { years_required: 5 }, enriched_at: '2026-09-01T00:00:00Z',
@@ -229,8 +233,14 @@ describe('the job card shows what a candidate decides on', () => {
 
     // Both are rendered even when absent: "not published" and "not fetched yet" are facts a
     // candidate wants, and a blank space communicates neither.
-    expect(await screen.findByText('£90,000 - £110,000', {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.getByTitle(/salary as the posting states it/i)).toBeInTheDocument();
+    // The pill shows the canonical band -- the same figures the salary filter and sort read --
+    // and its tooltip quotes the posting's own wording so the two can be checked against
+    // each other.
+    expect(await screen.findByText('£90k–£110k', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.getByTitle(/the posting states £90,000 - £110,000/i)).toBeInTheDocument();
+
+    // Sponsorship is now on every card, including when the posting never mentions it.
+    expect(screen.getByText('Not stated')).toBeInTheDocument();
 
     // The experience bar comes from the posting's own wording, not a guess.
     expect(screen.getByText('5+ yrs')).toBeInTheDocument();

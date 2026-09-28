@@ -15,6 +15,7 @@ import { useApplyReadiness } from '@/hooks/useApplications';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
 import { jcSponsorMeta, jobStatusMeta } from '@/lib/status';
+import { formatSalary, salaryBand } from '@/lib/jobModel';
 import '@/styles/jobs-command.css';
 import type { Job } from '@/types/job';
 import type { Resume } from '@/types/resume';
@@ -154,7 +155,21 @@ export default function JobDrawer({
               {job.salary_range && (
                 <>
                   <span style={{ color: 'var(--jc-text-4)' }}>·</span>
-                  <span>{job.salary_range}</span>
+                  {/* The posting's own words, with the figure the list sorted and filtered on
+                      beside them when the two differ. The card shows "£110k" for a posting
+                      that reads "£500 per day"; without this the drawer contradicted it with
+                      no explanation of where either number came from. */}
+                  <span title={`As published: ${job.salary_range}`}>{job.salary_range}</span>
+                  {(() => {
+                    const band = salaryBand(job);
+                    const normalised = formatSalary(band);
+                    if (!normalised || !band.annualised) return null;
+                    return (
+                      <span style={{ color: 'var(--jc-text-4)' }}>
+                        ({normalised} a year)
+                      </span>
+                    );
+                  })()}
                 </>
               )}
             </div>

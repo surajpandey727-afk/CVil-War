@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.models.enums import SponsorConfidence
 from app.models.job import Job
 
 API_PREFIX = "/api/v1/jobs"
@@ -367,3 +368,106 @@ class TestResumeRecommendation:
         assert body["recommended_resume_id"] == strong.id
         assert body["rankings"][0]["resume_id"] == strong.id
         assert "Tailored CV" in body["synopsis"]
+
+
+class TestCanonicalFieldsOverTheWire:
+    """The filterable form of salary and sponsorship, as the frontend actually receives it.
+
+    Asserting these on the schema object alone would not catch a response model that drops
+    them, or a route that serialises the ORM row directly. The Jobs screen filters, sorts and
+    labels every card from these fields, so if they are missing from the wire the filters
+    silently match nothing.
+    """
+
+    async def test_a_published_salary_arrives_as_numbers(self, client, db_session, job_data):
+        job = Job(**{**job_data, "salary_range": "\u00a390,000 - \u00a3110,000"})
+        db_session.add(job)
+        await db_session.commit()
+
+        body = (await client.get(f"{API_PREFIX}/")).json()
+        item = body["items"][0]
+
+        assert item["salary_min"] == 90_000
+        assert item["salary_max"] == 110_000
+        assert item["salary_currency"] == "GBP"
+        assert item["salary_annualised"] is False
+        # The employer's own wording is still there to check the numbers against.
+        assert item["salary_range"] == "\u00a390,000 - \u00a3110,000"
+
+    async def test_the_bonus_percentage_regression_does_not_reach_the_client(
+        self, client, db_session, job_data
+    ):
+        """The defect the whole canonical-field change exists to remove.
+
+        Read by the old client-side parser, this posting filtered as \u00a310k -- so a candidate
+        searching above \u00a350k never saw a \u00a360k role, and the card in front of them said
+        \u00a360,000 the whole time.
+        """
+        job = Job(**{**job_data, "salary_range": "Up to \u00a360,000 + 10% bonus"})
+        db_session.add(job)
+        await db_session.commit()
+
+        item = (await client.get(f"{API_PREFIX}/")).json()["items"][0]
+
+        assert item["salary_max"] == 60_000
+        assert item["salary_min"] is None
+
+    async def test_an_unpublished_salary_is_null_rather_than_zero(
+        self, client, db_session, job_data
+    ):
+        job = Job(**{**job_data, "salary_range": "Competitive"})
+        db_session.add(job)
+        await db_session.commit()
+
+        item = (await client.get(f"{API_PREFIX}/")).json()["items"][0]
+
+        assert item["salary_min"] is None
+        assert item["salary_max"] is None
+
+    async def test_sponsorship_status_arrives_with_the_evidence_behind_it(
+        self, client, db_session, job_data
+    ):
+        job = Job(**{
+            **job_data,
+            "sponsor_confidence": SponsorConfidence.CONFIRMED_REGISTER,
+            "sponsor_evidence": "TechCorp Inc.",
+        })
+        db_session.add(job)
+        await db_session.commit()
+
+        item = (await client.get(f"{API_PREFIX}/")).json()["items"][0]
+
+        assert item["sponsorship_status"] == "available"
+        assert item["sponsor_confidence"] == "confirmed_register"
+        assert item["sponsor_evidence"] == "TechCorp Inc."
+
+    async def test_a_posting_that_says_nothing_is_not_a_refusal(
+        self, client, db_session, job_data
+    ):
+        job = Job(**{**job_data, "sponsor_confidence": SponsorConfidence.UNKNOWN})
+        db_session.add(job)
+        await db_session.commit()
+
+        item = (await client.get(f"{API_PREFIX}/")).json()["items"][0]
+
+        assert item["sponsorship_status"] == "not_specified"
+
+    async def test_a_single_job_fetch_carries_the_same_fields_as_the_list(
+        self, client, db_session, job_data
+    ):
+        # The drawer reads the single-job route and the card reads the list. Two shapes would
+        # let them disagree about the same posting.
+        job = Job(**{**job_data, "salary_range": "\u00a3500 per day"})
+        db_session.add(job)
+        await db_session.commit()
+        await db_session.refresh(job)
+
+        listed = (await client.get(f"{API_PREFIX}/")).json()["items"][0]
+        fetched = (await client.get(f"{API_PREFIX}/{job.id}")).json()
+
+        for field in (
+            "salary_min", "salary_max", "salary_currency", "salary_period",
+            "salary_annualised", "sponsorship_status",
+        ):
+            assert fetched[field] == listed[field], field
+        assert fetched["salary_annualised"] is True

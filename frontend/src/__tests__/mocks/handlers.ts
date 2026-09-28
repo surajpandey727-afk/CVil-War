@@ -444,14 +444,29 @@ export const handlers = [
   // onUnhandledRequest:'error', which is what caught the omission.
   http.get('/api/v1/sources/', () => {
     return HttpResponse.json({
-      total: 55,
+      // `name`, not `label`: the endpoint's own field (SourceTierResponse in
+      // backend/app/api/v1/sources.py). This mock said `label` for months and nothing caught
+      // it, because until the Jobs rail started rendering the live catalogue nothing read a
+      // tier's name at all. A mock that does not match the contract is not a test double,
+      // it is a second, wrong API.
+      total: 3,
       tiers: [
         {
-          id: 'aggregator',
-          label: 'Aggregators',
+          id: 'tier4',
+          name: 'Tier 4 — Tech & startup',
+          note: 'AI-first companies and scale-ups',
           sources: [
-            { key: 'remotive', label: 'Remotive', health: 'live', implemented: true },
-            { key: 'adzuna', label: 'Adzuna', health: 'live', implemented: true },
+            { key: 'remotive', label: 'Remotive', domain: 'remotive.com', tier: 'tier4', health: 'live', implemented: true, note: '' },
+          ],
+        },
+        {
+          id: 'tier2',
+          name: 'Tier 2 — UK job boards',
+          note: 'Consultancies, traditional business, contract',
+          sources: [
+            { key: 'adzuna', label: 'Adzuna', domain: 'adzuna.co.uk', tier: 'tier2', health: 'live', implemented: true, note: '' },
+            // Not live: the Jobs rail must keep this behind Manage rather than listing it.
+            { key: 'ukvisajobs', label: 'UK Visa Jobs', domain: 'ukvisajobs.com', tier: 'tier2', health: 'auth_required', implemented: false, note: 'Real catalogue is behind login' },
           ],
         },
       ],

@@ -42,7 +42,36 @@ export interface Job {
   sponsor_confidence: SponsorConfidence;
   /** The matched register entry name, or the posting phrase that triggered detection. */
   sponsor_evidence: string | null;
+
+  /* -- Canonical, filterable form of the facts candidates filter on -------------------
+   *
+   * Derived on the server by `app.core.salary` and `app.schemas.job.sponsorship_status`, so
+   * the filter, the sort and the card read the same numbers instead of each parsing
+   * `salary_range` themselves. They used to, and disagreed: the card read "Up to £60,000 +
+   * 10% bonus" as £60,000 while the filter read it as £10,000 and hid the row.
+   *
+   * Optional only because a stored response from before this shipped will not carry them.
+   * Absent means "no band recoverable", which is the same thing the parser says about
+   * "Competitive" — never £0, which would hide every job that does not advertise pay. */
+  /** Annual, in `salary_currency`. Null when the posting published no floor. */
+  salary_min?: number | null;
+  /** Annual, in `salary_currency`. Null when the posting published no ceiling. */
+  salary_max?: number | null;
+  /** ISO code, when the posting marked one. Never assumed to be GBP. */
+  salary_currency?: string | null;
+  /** `year` unless the posting quoted a day, hour or monthly rate. */
+  salary_period?: string | null;
+  /** True when the figures were converted from a day/hour/monthly rate rather than quoted. */
+  salary_annualised?: boolean;
+  /** The three states a visa-dependent candidate needs to tell apart. */
+  sponsorship_status?: SponsorshipStatus;
 }
+
+/** Mirrors the backend `SponsorshipStatus` literal in `app/schemas/job.py`.
+ *
+ *  Three values, not the five evidence grades of `SponsorConfidence`: "how do we know" is a
+ *  different question from "can I take this job", and only the second one is a filter. */
+export type SponsorshipStatus = 'available' | 'not_specified' | 'none';
 
 /** Mirrors the backend `SponsorConfidence` enum. */
 export type SponsorConfidence =

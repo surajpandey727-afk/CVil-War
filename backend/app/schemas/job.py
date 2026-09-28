@@ -1,11 +1,37 @@
 """Pydantic schemas for job-related API requests and responses."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.core.salary import parse_salary
 from app.models.enums import JobStatus, SponsorConfidence
+
+#: The vocabulary a candidate filters by. Deliberately three values, not five: the evidence
+#: grades behind ``SponsorConfidence`` answer "how do we know", which is a different question
+#: from "can I take this job", and a filter offering five overlapping options is one nobody
+#: uses correctly.
+SponsorshipStatus = Literal["available", "not_specified", "none"]
+
+
+def sponsorship_status(confidence: SponsorConfidence | str) -> SponsorshipStatus:
+    """Collapse the evidence grade into the answer a visa-dependent candidate needs.
+
+    ``LIKELY`` counts as available even though nothing currently classifies into it: if a
+    future signal ever does, the honest place for it is alongside the other positives, not
+    silently in with the postings that said nothing.
+    """
+    value = confidence.value if isinstance(confidence, SponsorConfidence) else str(confidence)
+    if value in {
+        SponsorConfidence.CONFIRMED_REGISTER.value,
+        SponsorConfidence.KEYWORD_DETECTED.value,
+        SponsorConfidence.LIKELY.value,
+    }:
+        return "available"
+    if value == SponsorConfidence.NOT_SPONSOR.value:
+        return "none"
+    return "not_specified"
 
 
 class JobSearchRequest(BaseModel):
@@ -69,6 +95,38 @@ class JobListingResponse(BaseModel):
     #: The matched register entry name, or the posting phrase that triggered detection.
     #: ``None`` for UNKNOWN — there is nothing to show, not a fact that was hidden.
     sponsor_evidence: str | None = None
+
+    # -- Canonical, filterable form of the two facts candidates actually filter on ---------
+    #
+    # ``salary_range`` is free text and ``sponsor_confidence`` is a five-way evidence grade;
+    # neither can be compared or bucketed without being read first. Serving the read form means
+    # the filter, the sort and the card all use the same numbers. They previously each derived
+    # their own, and disagreed: a card showing "£60,000" was filtered out by a £50k minimum
+    # because the filter had read the "10% bonus" in the same string as £10k.
+    salary_min: int | None = None
+    salary_max: int | None = None
+    #: ISO code when the posting marked one, else ``None`` — never assumed to be GBP.
+    salary_currency: str | None = None
+    #: ``year`` unless the posting quoted a day, hour or monthly rate.
+    salary_period: str | None = None
+    #: True when the figures were converted from a non-annual rate, so the UI can say so
+    #: rather than presenting a derived number as the employer's own.
+    salary_annualised: bool = False
+    #: The three states a candidate needs a visa filter to distinguish. Any positive evidence
+    #: is ``available``; an explicit refusal is ``none``; silence is ``not_specified`` — which
+    #: is the common case and must never be collapsed into either of the others.
+    sponsorship_status: SponsorshipStatus = "not_specified"
+
+    @model_validator(mode="after")
+    def _derive_canonical_fields(self) -> "JobListingResponse":
+        band = parse_salary(self.salary_range)
+        self.salary_min = band.minimum
+        self.salary_max = band.maximum
+        self.salary_currency = band.currency
+        self.salary_period = band.period
+        self.salary_annualised = band.annualised
+        self.sponsorship_status = sponsorship_status(self.sponsor_confidence)
+        return self
 
 
 class JobListResponse(BaseModel):
