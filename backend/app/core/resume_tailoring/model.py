@@ -67,6 +67,38 @@ def _strip_bullet(text: str) -> tuple[str, str]:
 
 
 @dataclass
+class Style:
+    """How one line is typeset in the source document.
+
+    Carried on the line rather than decided by the renderer. A tailored CV that arrives in
+    Calibri when the candidate wrote it in Times New Roman is not their CV, whatever the words
+    say — and the renderer this replaces hard-coded its own font, size and colour, so every
+    generated document looked like a different person's.
+
+    Populated from the source where the format exposes it (PDF and DOCX both do). Left empty
+    for plain text, where the renderer falls back to sensible defaults because there is
+    genuinely nothing to preserve.
+    """
+
+    #: Typeface name as the source names it, e.g. "Times New Roman".
+    font: str = ""
+    #: Point size.
+    size: float = 0.0
+    bold: bool = False
+    italic: bool = False
+    #: RGB as three 0-255 ints. ``None`` means the source used the default text colour.
+    colour: tuple[int, int, int] | None = None
+    #: "left" | "center" | "right"; inferred from the line's position on the page.
+    align: str = "left"
+    #: Vertical gap above this line in points, so section breathing room survives.
+    space_before: float = 0.0
+
+    @property
+    def defined(self) -> bool:
+        return bool(self.font or self.size)
+
+
+@dataclass
 class Line:
     """One line of the document, in its original order."""
 
@@ -79,6 +111,8 @@ class Line:
     marker: str = ""
     #: Leading whitespace, which carries nesting in many CVs.
     indent: str = ""
+    #: Typography copied from the source, so the output is the same document.
+    style: Style = field(default_factory=Style)
 
     @property
     def editable(self) -> bool:
@@ -99,6 +133,9 @@ class Section:
     heading: str
     #: Position in the original document. Preserved on output; never sorted.
     order: int
+    #: Typography of the heading itself, which is usually the most distinctive styling in a
+    #: CV — the teal 12pt bold that makes it look like this person's document.
+    heading_style: Style = field(default_factory=Style)
     lines: list[Line] = field(default_factory=list)
 
     @property
@@ -122,6 +159,9 @@ class ResumeDocument:
     sections: list[Section] = field(default_factory=list)
     #: Where this came from, so the renderer can prefer the original file as a base.
     source_format: str = ""
+    #: (left, right, top, bottom) in points, measured from the source's own text block.
+    #: Word's one-inch default would reflow a CV that was fitted to three pages onto four.
+    page_margins: tuple[float, float, float, float] | None = None
 
     # -- read-only views ---------------------------------------------------------------
 
@@ -177,16 +217,24 @@ class ResumeDocument:
     def copy(self) -> ResumeDocument:
         """A deep copy, so an edit plan can be applied without mutating the original."""
         return ResumeDocument(
-            header=[Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent) for ln in self.header],
+            header=[
+                Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent, ln.style)
+                for ln in self.header
+            ],
             sections=[
                 Section(
                     heading=s.heading,
                     order=s.order,
-                    lines=[Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent) for ln in s.lines],
+                    heading_style=s.heading_style,
+                    lines=[
+                        Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent, ln.style)
+                        for ln in s.lines
+                    ],
                 )
                 for s in self.sections
             ],
             source_format=self.source_format,
+            page_margins=self.page_margins,
         )
 
 

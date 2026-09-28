@@ -29,6 +29,7 @@ import re
 from app.core.resume_tailoring.model import (
     BULLET_PREFIX,
     Line,
+    Style,
     LineKind,
     ResumeDocument,
     Section,
@@ -120,26 +121,40 @@ def _split_header(lines: list[str]) -> int:
 
 
 def parse_resume_text(text: str, *, source_format: str = "") -> ResumeDocument:
-    """Parse extracted CV text into a faithful, editable document.
+    """Parse plain CV text, with no typography to preserve."""
+    return parse_styled_lines(
+        [(ln, Style()) for ln in (text or "").splitlines()], source_format=source_format
+    )
+
+
+def parse_styled_lines(
+    pairs: list[tuple[str, Style]], *, source_format: str = ""
+) -> ResumeDocument:
+    """Parse CV lines that carry their own typography.
 
     Every non-blank line of the input appears exactly once in the result, in its original
     order. That property is asserted by the test suite, because it is the one the previous
     implementation violated catastrophically.
+
+    Style travels with the line from here on. Deciding typography at render time instead is
+    what made every tailored CV come back in the renderer's own font rather than the
+    candidate's — a document that no longer looked like theirs however accurate the words.
     """
-    raw_lines = [ln for ln in (text or "").splitlines()]
-    non_blank = [(i, ln) for i, ln in enumerate(raw_lines) if ln.strip()]
+    non_blank = [(raw, st) for raw, st in pairs if raw.strip()]
     if not non_blank:
         return ResumeDocument(source_format=source_format)
 
-    ordered = [ln for _, ln in non_blank]
+    ordered = [raw for raw, _ in non_blank]
+    styles = [st for _, st in non_blank]
     header_len = _split_header(ordered)
 
     doc = ResumeDocument(source_format=source_format)
     counter = 0
-    for raw in ordered[:header_len]:
+    for raw, st in zip(ordered[:header_len], styles[:header_len], strict=True):
         line = make_line(counter, raw)
         # Nothing in the contact block is ever edited, even if it looks like a bullet.
         line.kind = LineKind.FIXED
+        line.style = st
         doc.header.append(line)
         counter += 1
 
@@ -148,14 +163,15 @@ def parse_resume_text(text: str, *, source_format: str = "") -> ResumeDocument:
     current = Section(heading="", order=0)
     order = 0
 
-    for raw in ordered[header_len:]:
+    for raw, st in zip(ordered[header_len:], styles[header_len:], strict=True):
         if is_heading(raw):
             if current.lines or current.heading:
                 doc.sections.append(current)
             order += 1
-            current = Section(heading=raw.strip(), order=order)
+            current = Section(heading=raw.strip(), order=order, heading_style=st)
             continue
         line = make_line(counter, raw)
+        line.style = st
         counter += 1
         current.lines.append(line)
 
@@ -279,13 +295,127 @@ def _classify_prose(doc: ResumeDocument) -> None:
                 line.kind = LineKind.PROSE
 
 
+#: Fonts are embedded with a subset prefix like "BCDEEE+TimesNewRomanPSMT". Word needs the
+#: family name, so the prefix and the PostScript suffixes come off.
+_SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
+_PS_SUFFIX = re.compile(r"(PSMT|PS-BoldMT|PS-ItalicMT|PS-BoldItalicMT|MT|PS)$")
+
+
+def _family(fontname: str) -> str:
+    """The typeface family a PDF font name refers to."""
+    name = _SUBSET_PREFIX.sub("", fontname or "")
+    name = name.split(",")[0].split("-")[0]
+    name = _PS_SUFFIX.sub("", name)
+    # "TimesNewRoman" -> "Times New Roman"; Word matches on the spaced name.
+    spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).strip()
+    return spaced or name
+
+
+def _colour(raw: object) -> tuple[int, int, int] | None:
+    """A PDF colour as 0-255 RGB, or None when it is plain black.
+
+    PDFs express colour in several spaces: a single grey value, three RGB components, or four
+    CMYK. Treating the one-tuple case as red is the classic mistake here.
+    """
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return None
+    values = [float(v) for v in raw]
+    if len(values) == 1:
+        grey = values[0]
+        return None if grey == 0 else (round(grey * 255),) * 3
+    if len(values) == 3:
+        rgb = tuple(round(v * 255) for v in values)
+        return None if rgb == (0, 0, 0) else rgb
+    if len(values) == 4:
+        c, m, y, k = values
+        rgb = tuple(round(255 * (1 - min(1.0, comp + k))) for comp in (c, m, y))
+        return None if rgb == (0, 0, 0) else rgb
+    return None
+
+
+def _line_style(line: dict, page_width: float, previous_bottom: float | None) -> Style:
+    """Summarise how one extracted line is typeset.
+
+    The dominant value wins for each attribute rather than the first: a heading whose final
+    character is punctuation in a different face is still that heading's font.
+    """
+    from collections import Counter
+
+    chars = line.get("chars") or []
+    if not chars:
+        return Style()
+
+    fonts = Counter(_family(c.get("fontname", "")) for c in chars if c.get("fontname"))
+    sizes = Counter(round(float(c.get("size", 0)), 1) for c in chars)
+    colours = Counter(str(c.get("non_stroking_color")) for c in chars)
+    bold_chars = sum(1 for c in chars if "bold" in str(c.get("fontname", "")).lower())
+    italic_chars = sum(1 for c in chars if "italic" in str(c.get("fontname", "")).lower())
+
+    dominant_colour_key = colours.most_common(1)[0][0]
+    swatch = next(
+        (c.get("non_stroking_color") for c in chars
+         if str(c.get("non_stroking_color")) == dominant_colour_key),
+        None,
+    )
+
+    x0, x1 = float(line.get("x0", 0)), float(line.get("x1", 0))
+    centre_offset = abs(((x0 + x1) / 2) - (page_width / 2))
+    align = "center" if centre_offset < page_width * 0.06 and x0 > page_width * 0.2 else "left"
+
+    gap = 0.0
+    if previous_bottom is not None:
+        gap = max(0.0, float(line.get("top", 0)) - previous_bottom)
+
+    return Style(
+        font=fonts.most_common(1)[0][0] if fonts else "",
+        size=sizes.most_common(1)[0][0] if sizes else 0.0,
+        bold=bold_chars > len(chars) / 2,
+        italic=italic_chars > len(chars) / 2,
+        colour=_colour(swatch),
+        align=align,
+        # Only report a gap that is genuinely a paragraph break, not normal leading.
+        space_before=round(gap, 1) if gap > 6 else 0.0,
+    )
+
+
 def extract_from_pdf(path: str) -> ResumeDocument:
-    """Parse a PDF CV, preferring the layout-aware extractor."""
+    """Parse a PDF CV, keeping the typography the candidate actually used."""
     import pdfplumber
 
+    pairs: list[tuple[str, Style]] = []
+    lefts: list[float] = []
+    rights: list[float] = []
+    tops: list[float] = []
+    bottoms: list[float] = []
+    page_width = page_height = 0.0
+
     with pdfplumber.open(path) as pdf:
-        text = "\n".join((page.extract_text() or "") for page in pdf.pages)
-    return parse_resume_text(text, source_format="pdf")
+        for page in pdf.pages:
+            page_width, page_height = float(page.width), float(page.height)
+            previous_bottom: float | None = None
+            for line in page.extract_text_lines():
+                text = line.get("text", "")
+                if not text.strip():
+                    continue
+                pairs.append((text, _line_style(line, page_width, previous_bottom)))
+                lefts.append(float(line.get("x0", 0)))
+                rights.append(float(line.get("x1", 0)))
+                tops.append(float(line.get("top", 0)))
+                bottoms.append(float(line.get("bottom", 0)))
+                previous_bottom = float(line.get("bottom", 0))
+
+    doc = parse_styled_lines(pairs, source_format="pdf")
+    if lefts and page_width:
+        # The smallest left edge is the text block's margin; the largest right edge gives the
+        # mirror. Measured rather than assumed, because Word's one-inch default reflows a CV
+        # that was laid out to fit three pages.
+        doc.page_margins = (
+            round(min(lefts), 1),
+            round(max(0.0, page_width - max(rights)), 1),
+            round(min(tops), 1),
+            round(max(0.0, page_height - max(bottoms)), 1),
+        )
+    return doc
 
 
 def extract_from_docx(path: str) -> ResumeDocument:

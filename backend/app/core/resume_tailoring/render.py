@@ -24,7 +24,7 @@ from pathlib import Path
 
 import structlog
 
-from app.core.resume_tailoring.model import LineKind, ResumeDocument
+from app.core.resume_tailoring.model import Line, LineKind, ResumeDocument, Style
 
 logger = structlog.get_logger(__name__)
 
@@ -106,61 +106,140 @@ def edit_docx_in_place(
     )
 
 
-def render_docx(doc: ResumeDocument, out_path: Path) -> RenderResult:
-    """Write the document out as a clean, structurally faithful DOCX.
+def _dominant_body_style(doc: ResumeDocument) -> Style:
+    """The typography most of the document's body text uses.
 
-    Used when the source was a PDF. Plain single-column output with real Word headings and
-    real list paragraphs: the structure is the candidate's, the styling is ours, and no
-    graphics, columns, icons or text boxes are introduced — all of which are the things that
-    break ATS parsing.
+    Used for the document default, so anything this module does not style explicitly still
+    comes out in the candidate's typeface rather than Word's.
+    """
+    from collections import Counter
+
+    tally: Counter[tuple[str, float]] = Counter()
+    for line in doc.all_lines():
+        st = line.style
+        if st.font and st.size:
+            tally[(st.font, st.size)] += max(1, len(line.text))
+    if not tally:
+        return Style(font="Calibri", size=10.0)
+    font, size = tally.most_common(1)[0][0]
+    return Style(font=font, size=size)
+
+
+def _apply(run, style: Style, fallback: Style) -> None:
+    """Put one line's typography onto a Word run."""
+    from docx.shared import Pt, RGBColor
+
+    run.font.name = style.font or fallback.font or None
+    size = style.size or fallback.size
+    if size:
+        run.font.size = Pt(size)
+    run.bold = style.bold
+    run.italic = style.italic
+    if style.colour:
+        run.font.color.rgb = RGBColor(*style.colour)
+
+    # python-docx sets the Latin typeface only; East Asian and complex-script slots fall back
+    # to the theme font, and Word then renders the line in Calibri on some machines and the
+    # right face on others. Setting all three makes the document look the same everywhere.
+    if run.font.name:
+        from docx.oxml.ns import qn
+
+        rpr = run._element.get_or_add_rPr()
+        rfonts = rpr.find(qn("w:rFonts"))
+        if rfonts is None:
+            rfonts = rpr.makeelement(qn("w:rFonts"), {})
+            rpr.append(rfonts)
+        for slot in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+            rfonts.set(qn(slot), run.font.name)
+
+
+def _align(paragraph, style: Style) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    if style.align == "center":
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    elif style.align == "right":
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def render_docx(doc: ResumeDocument, out_path: Path) -> RenderResult:
+    """Write the document out in the typography it arrived with.
+
+    Used when the source was a PDF, which cannot be edited back into itself. What is
+    reproduced is not just the structure but the look: the same typeface, sizes, weights,
+    colours, alignment and section spacing the candidate's own CV uses.
+
+    The renderer this replaces hard-coded Calibri 10pt in black. Run against a CV set in
+    Times New Roman with 20pt teal headings, it returned a document that shared none of those
+    things -- correct words, somebody else's CV.
     """
     from docx import Document as DocxDocument
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
 
+    body = _dominant_body_style(doc)
     document = DocxDocument()
-    for style_name, size in (("Normal", 10), ("List Bullet", 10)):
-        try:
-            style = document.styles[style_name]
-            style.font.name = "Calibri"
-            style.font.size = Pt(size)
-        except KeyError:
-            pass
 
-    # Header: name first and larger, then the contact lines exactly as the CV had them.
-    for index, line in enumerate(doc.header):
-        paragraph = document.add_paragraph()
+    normal = document.styles["Normal"]
+    normal.font.name = body.font or "Calibri"
+    normal.font.size = Pt(body.size or 10.0)
+
+    # Margins follow the source's own text block rather than Word's one-inch default, which
+    # would reflow a carefully fitted three-page CV onto four.
+    if doc.page_margins:
+        section = document.sections[0]
+        left, right, top, bottom = doc.page_margins
+        section.left_margin = Pt(left)
+        section.right_margin = Pt(right)
+        section.top_margin = Pt(top)
+        section.bottom_margin = Pt(bottom)
+
+    def emit(line: Line, *, bullet: bool) -> None:
+        if bullet:
+            paragraph = document.add_paragraph(style="List Bullet")
+        else:
+            paragraph = document.add_paragraph()
         run = paragraph.add_run(line.text)
-        run.bold = index == 0
-        run.font.size = Pt(18 if index == 0 else 10)
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        paragraph.paragraph_format.space_after = Pt(2)
+        _apply(run, line.style, body)
+        _align(paragraph, line.style)
+        paragraph.paragraph_format.space_after = Pt(0)
+        if line.style.space_before:
+            paragraph.paragraph_format.space_before = Pt(min(line.style.space_before, 14))
+        else:
+            paragraph.paragraph_format.space_before = Pt(0)
+
+    for line in doc.header:
+        emit(line, bullet=False)
 
     for section in doc.sections:
         if section.heading:
             heading = document.add_paragraph()
             run = heading.add_run(section.heading)
-            run.bold = True
-            run.font.size = Pt(12)
-            heading.paragraph_format.space_before = Pt(10)
-            heading.paragraph_format.space_after = Pt(4)
+            _apply(run, section.heading_style, body)
+            _align(heading, section.heading_style)
+            heading.paragraph_format.space_before = Pt(
+                min(section.heading_style.space_before or 8, 14)
+            )
+            heading.paragraph_format.space_after = Pt(2)
 
         for line in section.lines:
-            if line.kind is LineKind.BULLET:
-                paragraph = document.add_paragraph(line.text, style="List Bullet")
-            else:
-                paragraph = document.add_paragraph(line.text)
-            paragraph.paragraph_format.space_after = Pt(2)
+            emit(line, bullet=line.kind is LineKind.BULLET)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(str(out_path))
-    logger.info("resume_docx_rendered", sections=len(doc.sections), path=str(out_path))
+    logger.info(
+        "resume_docx_rendered",
+        sections=len(doc.sections),
+        font=body.font,
+        size=body.size,
+        path=str(out_path),
+    )
     return RenderResult(
         path=out_path,
-        formatting_preserved=False,
+        formatting_preserved=bool(body.font and body.font != "Calibri"),
         note=(
-            "Source was a PDF, so the visual template could not be carried across. Section "
-            "names, section order and every line are reproduced exactly."
+            f"Rebuilt from a PDF in the source's own typography ({body.font} {body.size:g}pt), "
+            "with its section names, order, colours and alignment. Exact page geometry cannot "
+            "be carried across from a PDF."
         ),
     )
 
