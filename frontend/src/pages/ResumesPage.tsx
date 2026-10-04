@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import Icon from '@/components/ui/Icon';
 import DeleteResumeDialog from '@/components/resumes/DeleteResumeDialog';
@@ -7,6 +7,7 @@ import ResumePreviewPanel from '@/components/resumes/ResumePreviewPanel';
 import { useResumes, useUploadResume, useOptimizeResume, useGenerateResume, useScoreResume, useDeleteResume, useExtractProfile } from '@/hooks/useResumes';
 import { useJobs } from '@/hooks/useJobs';
 import { downloadResumeFile } from '@/services/resumeService';
+import { apiErrorMessage } from '@/lib/apiError';
 import { useAppStore } from '@/store/useAppStore';
 import type { Resume, ResumeScoreResponse } from '@/types/resume';
 
@@ -26,6 +27,9 @@ export default function ResumesPage() {
   const remove = useDeleteResume();
   const extractProfile = useExtractProfile();
 
+  // `generate.isPending` only updates on the next render, so several clicks inside one tick all
+  // saw "not pending" and each sent a request. A ref flips immediately.
+  const generating = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [targetJobId, setTargetJobId] = useState('');
   const [scoreResult, setScoreResult] = useState<ResumeScoreResponse | null>(null);
@@ -35,7 +39,13 @@ export default function ResumesPage() {
   const archivedCount = data?.archived_count ?? 0;
   const jobs = jobData?.items ?? [];
   const selected = resumes.find((r) => r.id === selectedId) ?? resumes[0] ?? null;
-  const baseResumeId = resumes.find((r) => r.type === 'base')?.id ?? resumes[0]?.id ?? null;
+  // Tailor the résumé the person has selected (or, if a tailored variant is selected, the base
+  // it came from). Only when nothing relevant is selected does it fall back to the first base —
+  // before, this always used the first base résumé whatever was on screen.
+  const baseResumeId =
+    (selected?.type === 'base' ? selected.id : selected?.base_resume_id) ??
+    resumes.find((r) => r.type === 'base')?.id ??
+    null;
 
   const onUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -107,12 +117,22 @@ export default function ResumesPage() {
 
   const onGenerate = () => {
     if (!baseResumeId || !targetJobId) { notify('Pick a target job (in the panel) first', 'warning'); return; }
-    if (!canGenerate) return; // aria-disabled doesn't block clicks — also guards a double submit while pending
+    if (!canGenerate || generating.current) return; // aria-disabled doesn't block clicks
+    generating.current = true;
     generate.mutate(
       { base_resume_id: baseResumeId, job_id: targetJobId },
       {
-        onSuccess: () => notify('Tailored résumé generated', 'success'),
-        onError: () => notify('Could not generate the résumé', 'error'),
+        onSettled: () => { generating.current = false; },
+        onSuccess: (r) => {
+          setSelectedId(r.id);
+          setScoreResult(null);
+          if (r.tailoring_audit?.generation_status === 'unchanged') {
+            notify('No supportable changes — this PDF already covers the posting as far as your CV allows', 'info');
+          } else {
+            notify('Tailored résumé generated — PDF edited in place', 'success');
+          }
+        },
+        onError: (err) => notify(apiErrorMessage(err, 'Could not generate the résumé'), 'error'),
       },
     );
   };

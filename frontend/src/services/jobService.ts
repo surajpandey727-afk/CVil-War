@@ -1,4 +1,5 @@
 import api from './api';
+import type { JobScoreResponse } from '@/types/ats';
 import type { CompanyProfile } from '@/types/company';
 import type { FitAnalysis } from '@/types/fit';
 import type { Job, JobSearchRequest, JobListResponse, JobAnalysisResponse } from '@/types/job';
@@ -91,5 +92,18 @@ export async function enrichJob(jobId: string, force = false): Promise<Job> {
 /** Save, hide, or otherwise change a job's lifecycle status. */
 export async function updateJobStatus(jobId: string, status: string): Promise<Job> {
   const { data } = await api.patch<Job>(`/jobs/${jobId}`, { status });
+  return data;
+}
+
+/**
+ * Fill in the match score for up to 100 jobs at once, using the best-matching of your résumés.
+ * One request, no per-row rate limit; jobs with no description come back as unscorable.
+ */
+export async function scoreJobs(jobIds: string[], opts: { resumeId?: string; force?: boolean } = {}): Promise<JobScoreResponse> {
+  const { data } = await api.post<JobScoreResponse>('/jobs/score', {
+    job_ids: jobIds,
+    resume_id: opts.resumeId ?? null,
+    force: opts.force ?? false,
+  });
   return data;
 }

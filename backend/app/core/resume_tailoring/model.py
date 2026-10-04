@@ -48,6 +48,9 @@ class LineKind(StrEnum):
     #: An employer line, a role-and-dates line, a project sub-heading, a skills-table row, a
     #: heading. Immutable: the editor has no operation that can reach these.
     FIXED = "fixed"
+    #: One "Label: item, item, item" row of a skills table. Editable under a stricter rule than a
+    #: bullet: the label and every existing item stay in order, and items may only be appended.
+    SKILL = "skill"
 
 
 #: Bullet glyphs and list markers that real CVs use, in the order text extraction leaves them.
@@ -116,7 +119,7 @@ class Line:
 
     @property
     def editable(self) -> bool:
-        return self.kind in (LineKind.BULLET, LineKind.PROSE)
+        return self.kind in (LineKind.BULLET, LineKind.PROSE, LineKind.SKILL)
 
     def rendered(self) -> str:
         """The line as it should appear in the output document."""
@@ -162,6 +165,12 @@ class ResumeDocument:
     #: (left, right, top, bottom) in points, measured from the source's own text block.
     #: Word's one-inch default would reflow a CV that was fitted to three pages onto four.
     page_margins: tuple[float, float, float, float] | None = None
+    #: line id -> where that line sits on the source PDF page (``pdf_layout.PParagraph``).
+    #: Present only for documents read from a PDF; it is what lets an edit be written back
+    #: into the original file instead of rebuilding the document from text.
+    layout: dict[str, object] = field(default_factory=dict)
+    #: line id -> roughly how many characters fit where the line sits (PDF sources only).
+    capacity: dict[str, int] = field(default_factory=dict)
 
     # -- read-only views ---------------------------------------------------------------
 
@@ -211,6 +220,8 @@ class ResumeDocument:
         allowed to touch has moved, and the result is rejected rather than shipped.
         """
         fixed = [ln.text for ln in self.all_lines() if not ln.editable]
+        # A skills row's label is as fixed as any heading; only its list of items may grow.
+        fixed.extend(ln.text.split(":", 1)[0] for ln in self.all_lines() if ln.kind is LineKind.SKILL)
         fixed.extend(s.heading for s in self.sections)
         return hashlib.sha256("\u0000".join(fixed).encode()).hexdigest()
 
@@ -235,6 +246,8 @@ class ResumeDocument:
             ],
             source_format=self.source_format,
             page_margins=self.page_margins,
+            layout=self.layout,
+            capacity=self.capacity,
         )
 
 

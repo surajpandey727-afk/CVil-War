@@ -1,5 +1,8 @@
+import { useCallback, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as appService from '@/services/applicationService';
+import { apiErrorMessage } from '@/lib/apiError';
+import type { ApplicationScoreItem, TailorRowState } from '@/types/ats';
 import type {
   ApplicationBatchCreate,
   ApplicationCreate,
@@ -128,4 +131,98 @@ export function useApplyReadiness(jobId: string | undefined, resumeId?: string) 
     queryFn: () => appService.getApplyReadiness(jobId!, resumeId),
     enabled: !!jobId,
   });
+}
+
+/**
+ * ATS match for a set of applications, in one request.
+ *
+ * Rows with a résumé attached come back scored with it; the rest are scored with the best base
+ * résumé for their job (the item says which). Rows that cannot be scored carry the reason, so the
+ * list can say "no job description" instead of leaving a blank.
+ */
+export function useApplicationScores(applicationIds: string[], enabled = true) {
+  const key = [...applicationIds].sort().join(',');
+  const query = useQuery({
+    queryKey: [...APPS_KEY, 'scores', key],
+    queryFn: () => appService.scoreApplications(applicationIds),
+    enabled: enabled && applicationIds.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const byId = new Map<string, ApplicationScoreItem>((query.data?.items ?? []).map((i) => [i.application_id, i]));
+  return { ...query, byId };
+}
+
+/** How many tailoring requests run at once. The server serialises per (résumé, job), and a model gateway has limits. */
+const TAILOR_CONCURRENCY = 3;
+
+/**
+ * Tailor a résumé for each of several applications, tracking every row.
+ *
+ * Each row calls the same endpoint as the job drawer's "Get Tailored Resume", attaches the result
+ * to that application and returns the generated file's own ATS score. Rows run a few at a time,
+ * one failure never stops the rest, and a second `start` while one is running is ignored (a
+ * double click must not spend the model twice).
+ */
+export function useBulkTailor() {
+  const queryClient = useQueryClient();
+  const [rows, setRows] = useState<Record<string, TailorRowState>>({});
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const cancelRef = useRef(false);
+
+  const start = useCallback(
+    async (ids: string[], opts: { baseResumeId?: string; regenerate?: boolean } = {}) => {
+      if (runningRef.current || ids.length === 0) return;
+      runningRef.current = true;
+      cancelRef.current = false;
+      setRunning(true);
+      setRows(Object.fromEntries(ids.map((id) => [id, { phase: 'queued' } as TailorRowState])));
+      const queue = [...ids];
+      const set = (id: string, state: TailorRowState) => setRows((prev) => ({ ...prev, [id]: state }));
+
+      const worker = async () => {
+        while (queue.length && !cancelRef.current) {
+          const id = queue.shift()!;
+          set(id, { phase: 'running' });
+          try {
+            const r = await appService.tailorApplication(id, {
+              base_resume_id: opts.baseResumeId || null,
+              regenerate: opts.regenerate ?? false,
+            });
+            set(id, {
+              phase: 'done', before: r.ats_before, after: r.ats_after, status: r.status,
+              note: r.target_note, resumeName: r.resume.name,
+            });
+          } catch (err) {
+            set(id, { phase: 'failed', message: apiErrorMessage(err, 'Could not tailor a résumé for this role') });
+          }
+        }
+      };
+      try {
+        await Promise.all(Array.from({ length: Math.min(TAILOR_CONCURRENCY, ids.length) }, worker));
+      } finally {
+        // Anything still queued after a cancel is simply not run: say so rather than leave it spinning.
+        setRows((prev) => Object.fromEntries(Object.entries(prev).map(([id, s]) => [id, s.phase === 'queued' ? { phase: 'failed', message: 'Cancelled before it started' } as TailorRowState : s])));
+        runningRef.current = false;
+        setRunning(false);
+        void queryClient.invalidateQueries({ queryKey: APPS_KEY });
+        void queryClient.invalidateQueries({ queryKey: ['resumes'] });
+      }
+    },
+    [queryClient],
+  );
+
+  const cancel = useCallback(() => { cancelRef.current = true; }, []);
+  const clear = useCallback(() => setRows({}), []);
+  const values = Object.values(rows);
+  return {
+    rows,
+    running,
+    start,
+    cancel,
+    clear,
+    total: values.length,
+    finished: values.filter((r) => r.phase === 'done' || r.phase === 'failed').length,
+    failed: values.filter((r) => r.phase === 'failed').length,
+  };
 }

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
@@ -55,7 +55,7 @@ class ResumeBranch(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    versions: Mapped[list["ResumeVersion"]] = relationship(
+    versions: Mapped[list[ResumeVersion]] = relationship(
         back_populates="branch", cascade="all, delete-orphan",
     )
 
@@ -103,8 +103,8 @@ class ResumeVersion(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     )
     commit_message: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
-    branch: Mapped["ResumeBranch | None"] = relationship(back_populates="versions")
-    changes: Mapped[list["ResumeChange"]] = relationship(
+    branch: Mapped[ResumeBranch | None] = relationship(back_populates="versions")
+    changes: Mapped[list[ResumeChange]] = relationship(
         back_populates="version", cascade="all, delete-orphan",
         order_by="ResumeChange.created_at",
     )
@@ -155,7 +155,7 @@ class ResumeChange(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
         nullable=False, default=ResumeChangeStatus.ACCEPTED,
     )
 
-    version: Mapped["ResumeVersion | None"] = relationship(back_populates="changes")
+    version: Mapped[ResumeVersion | None] = relationship(back_populates="changes")
 
     def __repr__(self) -> str:
         return f"<ResumeChange(id={self.id}, type='{self.change_type}')>"

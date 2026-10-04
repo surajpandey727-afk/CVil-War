@@ -29,10 +29,10 @@ import re
 from app.core.resume_tailoring.model import (
     BULLET_PREFIX,
     Line,
-    Style,
     LineKind,
     ResumeDocument,
     Section,
+    Style,
     make_line,
 )
 
@@ -128,7 +128,7 @@ def parse_resume_text(text: str, *, source_format: str = "") -> ResumeDocument:
 
 
 def parse_styled_lines(
-    pairs: list[tuple[str, Style]], *, source_format: str = ""
+    pairs: list[tuple[str, Style]], *, source_format: str = "", joined: bool = False
 ) -> ResumeDocument:
     """Parse CV lines that carry their own typography.
 
@@ -139,6 +139,10 @@ def parse_styled_lines(
     Style travels with the line from here on. Deciding typography at render time instead is
     what made every tailored CV come back in the renderer's own font rather than the
     candidate's — a document that no longer looked like theirs however accurate the words.
+
+    ``joined`` says each pair is already a whole paragraph. The PDF layout reader groups
+    wrapped lines itself, from their coordinates, so the text-based re-joining below is skipped
+    — it would only be guessing again at what the page already says.
     """
     non_blank = [(raw, st) for raw, st in pairs if raw.strip()]
     if not non_blank:
@@ -178,10 +182,12 @@ def parse_styled_lines(
     if current.lines or current.heading:
         doc.sections.append(current)
 
-    _join_wrapped_lines(doc)
+    if not joined:
+        _join_wrapped_lines(doc)
     _protect_skill_tables(doc)
     _classify_prose(doc)
-    _join_prose(doc)
+    if not joined:
+        _join_prose(doc)
     return doc
 
 

@@ -26,12 +26,18 @@ from app.schemas.application import (
     ApplicationStatusUpdate,
     CoverLetterResponse,
 )
+from app.schemas.ats import (
+    ApplicationScoreRequest,
+    ApplicationScoreResponse,
+    ApplicationTailorRequest,
+    ApplicationTailorResponse,
+)
 from app.schemas.communications import LogRecruiterContactRequest, LogRecruiterContactResponse
 from app.schemas.evidence import ApplicationEvidence
 from app.services import apollo as apollo_service
 from app.services import application as app_service
+from app.services import application_tailoring, ats_evaluation, dispatch
 from app.services import cover_letter as cover_letter_service
-from app.services import dispatch
 from app.services.evidence import build_evidence
 from app.services.readiness import apply_readiness
 from app.services.timeline import record_event
@@ -103,6 +109,49 @@ async def bulk_approve(
     """Approve a set of the current user's staged applications and enqueue them together."""
     count = await dispatch.bulk_approve(db, pool, data.application_ids)
     return {"approved": count}
+
+
+@router.post(
+    "/score",
+    response_model=ApplicationScoreResponse,
+    summary="Score applications against their job (one request, any number of rows)",
+)
+async def score_applications(
+    data: ApplicationScoreRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ApplicationScoreResponse:
+    """ATS match for every row, with the résumé that was used.
+
+    An application with a résumé attached is scored with it and the score is saved. One without
+    is scored with the base résumé that fits its job best (``scored_with.source == "best"``) and
+    nothing is saved, since no résumé is attached to submit. Postings with no description are
+    reported as such rather than given a made-up number.
+    """
+    items = await ats_evaluation.score_applications(db, user.id, data.application_ids, resume_id=data.resume_id)
+    scored = sum(1 for i in items if i.scored)
+    return ApplicationScoreResponse(items=items, scored=scored, skipped=len(items) - scored)
+
+
+@router.post(
+    "/{app_id}/tailor",
+    response_model=ApplicationTailorResponse,
+    dependencies=[_COSTLY],
+    summary="Tailor a résumé for this application and attach it",
+)
+async def tailor_application(
+    app_id: str,
+    user: CurrentUser,
+    data: ApplicationTailorRequest = ApplicationTailorRequest(),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ApplicationTailorResponse:
+    """The same in-place PDF tailoring as the job drawer, attached to this application."""
+    try:
+        return await application_tailoring.tailor_for_application(db, user.id, app_id, data)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Application not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{app_id}", response_model=ApplicationResponse, summary="Get a single application")

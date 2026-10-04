@@ -12,7 +12,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Structured résumé content — what a ResumeVersion.content JSON blob contains.
 # ---------------------------------------------------------------------------

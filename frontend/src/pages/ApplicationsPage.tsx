@@ -1,19 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+import AtsChip from '@/components/applications/AtsChip';
+import BulkTailorBar from '@/components/applications/BulkTailorBar';
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import {
-  useApplications, useApproveApplication, useBulkApprove, useUpdateApplicationStatus,
+  useApplicationScores, useApplications, useApproveApplication, useBulkApprove, useBulkTailor,
 } from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
-import { useResumeJobMatch, useResumes } from '@/hooks/useResumes';
+import { useResumes } from '@/hooks/useResumes';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
 import { statusMeta, atsColor, atsPercent, isApprovable, relativeTime } from '@/lib/status';
 import { buildAppTimeline, type TimelineState } from '@/lib/timeline';
 import type { Application } from '@/types/application';
+import type { ApplicationScoreItem, TailorRowState } from '@/types/ats';
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-1)',
@@ -88,11 +91,10 @@ export default function ApplicationsPage() {
   const { data, isLoading, isError } = useApplications(1, 100);
   const approve = useApproveApplication();
   const bulkApprove = useBulkApprove();
-  const updateStatus = useUpdateApplicationStatus();
   const { data: resumeData } = useResumes();
   const resumes = resumeData?.items ?? [];
-  const [bulkResumeId, setBulkResumeId] = useState('');
-  const [autoApplying, setAutoApplying] = useState(false);
+  const [baseResumeId, setBaseResumeId] = useState('');
+  const bulkTailor = useBulkTailor();
 
   const apps = useMemo(() => data?.items ?? [], [data]);
   const active = useMemo(() => apps.filter((a) => ACTIVE_STATUSES.has(a.status)), [apps]);
@@ -109,6 +111,10 @@ export default function ApplicationsPage() {
     review: needsAction.length,
   };
 
+  // One request scores every row waiting for review, so none of them is left blank.
+  const needsIds = useMemo(() => needsAction.map((a) => a.id), [needsAction]);
+  const scores = useApplicationScores(needsIds, tab === 'needs_action');
+
   const approveAll = () => {
     const ids = needsAction.map((a) => a.id);
     if (!ids.length) return;
@@ -118,34 +124,31 @@ export default function ApplicationsPage() {
     });
   };
 
-  // One résumé, attached to every needs-action app that doesn't already have one, then the
-  // whole batch approved together — the point is skipping the "open each app, pick a résumé,
-  // approve" loop for a run where every role gets the same CV.
-  const autoApplyAll = async () => {
-    if (!bulkResumeId || !needsAction.length) return;
-    setAutoApplying(true);
-    const toAttach = needsAction.filter((a) => !a.resume_id);
-    try {
-      const results = await Promise.allSettled(
-        toAttach.map((a) =>
-          updateStatus.mutateAsync({ appId: a.id, update: { status: a.status, resume_id: bulkResumeId } }),
-        ),
-      );
-      const attachFailures = results.filter((r) => r.status === 'rejected').length;
-      const approveResult = await bulkApprove.mutateAsync(needsAction.map((a) => a.id));
-      if (attachFailures > 0) {
-        notify(
-          `${approveResult.approved} approved · ${attachFailures} résumé attachment(s) failed`,
-          'warning',
-        );
-      } else {
-        notify(`Résumé attached and ${approveResult.approved} approved · queued for the agent`, 'success');
-      }
-    } catch {
-      notify('Auto-apply could not complete — some applications may be unchanged', 'error');
-    } finally {
-      setAutoApplying(false);
+  const tailorSelected = (regenerate = false) => {
+    void bulkTailor.start([...selected], { baseResumeId: baseResumeId || undefined, regenerate });
+  };
+
+  // Approve what is selected, but never release a role that has no résumé to submit.
+  const approveSelectedWithResume = () => {
+    const chosen = needsAction.filter((a) => selected.has(a.id));
+    const ready = chosen.filter((a) => a.resume_id).map((a) => a.id);
+    const missing = chosen.length - ready.length;
+    if (!ready.length) {
+      notify('None of the selected roles has a résumé yet. Tailor résumés for them first.', 'warning');
+      return;
     }
+    bulkApprove.mutate(ready, {
+      onSuccess: (r) => {
+        notify(
+          missing > 0
+            ? `${r.approved} approved · ${missing} left for review (no résumé attached yet)`
+            : `${r.approved} approved · queued for the agent`,
+          missing > 0 ? 'warning' : 'success',
+        );
+        setSelected(new Set(chosen.filter((a) => !a.resume_id).map((a) => a.id)));
+      },
+      onError: () => notify('Could not approve the selected applications', 'error'),
+    });
   };
 
   const approveSelected = () => {
@@ -242,32 +245,25 @@ export default function ApplicationsPage() {
       {tab === 'needs_action' && (
         <>
           {needsAction.length > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-              <select
-                aria-label="Résumé for auto-apply"
-                value={bulkResumeId}
-                onChange={(e) => setBulkResumeId(e.target.value)}
-                style={{ height: 34, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', minWidth: 180 }}
-              >
-                <option value="">Auto-apply with résumé…</option>
-                {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-              <button
-                onClick={() => void autoApplyAll()}
-                disabled={!bulkResumeId || autoApplying}
-                title="Attach this résumé to every needs-action application that doesn't have one, then approve all"
-                style={{ height: 34, padding: '0 14px', borderRadius: 'var(--r-md)', background: bulkResumeId ? 'var(--surface-2)' : 'var(--surface-3)', border: '1px solid var(--border-2)', color: bulkResumeId ? 'var(--text)' : 'var(--text-4)', font: '700 12.5px/1 var(--font)', cursor: bulkResumeId ? 'pointer' : 'default' }}
-              >
-                {autoApplying ? 'Applying…' : `Auto-apply all ${needsAction.length}`}
-              </button>
-              <button
-                title="Approve every application waiting for review and release them to the agent."
-                onClick={approveAll} disabled={bulkApprove.isPending}
-                style={{ height: 34, padding: '0 14px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12.5px/1 var(--font)', cursor: 'pointer' }}
-              >
-                Approve all {needsAction.length}
-              </button>
-            </div>
+            <BulkTailorBar
+              selectedCount={needsAction.filter((a) => selected.has(a.id)).length}
+              totalCount={needsAction.length}
+              resumes={resumes}
+              baseResumeId={baseResumeId}
+              onBaseResumeChange={setBaseResumeId}
+              onTailor={() => tailorSelected(false)}
+              onRegenerate={() => tailorSelected(true)}
+              onCancel={bulkTailor.cancel}
+              onApprove={approveSelectedWithResume}
+              onApproveAll={approveAll}
+              onSelectAll={() => setSelected(new Set(needsIds))}
+              onClear={() => setSelected(new Set())}
+              running={bulkTailor.running}
+              approving={bulkApprove.isPending}
+              rows={bulkTailor.rows}
+              finished={bulkTailor.finished}
+              failed={bulkTailor.failed}
+            />
           )}
           <ActiveOrNeedsActionView
             items={needsAction} isLoading={isLoading} isError={isError} navigate={navigate}
@@ -279,7 +275,9 @@ export default function ApplicationsPage() {
             })}
             approving={approve.isPending}
             showTimeline={false}
-            matchResumeId={bulkResumeId || undefined}
+            selection={{
+              selected, onToggle: toggle, scores: scores.byId, scoresLoading: scores.isLoading, tailor: bulkTailor.rows,
+            }}
           />
         </>
       )}
@@ -360,9 +358,17 @@ export default function ApplicationsPage() {
   );
 }
 
+interface RowSelection {
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  scores: Map<string, ApplicationScoreItem>;
+  scoresLoading: boolean;
+  tailor: Record<string, TailorRowState>;
+}
+
 function ActiveOrNeedsActionView({
   items, isLoading, isError, navigate, emptyTitle, emptyBody, approve, approving,
-  showTimeline, matchResumeId,
+  showTimeline, selection,
 }: {
   items: Application[];
   isLoading: boolean;
@@ -376,9 +382,8 @@ function ActiveOrNeedsActionView({
    *  Needs action is every row at the same stage by construction, so the same 7-chip strip
    *  repeated 30 times carries zero differentiating information; dropped there. */
   showTimeline: boolean;
-  /** The bulk-apply résumé picker's current choice, if any — drives a live per-row match
-   *  preview so picking a résumé once shows how it scores against every listed job. */
-  matchResumeId?: string;
+  /** Needs action only: row selection, the live ATS score per row and bulk-tailoring progress. */
+  selection?: RowSelection;
 }) {
   if (isError) return <div style={card}><Notice text="Couldn't load applications. Retry in a moment." /></div>;
 
@@ -419,38 +424,40 @@ function ActiveOrNeedsActionView({
           onApprove={approve ? () => approve(a) : undefined}
           approving={approving}
           showTimeline={showTimeline}
-          matchResumeId={matchResumeId}
+          selection={selection}
         />
       ))}
     </div>
   );
 }
 
-function RunRow({ app, onOpen, onApprove, approving, showTimeline, matchResumeId }: {
+function RunRow({ app, onOpen, onApprove, approving, showTimeline, selection }: {
   app: Application; onOpen: () => void; onApprove?: () => void; approving?: boolean;
-  showTimeline: boolean; matchResumeId?: string;
+  showTimeline: boolean; selection?: RowSelection;
 }) {
   const meta = statusMeta(app.status);
   const steps = showTimeline ? buildAppTimeline(app.apply_mode, app.status) : [];
-  const pct = atsPercent(app.ats_score);
   const setFocusedJob = useFocusStore((s) => s.setFocusedJob);
   const borderColor =
     app.status === 'failed' ? 'var(--failed-soft)'
       : app.status === 'pending_review' ? 'var(--review-line)'
         : 'var(--border)';
 
-  // A live preview of a résumé that isn't necessarily the one attached — how would the
-  // bulk-picker's choice score against this job? Skipped when it's the same résumé already
-  // attached: app.ats_score already answers that, no need for a second, redundant fetch.
-  const previewingDifferentResume = !!matchResumeId && matchResumeId !== app.resume_id;
-  const { data: preview, isLoading: previewLoading } = useResumeJobMatch(
-    previewingDifferentResume ? matchResumeId : undefined,
-    previewingDifferentResume ? app.job_id : undefined,
-  );
+  const tailorState = selection?.tailor[app.id];
+  const scoreItem = selection?.scores.get(app.id);
 
   return (
     <div style={{ ...card, padding: showTimeline ? '14px 16px' : '11px 14px', borderColor }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {selection && (
+          <input
+            type="checkbox"
+            aria-label={`Select ${app.job_title ?? 'application'}`}
+            checked={selection.selected.has(app.id)}
+            onChange={() => selection.onToggle(app.id)}
+            style={{ width: 16, height: 16, accentColor: 'var(--accent)', cursor: 'pointer', flex: '0 0 auto' }}
+          />
+        )}
         <CompanyLogo name={app.company ?? '—'} size={34} radius={9} />
         <button
           onClick={onOpen}
@@ -462,19 +469,10 @@ function RunRow({ app, onOpen, onApprove, approving, showTimeline, matchResumeId
           </div>
         </button>
 
-        {/* One score slot, not two: a live preview (bulk-picker résumé, not yet attached) wins
-            over the persisted ats_score when both could apply — showing both would just be two
-            numbers answering slightly different questions in the same 80px. */}
-        {previewingDifferentResume ? (
-          previewLoading ? (
-            <span style={{ font: '600 11px/1 var(--font)', color: 'var(--text-4)' }}>scoring…</span>
-          ) : preview ? (
-            <span title={`Preview: how ${matchResumeId ? 'this résumé' : ''} would score`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, font: '700 12px/1 var(--mono)', color: atsColor(atsPercent(preview.overall_score)) }}>
-              <Icon name="wand" size={11} /> {atsPercent(preview.overall_score)}%
-            </span>
-          ) : null
+        {selection ? (
+          <AtsChip item={scoreItem} saved={app.ats_score} loading={selection.scoresLoading} />
         ) : app.ats_score != null ? (
-          <span style={{ font: '700 12px/1 var(--mono)', color: atsColor(pct) }}>{pct}%</span>
+          <span style={{ font: '700 12px/1 var(--mono)', color: atsColor(atsPercent(app.ats_score)) }}>{atsPercent(app.ats_score)}%</span>
         ) : null}
 
         {app.resume_id ? (
@@ -553,6 +551,8 @@ function RunRow({ app, onOpen, onApprove, approving, showTimeline, matchResumeId
         </div>
       )}
 
+      {tailorState && <TailorStatus state={tailorState} />}
+
       {/* Needs action's own reason for waiting — the one piece of per-row information that
           matters here, so it stays even without the full timeline strip above it. */}
       {!showTimeline && app.notes && (
@@ -560,6 +560,35 @@ function RunRow({ app, onOpen, onApprove, approving, showTimeline, matchResumeId
           {app.notes}
         </div>
       )}
+    </div>
+  );
+}
+
+function TailorStatus({ state }: { state: TailorRowState }) {
+  const base: React.CSSProperties = { marginTop: 9, font: '600 11.5px/1.45 var(--font)', display: 'flex', alignItems: 'center', gap: 7 };
+  if (state.phase === 'queued') return <div style={{ ...base, color: 'var(--text-4)' }}>Waiting to tailor…</div>;
+  if (state.phase === 'running') {
+    return (
+      <div role="status" style={{ ...base, color: 'var(--accent)' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'aaPulse 1.2s var(--ease-io) infinite' }} />
+        Tailoring a résumé for this role…
+      </div>
+    );
+  }
+  if (state.phase === 'failed') {
+    return <div role="alert" style={{ ...base, color: 'var(--failed)' }}><Icon name="alert" size={12} /> {state.message}</div>;
+  }
+  const gain = state.before != null && state.after != null ? atsPercent(state.after) - atsPercent(state.before) : null;
+  return (
+    <div style={{ ...base, color: 'var(--text-2)', flexWrap: 'wrap' }}>
+      <span style={{ color: 'var(--offer)' }}><Icon name="check" size={12} /></span>
+      {state.status === 'unchanged'
+        ? 'Kept your résumé as is — nothing more it supports for this role.'
+        : `Tailored · ATS ${state.before != null ? atsPercent(state.before) : '—'}% → ${state.after != null ? atsPercent(state.after) : '—'}%`}
+      {gain != null && gain !== 0 && (
+        <span style={{ color: gain > 0 ? 'var(--offer)' : 'var(--rejected)', font: '700 11.5px/1 var(--mono)' }}>{gain > 0 ? '+' : ''}{gain}</span>
+      )}
+      {state.note && <span style={{ color: 'var(--text-3)', fontWeight: 500 }} title={state.note}>· {state.note}</span>}
     </div>
   );
 }

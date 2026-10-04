@@ -1,6 +1,7 @@
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as jobService from '@/services/jobService';
-import type { JobSearchRequest } from '@/types/job';
+import type { Job, JobSearchRequest } from '@/types/job';
 
 const JOBS_KEY = ['jobs'] as const;
 
@@ -128,4 +129,43 @@ export function useUpdateJobStatus() {
       void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
     },
   });
+}
+
+/**
+ * Fill in the match score of every listed job that does not have one yet.
+ *
+ * `match_score` was never written when jobs were stored, so every row showed "—". This asks the
+ * server to score the unscored ones (one batch request, best-matching résumé for each) and then
+ * refreshes the list. Each id is attempted once per session: a job with no description comes back
+ * unscorable and is not asked about again on every render.
+ */
+export function useAutoScoreJobs(items: Job[] | undefined) {
+  const queryClient = useQueryClient();
+  const attempted = useRef<Set<string>>(new Set());
+  const mounted = useRef(true);
+  const [scoring, setScoring] = useState(false);
+  const [unscorable, setUnscorable] = useState(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const todo = (items ?? []).filter((j) => j.match_score == null && !attempted.current.has(j.id)).slice(0, 100);
+    if (todo.length === 0) return;
+    todo.forEach((j) => attempted.current.add(j.id));
+    setScoring(true);
+    jobService
+      .scoreJobs(todo.map((j) => j.id))
+      .then((r) => {
+        if (mounted.current) setUnscorable((n) => n + r.skipped);
+        // Refresh even if the list changed while the request ran: the scores are saved server-side.
+        if (r.scored > 0) void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
+      })
+      .catch(() => undefined) // scoring is an enhancement; the list works without it
+      .finally(() => { if (mounted.current) setScoring(false); });
+  }, [items, queryClient]);
+
+  return { scoring, unscorable };
 }

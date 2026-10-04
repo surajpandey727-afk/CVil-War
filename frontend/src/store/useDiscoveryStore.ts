@@ -32,7 +32,9 @@ export interface DiscoveryFilters {
 }
 
 export const DEFAULT_FILTERS: DiscoveryFilters = {
-  minAtsScore: 70,
+  // No floor by default. Scores are honest evidence-based matches (a strong fit is often 55–75),
+  // and a 70 floor now that every job has a score would hide most of the market.
+  minAtsScore: 0,
   salaryBrackets: [],
   salaryCustomMinK: null,
   salaryCustomMaxK: null,
@@ -140,7 +142,7 @@ interface DiscoveryState {
  * with no way to tell from the screen.
  *
  * v3 replaces the single `minSalaryK` slider with brackets plus a custom window, and adds the
- * sponsorship filter.
+ * sponsorship filter. v4 retires the old 70% default match floor.
  */
 export function migrateDiscoveryState(persisted: unknown, from: number): Record<string, unknown> {
   const state = (persisted ?? {}) as Record<string, unknown>;
@@ -156,6 +158,14 @@ export function migrateDiscoveryState(persisted: unknown, from: number): Record<
       // as a floor would have turned everyone's untouched slider into an active filter.
       salaryCustomMinK: typeof legacyMin === 'number' && legacyMin > 0 ? legacyMin : null,
     };
+  }
+  if (from < 4) {
+    // 70 was the old default, set when most jobs had no score and were never filtered. Now that
+    // every job is scored on the honest scale it would silently hide nearly all of them, so an
+    // untouched default becomes "no floor". A floor the person chose deliberately is kept.
+    const filters = { ...((state['filters'] ?? {}) as Record<string, unknown>) };
+    if (filters['minAtsScore'] === 70) filters['minAtsScore'] = 0;
+    state['filters'] = { ...DEFAULT_FILTERS, ...filters };
   }
   return state;
 }
@@ -243,7 +253,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       // reference cache — with no way to tell from the screen.
       // v3 replaces the single `minSalaryK` slider with brackets plus a custom window, and
       // adds the sponsorship filter.
-      version: 3,
+      version: 4,
       migrate: migrateDiscoveryState,
       partialize: (s) => ({
         activeTitles: s.activeTitles,

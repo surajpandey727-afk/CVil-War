@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 # trixie, where the old name has no installation candidate and `docker build` fails outright.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-    libffi-dev libcairo2 libglib2.0-0 \
+    libffi-dev libcairo2 libglib2.0-0 fonts-liberation fonts-crosextra-carlito \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

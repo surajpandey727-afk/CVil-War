@@ -1,4 +1,9 @@
 import api from './api';
+import type {
+  ApplicationScoreResponse,
+  ApplicationTailorRequest,
+  ApplicationTailorResponse,
+} from '@/types/ats';
 import type { ApplicationEvidence } from '@/types/evidence';
 import type {
   Application,
@@ -106,6 +111,35 @@ export async function generateCoverLetter(appId: string): Promise<CoverLetterRes
 export async function getApplyReadiness(jobId: string, resumeId?: string): Promise<ApplyReadiness> {
   const { data } = await api.get<ApplyReadiness>(`/applications/readiness/${jobId}`, {
     params: resumeId ? { resume_id: resumeId } : undefined,
+  });
+  return data;
+}
+
+/**
+ * ATS match for every row in one request. Rows with a résumé attached are scored with it (and the
+ * score is saved); the rest are scored with the best-matching base résumé. Omit `applicationIds`
+ * to score everything waiting for review.
+ */
+export async function scoreApplications(
+  applicationIds?: string[],
+  resumeId?: string,
+): Promise<ApplicationScoreResponse> {
+  const { data } = await api.post<ApplicationScoreResponse>('/applications/score', {
+    application_ids: applicationIds ?? null,
+    resume_id: resumeId ?? null,
+  });
+  return data;
+}
+
+/** Tailor a résumé for one application, attach it, and return the file's own ATS score. */
+export async function tailorApplication(
+  appId: string,
+  body: ApplicationTailorRequest = {},
+): Promise<ApplicationTailorResponse> {
+  // Generation reads a PDF, calls the model, edits the file and checks it — well past the
+  // client's default timeout, which would otherwise report a failure for work that completes.
+  const { data } = await api.post<ApplicationTailorResponse>(`/applications/${appId}/tailor`, body, {
+    timeout: 180_000,
   });
   return data;
 }

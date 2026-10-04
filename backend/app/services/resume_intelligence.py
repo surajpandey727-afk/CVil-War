@@ -25,7 +25,6 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import RecordNotFoundError
 from app.models.enums import ResumeChangeStatus, ResumeChangeType, ResumeVersionSource, RoleFamily
-from app.models.resume import Resume
 from app.models.resume_intelligence import ResumeBranch, ResumeChange, ResumeVersion
 from app.models.user_settings import UserSettings
 from app.schemas.resume_intelligence import (

@@ -326,13 +326,20 @@ class DocumentGenerator:
             TailoredResumeData,
             render_resume_tailor_prompt,
         )
+        from app.core.llm.prompts.standing import (
+            ATS_EVALUATION_STANDARD,
+            RESUME_GENERATION_STANDARD,
+            with_standing,
+        )
 
         prompt = render_resume_tailor_prompt(resume_data, job_description)
         try:
             result = await self._llm.complete_with_structured_output(
                 prompt=prompt,
                 output_schema=TailoredResumeData,
-                system_prompt=RESUME_TAILOR_SYSTEM_PROMPT,
+                system_prompt=with_standing(
+                    RESUME_TAILOR_SYSTEM_PROMPT, RESUME_GENERATION_STANDARD, ATS_EVALUATION_STANDARD
+                ),
                 purpose="resume_tailor",
             )
             tailored = result.model_dump()

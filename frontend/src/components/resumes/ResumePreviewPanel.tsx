@@ -1,4 +1,5 @@
 import Icon from '@/components/ui/Icon';
+import TailoringSummary from '@/components/resumes/TailoringSummary';
 import { atsColor, atsPercent } from '@/lib/status';
 import { useResumePreviewUrl } from '@/hooks/useResumes';
 import type { Resume, ResumeScoreResponse } from '@/types/resume';
@@ -87,6 +88,10 @@ export default function ResumePreviewPanel({ resume, score, scoring, jobs, targe
       )}
 
       <div style={{ font: '700 12.5px/1.3 var(--font)' }}>{resume.name}</div>
+
+      {resume.type === 'tailored' && resume.tailoring_audit && (
+        <TailoringSummary audit={resume.tailoring_audit} variant="app" />
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div role="img" aria-label={`ATS score ${overall} out of 100`} style={{ flex: '0 0 auto', position: 'relative', width: 70, height: 70 }}>

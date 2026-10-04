@@ -31,14 +31,17 @@ import SourcesPage from '@/pages/SourcesPage';
  * none of those is unusable by anyone who does not already know what it does.
  */
 
+// Relative to now: the Jobs page hides postings older than its default 30-day window, so a
+// hard-coded date made this suite start failing the day the fixture aged out.
+const RECENT = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 const JOB = {
   id: 'j1', platform: 'remotive', platform_job_id: 'rm1', title: 'Senior Product Manager',
   company: 'Northwind Labs', location: 'London, UK', url: 'https://example.invalid/j1',
   description: 'Own the roadmap.', salary_range: '£90,000 - £110,000', job_type: 'Full-time',
-  remote: true, posted_date: '2026-09-01T00:00:00Z', experience_level: 'Senior',
+  remote: true, posted_date: RECENT, experience_level: 'Senior',
   match_score: 0.9, skills_required: null, status: 'new', sponsor_confidence: 'unknown',
-  posting_data: { years_required: 5 }, enriched_at: '2026-09-01T00:00:00Z',
-  created_at: '2026-08-08T00:00:00Z', updated_at: '2026-08-08T00:00:00Z',
+  posting_data: { years_required: 5 }, enriched_at: RECENT,
+  created_at: RECENT, updated_at: RECENT,
 };
 
 
@@ -46,7 +49,7 @@ const RESUME = {
   id: 'r1', name: 'Base CV', type: 'base', template_id: 'modern', base_resume_id: null,
   job_id: null, has_pdf: true, has_docx: true, ats_score: 0.8, used_in_applications: 1,
   submitted_applications: 0, archived: false, tailoring_audit: null,
-  created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
+  created_at: RECENT, updated_at: RECENT,
 };
 
 const page = (items: object[]) => ({
@@ -222,8 +225,8 @@ describe('the job card shows what a candidate decides on', () => {
             job_type: 'Full-time', remote: true,
             posted_date: null, experience_level: 'Senior', match_score: 0.9,
             skills_required: null, status: 'new', sponsor_confidence: 'unknown',
-            posting_data: { years_required: 5 }, enriched_at: '2026-09-01T00:00:00Z',
-            created_at: '2026-08-08T00:00:00Z', updated_at: '2026-08-08T00:00:00Z',
+            posting_data: { years_required: 5 }, enriched_at: RECENT,
+            created_at: RECENT, updated_at: RECENT,
           }],
           total: 1, page: 1, page_size: 20, has_next: false,
         }),

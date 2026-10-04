@@ -138,6 +138,16 @@ University of Leeds, MSc Data Science Sept 2020 - Sept 2021
 """
 
 
+@pytest.fixture(autouse=True)
+def _no_language_model(monkeypatch):
+    """The document is under test here, not the model: never reach the developer's gateway."""
+    from unittest.mock import AsyncMock
+
+    import app.services.resume as resume_service
+
+    monkeypatch.setattr(resume_service, "build_llm_client_for_user", AsyncMock(return_value=None))
+
+
 class TestGenerateResumeAPI:
     async def test_generate_resume_returns_201(self, client, db_session):
         resume = await _create_base_resume(db_session)

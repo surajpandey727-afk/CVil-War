@@ -385,7 +385,7 @@ class TestScoring:
     def test_mandatory_and_preferred_are_scored_separately(self, spec) -> None:
         """Averaging them lets a pile of nice-to-haves hide a missing must-have."""
         assert spec.terms(Tier.MANDATORY)
-        assert "required_skills" in score(
+        assert "critical_coverage" in score(
             parse_resume_text(CV), spec, match_requirements(parse_resume_text(CV), spec)
         ).components
 

@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import JobDrawer from '@/components/jobs/JobDrawer';
-import { useJobs, useSearchJobs, useUpdateJobStatus } from '@/hooks/useJobs';
+import { useAutoScoreJobs, useJobs, useSearchJobs, useUpdateJobStatus } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
 import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useResumes } from '@/hooks/useResumes';
@@ -130,6 +130,8 @@ export default function JobSearchPage() {
     location: appliedLocation,
     query: appliedQuery,
   });
+  // Every listed role gets a match score: unscored ones are scored in one batch request and saved.
+  const { scoring: scoringJobs, unscorable: unscorableJobs } = useAutoScoreJobs(data?.items);
   const { data: resumeData } = useResumes();
   // The authoritative list of what exists, from the backend registry rather than the static
   // catalogue. Used only to decide whether a source is one the operator could have disabled.
@@ -622,6 +624,16 @@ export default function JobSearchPage() {
               title={`Filters run over the ${allJobs.length} most recent stored roles. ${stored - allJobs.length} older ones are not on this page.`}
             >
               of {stored} stored
+            </span>
+          )}
+          {scoringJobs && (
+            <span className="jc-meta" role="status" title="Matching each role against your best-fitting résumé">
+              Scoring matches…
+            </span>
+          )}
+          {!scoringJobs && unscorableJobs > 0 && (
+            <span className="jc-meta" title="These postings have no description, so there is nothing to score against">
+              {unscorableJobs} without a description
             </span>
           )}
           <div style={{ flex: '1 1 auto' }} />

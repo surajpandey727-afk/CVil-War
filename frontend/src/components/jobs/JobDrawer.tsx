@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,6 +12,10 @@ import {
   useUpdateJobStatus,
 } from '@/hooks/useJobs';
 import { useApplyReadiness } from '@/hooks/useApplications';
+import TailoringSummary from '@/components/resumes/TailoringSummary';
+import { useGenerateResume, useResumePreviewUrl } from '@/hooks/useResumes';
+import { apiErrorMessage } from '@/lib/apiError';
+import { downloadResumeFile } from '@/services/resumeService';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
 import { jcSponsorMeta, jobStatusMeta } from '@/lib/status';
@@ -20,7 +24,7 @@ import '@/styles/jobs-command.css';
 import type { Job } from '@/types/job';
 import type { Resume } from '@/types/resume';
 
-type Tab = 'fit' | 'posting' | 'company' | 'description';
+type Tab = 'fit' | 'tailored' | 'posting' | 'company' | 'description';
 
 interface JobDrawerProps {
   job: Job;
@@ -84,6 +88,23 @@ export default function JobDrawer({
   const blocked = readiness != null && !readiness.ready;
   const analyse = useAnalyseFit();
   const enrich = useEnrichJob();
+  const generate = useGenerateResume();
+  const generating = useRef(false); // flips at once; `isPending` only on the next render
+
+  // Tailoring always starts from a base CV. If a tailored variant is selected, its own base is
+  // used, so the button never tries to tailor a document that was itself generated.
+  const selectedResume = resumes.find((r) => r.id === resumeId);
+  const baseResumeId = selectedResume
+    ? selectedResume.type === 'base' ? selectedResume.id : selectedResume.base_resume_id
+    : null;
+  // The version for THIS job and base: the one just generated, or — after a refresh or when the
+  // drawer is reopened — the one already stored. Both are the same record.
+  const storedTailored = resumes.find(
+    (r) => r.type === 'tailored' && r.job_id === job.id && r.base_resume_id === baseResumeId && r.has_pdf,
+  );
+  const justGenerated = generate.data && generate.data.job_id === job.id ? generate.data : undefined;
+  const tailored = justGenerated ?? storedTailored ?? null;
+  const preview = useResumePreviewUrl(tailored?.id ?? null, Boolean(tailored?.has_pdf));
   const updateStatus = useUpdateJobStatus();
   const isSaved = job.status === 'saved';
 
@@ -108,6 +129,27 @@ export default function JobDrawer({
     analyse.mutate(
       { jobId: job.id, resumeId, refresh },
       { onError: () => notify('Could not analyse this job', 'error') },
+    );
+  };
+
+  const runTailor = (regenerate: boolean) => {
+    if (!baseResumeId) {
+      notify('Choose the PDF CV to tailor first', 'warning');
+      return;
+    }
+    if (generate.isPending || generating.current) return;
+    generating.current = true;
+    setTab('tailored');
+    generate.mutate(
+      { base_resume_id: baseResumeId, job_id: job.id, regenerate },
+      {
+        onSettled: () => { generating.current = false; },
+        onSuccess: (r) =>
+          r.tailoring_audit?.generation_status === 'unchanged'
+            ? notify('No supportable changes — your PDF already covers this posting as far as your CV allows', 'info')
+            : notify('Tailored résumé ready — PDF edited in place', 'success'),
+        onError: (err) => notify(apiErrorMessage(err, 'Could not generate the tailored résumé'), 'error'),
+      },
     );
   };
 
@@ -252,11 +294,20 @@ export default function JobDrawer({
           >
             {analyse.isPending ? 'Analysing…' : analysis ? 'Re-analyse' : 'Analyse my fit'}
           </button>
+          <button
+            onClick={() => (tailored ? setTab('tailored') : runTailor(false))}
+            disabled={generate.isPending || !baseResumeId}
+            title="Edit this PDF in place for this job — only the relevant wording changes, the layout is untouched"
+            className="jc-btn jc-btn-secondary"
+            style={{ flex: '0 0 auto', height: 34, padding: '0 14px' }}
+          >
+            <Icon name="wand" size={13} /> {generate.isPending ? 'Tailoring…' : tailored ? 'View tailored résumé' : 'Get tailored résumé'}
+          </button>
         </div>
 
         {/* ---- Section switcher: Fit / Posting / Company / Description ------------------- */}
         <div style={{ flex: '0 0 auto', display: 'flex', gap: 5, padding: '14px 24px 0' }}>
-          {([['fit', 'Fit'], ['posting', 'Posting'], ['company', 'Company'], ['description', 'Description']] as const).map(
+          {([['fit', 'Fit'], ['tailored', tailored ? 'Tailored •' : 'Tailored'], ['posting', 'Posting'], ['company', 'Company'], ['description', 'Description']] as const).map(
             ([key, label]) => (
               <button
                 key={key}
@@ -282,6 +333,60 @@ export default function JobDrawer({
                 {resumes.length === 0
                   ? 'Upload a CV first, then assess it against this job.'
                   : 'Choose a CV above and analyse your fit against this job.'}
+              </Centered>
+            )
+          )}
+
+          {tab === 'tailored' && (
+            generate.isPending ? (
+              <Centered>
+                Tailoring your PDF… reading the posting, editing only the lines your CV can back up,
+                then re-checking the file. This usually takes 10–60 seconds.
+              </Centered>
+            ) : generate.isError && !justGenerated ? (
+              <Centered>
+                <div style={{ color: 'var(--jc-text-2)', fontWeight: 700, marginBottom: 6 }}>Tailoring did not complete</div>
+                <div style={{ marginBottom: 12 }}>{apiErrorMessage(generate.error, 'Something went wrong generating the PDF.')}</div>
+                <button onClick={() => runTailor(false)} disabled={!baseResumeId} className="jc-btn jc-btn-primary" style={{ height: 34, padding: '0 14px' }}>
+                  Try again
+                </button>
+              </Centered>
+            ) : tailored ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="jc-body" style={{ flex: '1 1 160px', minWidth: 0, fontWeight: 700 }}>{tailored.name}</div>
+                  <button
+                    onClick={() => downloadResumeFile(tailored.id, 'pdf', tailored.name).catch(() => notify('Could not download the PDF', 'error'))}
+                    className="jc-btn jc-btn-primary" style={{ height: 32, padding: '0 12px' }}
+                  >
+                    <Icon name="download" size={13} /> Download PDF
+                  </button>
+                  <button onClick={() => runTailor(true)} disabled={generate.isPending} className="jc-btn jc-btn-secondary" style={{ height: 32, padding: '0 12px' }}>
+                    <Icon name="refresh" size={13} /> Regenerate
+                  </button>
+                  <button onClick={() => navigate('/resumes')} className="jc-btn jc-btn-secondary" style={{ height: 32, padding: '0 12px' }}>
+                    Open in Résumés
+                  </button>
+                </div>
+                <div style={{ height: 360, borderRadius: 10, background: 'var(--jc-surface-2)', border: '1px solid var(--jc-border)', overflow: 'hidden', position: 'relative' }}>
+                  {preview.url && (
+                    <iframe
+                      key={tailored.id}
+                      src={`${preview.url}#toolbar=0&navpanes=0`}
+                      title={`Preview of ${tailored.name}`}
+                      style={{ width: '100%', height: '100%', border: 0, background: '#fff', display: 'block' }}
+                    />
+                  )}
+                  {preview.loading && <Centered>Loading preview…</Centered>}
+                  {preview.error && <Centered>Couldn&apos;t load the preview — the file is still downloadable.</Centered>}
+                </div>
+                {tailored.tailoring_audit && <TailoringSummary audit={tailored.tailoring_audit} variant="jc" />}
+              </div>
+            ) : (
+              <Centered>
+                {baseResumeId
+                  ? 'Click "Get tailored résumé" to edit this PDF for this job. Only wording your CV can back up changes; the layout stays exactly as it is.'
+                  : 'Choose a PDF CV above, then tailor it to this job.'}
               </Centered>
             )
           )}

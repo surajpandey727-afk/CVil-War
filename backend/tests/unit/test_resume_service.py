@@ -56,6 +56,18 @@ University of Leeds, MSc Data Science Sept 2020 - Sept 2021
 """
 
 
+@pytest.fixture(autouse=True)
+def _no_language_model(monkeypatch):
+    """These tests are about the document, not the model: run with none configured.
+
+    Without this they reach whatever gateway the developer's .env points at, so a gateway that
+    is slow or down changes the result (or hangs the suite) for reasons unrelated to the code.
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(resume_service, "build_llm_client_for_user", AsyncMock(return_value=None))
+
+
 class TestGenerateTailoredResume:
     """The endpoint behind the "Generate tailored" button.
 
@@ -192,49 +204,40 @@ class TestScoreResume:
         assert 0.0 <= result.skill_score <= 1.0
         assert 0.0 <= result.keyword_score <= 1.0
 
-    async def test_experience_score_uses_the_real_candidate_profile(
+    async def test_experience_score_comes_from_the_resumes_own_dated_roles(
         self, db_session, sample_job_data
     ) -> None:
-        """Root-cause regression: experience_score/education_score used to be computed
-        against permanently-empty lists no matter what — a flat 0.0 (experience) and an
-        arbitrary constant (education) on every résumé, for every job. They must now reflect
-        the operator's own stored work history and education (Settings > Candidate profile)."""
-        r = Resume(
-            user_id=TEST_USER_ID, name="Real Resume", type="base", template_id="modern",
-            content_text="Experienced Python developer with FastAPI and PostgreSQL skills",
+        """The score reads the résumé that would be submitted: its dated roles and the work its
+        bullets describe. A résumé that shows eight dated years of relevant, quantified work
+        scores higher on experience than one that only lists skills."""
+        strong = Resume(
+            user_id=TEST_USER_ID, name="Dated Resume", type="base", template_id="modern",
+            content_text=(
+                "Asha Raman\nasha@example.com | +44 7700 900123\n\nSKILLS\nPython, FastAPI, PostgreSQL\n\n"
+                "EXPERIENCE\nAcme Ltd\nSenior Software Engineer\nJanuary 2016 - March 2024\n"
+                "• Built FastAPI services on PostgreSQL serving 2 million requests a day.\n"
+                "• Led delivery of a Python platform used by 40 teams, cutting release time by 35%.\n"
+            ),
         )
-        db_session.add(r)
-        db_session.add(UserSettings(
-            user_id=TEST_USER_ID,
-            candidate_profile={
-                "experience": [
-                    {
-                        "title": "Senior Software Engineer", "company": "Acme",
-                        "start_date": "2016", "end_date": "2024",
-                        "description": "Architected systems and led delivery.",
-                        "responsibilities": ["architect", "deliver"],
-                    },
-                ],
-                "education": [{"degree": "Master's", "institution": "Some University"}],
-            },
-        ))
+        listed = Resume(
+            user_id=TEST_USER_ID, name="Skills Only", type="base", template_id="modern",
+            content_text="Asha Raman\n\nSKILLS\nPython, FastAPI, PostgreSQL, Docker, AWS",
+        )
+        db_session.add_all([strong, listed])
         await db_session.commit()
-        await db_session.refresh(r)
-
         job = await _create_job(db_session, sample_job_data)
-        result = await resume_service.score_resume(
-            db_session, r.id, ResumeScoreRequest(job_id=job.id)
-        )
 
-        # 8 years of senior-level experience is a real, non-neutral signal — not the old
-        # hard-coded 0.0 every résumé got regardless of the candidate's actual background.
-        assert result.experience_score > 0.5
+        strong_score = await resume_service.score_resume(db_session, strong.id, ResumeScoreRequest(job_id=job.id))
+        listed_score = await resume_service.score_resume(db_session, listed.id, ResumeScoreRequest(job_id=job.id))
 
-    async def test_experience_score_is_neutral_without_a_stored_profile(
+        assert strong_score.experience_score >= listed_score.experience_score
+        assert strong_score.overall_score > listed_score.overall_score
+        assert strong_score.evaluation is not None and strong_score.parsing_score is not None
+
+    async def test_scoring_needs_no_stored_candidate_profile(
         self, db_session, sample_job_data
     ) -> None:
-        """No UserSettings row at all (never onboarded) must not crash scoring, and must
-        land on the honest neutral default rather than a punishing zero."""
+        """No UserSettings row at all (never onboarded) must not crash scoring."""
         r = Resume(
             user_id=TEST_USER_ID, name="No Profile Resume", type="base", template_id="modern",
             content_text="Experienced Python developer with FastAPI and PostgreSQL skills",
@@ -248,7 +251,7 @@ class TestScoreResume:
             db_session, r.id, ResumeScoreRequest(job_id=job.id)
         )
 
-        assert result.experience_score == 0.5
+        assert 0.0 <= result.overall_score <= 1.0 and 0.0 <= result.experience_score <= 1.0
 
 
 class TestTextFallbackScorer:

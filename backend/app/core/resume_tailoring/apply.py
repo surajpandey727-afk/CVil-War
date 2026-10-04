@@ -88,6 +88,11 @@ class ChangeRecord:
     level: str
     keywords_added: list[str] = field(default_factory=list)
     change_type: str = "modified"
+    #: Where the supporting facts came from: "Current résumé", or the labels of the trusted
+    #: sources a recovered fact was taken from.
+    evidence_sources: list[str] = field(default_factory=lambda: ["Current résumé"])
+    #: Words or figures this edit brought in that the current résumé did not contain.
+    recovered_terms: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -158,6 +163,8 @@ class TailoringAudit:
                     "level": c.level,
                     "keywords_added": c.keywords_added,
                     "change_type": c.change_type,
+                    "evidence_sources": c.evidence_sources,
+                    "recovered_terms": c.recovered_terms,
                 }
                 for c in self.changes
             ],
@@ -176,8 +183,13 @@ def build_audit(
     reordered: list[str],
     document_failures: list[str],
     job_title: str = "",
+    recovery: dict[str, tuple[list[str], list[str]]] | None = None,
 ) -> TailoringAudit:
-    """Assemble the change log from the before and after documents."""
+    """Assemble the change log from the before and after documents.
+
+    ``recovery`` maps a line id to (recovered terms, source labels) for edits that surfaced a
+    fact from trusted evidence rather than from the current résumé.
+    """
     before_lines = {ln.id: ln.text for ln in original.all_lines()}
     edits_by_id = {e.line_id: e for e in accepted}
 
@@ -201,6 +213,10 @@ def build_audit(
                 evidence=edit.evidence if edit else "",
                 level=edit.level if edit else "1_clarity",
                 keywords_added=list(edit.keywords_added) if edit else [],
+                change_type="removed" if not line.text.strip() else "modified",
+                recovered_terms=list((recovery or {}).get(line.id, ([], []))[0]),
+                evidence_sources=list((recovery or {}).get(line.id, ([], []))[1])
+                or ["Current résumé"],
             )
         )
 

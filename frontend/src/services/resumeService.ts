@@ -29,7 +29,8 @@ export async function listResumes(): Promise<ResumeListResponse> {
 
 /** Generate a job-tailored resume from a base resume. */
 export async function generateResume(request: ResumeGenerateRequest): Promise<Resume> {
-  const { data } = await api.post<Resume>('/resumes/generate', request);
+  // A real LLM pass plus rendering and validation: well past the 30s default.
+  const { data } = await api.post<Resume>('/resumes/generate', request, { timeout: LLM_CALL_TIMEOUT_MS });
   return data;
 }
 

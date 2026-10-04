@@ -25,6 +25,9 @@ class ResumeGenerateRequest(BaseModel):
     job_id: str
     template_id: str = "modern"
     output_formats: list[str] = Field(default_factory=lambda: ["pdf", "docx"])
+    #: Make a new version even though one already exists for this résumé and job. Without it a
+    #: repeat request (a double click, a retry after a refresh) returns the existing version.
+    regenerate: bool = False
 
 
 class ResumeScoreRequest(BaseModel):
@@ -45,6 +48,12 @@ class ResumeScoreResponse(BaseModel):
     keyword_score: float
     missing_skills: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    #: Present when the ATS evaluation engine produced the score: file parsing, shortlist
+    #: readiness (both 0-1) and the full explained evaluation.
+    parsing_score: float | None = None
+    shortlist_score: float | None = None
+    band: str = ""
+    evaluation: dict | None = None
 
 
 class ResumeOptimizeRequest(BaseModel):

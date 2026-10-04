@@ -12,6 +12,7 @@ from app.core.exceptions import RecordNotFoundError
 from app.core.orchestration.graph import run_post_enrichment_pipeline
 from app.core.ratelimit import rate_limit
 from app.models.job import Job
+from app.schemas.ats import JobScoreRequest, JobScoreResponse
 from app.schemas.company import CompanyProfile
 from app.schemas.fit import FitAnalysis, FitRequest
 from app.schemas.job import (
@@ -22,6 +23,7 @@ from app.schemas.job import (
     JobStatusUpdate,
 )
 from app.schemas.resume_recommendation import ResumeRecommendation
+from app.services import ats_evaluation
 from app.services import company as company_service
 from app.services import fit as fit_service
 from app.services import job_search as job_service
@@ -49,6 +51,27 @@ async def search_jobs(
 ) -> JobListResponse:
     """Launch a multi-platform job search for the current user."""
     return await job_service.search_jobs(db, request, user.id)
+
+
+@router.post(
+    "/score",
+    response_model=JobScoreResponse,
+    summary="Score jobs against your best-matching résumé and save the match",
+)
+async def score_jobs(
+    data: JobScoreRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_tenant_db),
+) -> JobScoreResponse:
+    """Fill in ``match_score`` for up to 100 jobs in one request.
+
+    Each job is scored with whichever of your base résumés matches it best (or the one you
+    name), with the ATS evaluation engine: no model call, no per-row rate limit. Jobs with no
+    description are reported as unscorable instead of getting a made-up number.
+    """
+    items = await ats_evaluation.score_jobs(db, user.id, data.job_ids, resume_id=data.resume_id, force=data.force)
+    scored = sum(1 for i in items if i.scored)
+    return JobScoreResponse(items=items, scored=scored, skipped=len(items) - scored)
 
 
 @router.get("/", response_model=JobListResponse, summary="List jobs with pagination")

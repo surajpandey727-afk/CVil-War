@@ -210,3 +210,19 @@ describe('persisted state survives a reload', () => {
     expect(JSON.parse(raw!).state.recentSearches[0].query).toBe('Persisted search');
   });
 });
+
+describe('migrateDiscoveryState: the retired 70% match floor (v4)', () => {
+  it('turns an untouched 70% default into no floor, so scored jobs are not hidden', () => {
+    const migrated = migrateDiscoveryState({ filters: { minAtsScore: 70 } }, 3) as { filters: DiscoveryFilters };
+    expect(migrated.filters.minAtsScore).toBe(0);
+  });
+
+  it('keeps a floor the person chose themselves', () => {
+    const migrated = migrateDiscoveryState({ filters: { minAtsScore: 55 } }, 3) as { filters: DiscoveryFilters };
+    expect(migrated.filters.minAtsScore).toBe(55);
+  });
+
+  it('new installs start with no floor', () => {
+    expect(DEFAULT_FILTERS.minAtsScore).toBe(0);
+  });
+});

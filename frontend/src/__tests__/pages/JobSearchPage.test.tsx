@@ -134,12 +134,35 @@ describe('JobSearchPage', () => {
     expect(screen.getByText(/no roles match these filters/i)).toBeInTheDocument();
   });
 
-  it('filters out roles below the ATS threshold', async () => {
+  it('filters out roles below the ATS threshold the person sets', async () => {
+    useDiscoveryStore.setState({ filters: { ...DEFAULT_FILTERS, minAtsScore: 70 } });
     server.use(http.get('/api/v1/jobs/', () =>
       HttpResponse.json(listOf(job(), job({ id: 'j2', title: 'Junior Analyst', match_score: 0.42 })))));
     renderJobs();
     await screen.findByRole('button', { name: 'Senior Product Manager' });
     expect(screen.queryByRole('button', { name: 'Junior Analyst' })).not.toBeInTheDocument();
+  });
+
+  it('hides nothing by default: every scored role is shown until a floor is chosen', async () => {
+    server.use(http.get('/api/v1/jobs/', () =>
+      HttpResponse.json(listOf(job(), job({ id: 'j2', title: 'Junior Analyst', match_score: 0.42 })))));
+    renderJobs();
+    await screen.findByRole('button', { name: 'Senior Product Manager' });
+    expect(await screen.findByRole('button', { name: 'Junior Analyst' })).toBeInTheDocument();
+  });
+
+  it('asks the server to score jobs that have no match score yet, then shows them', async () => {
+    let asked: string[] = [];
+    server.use(
+      http.get('/api/v1/jobs/', () => HttpResponse.json(listOf(job({ id: 'j9', title: 'Unscored Role', match_score: null })))),
+      http.post('/api/v1/jobs/score', async ({ request }) => {
+        asked = ((await request.json()) as { job_ids: string[] }).job_ids;
+        return HttpResponse.json({ items: [{ job_id: 'j9', scored: true, reason: '', match_score: 0.6, scored_with: null, top_gaps: [] }], scored: 1, skipped: 0 });
+      }),
+    );
+    renderJobs();
+    await screen.findByRole('button', { name: 'Unscored Role' });
+    await waitFor(() => expect(asked).toEqual(['j9']));
   });
 
   it('distinguishes "filtered out" from "nothing stored"', async () => {

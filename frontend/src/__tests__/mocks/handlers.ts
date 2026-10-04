@@ -110,6 +110,9 @@ export const handlers = [
     return HttpResponse.json({ ...sampleJob, id: params['jobId'], status: body.status });
   }),
 
+  // Bulk scoring: by default nothing needs scoring, so tests that do not care see no change.
+  http.post('/api/v1/jobs/score', () => HttpResponse.json({ items: [], scored: 0, skipped: 0 })),
+  http.post('/api/v1/applications/score', () => HttpResponse.json({ items: [], scored: 0, skipped: 0 })),
   http.post('/api/v1/jobs/:jobId/analyze', () => {
     return HttpResponse.json({
       job_id: 'job-1',

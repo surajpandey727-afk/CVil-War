@@ -22,7 +22,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from app.core.resume_tailoring.model import ResumeDocument
+from app.core.resume_tailoring.declared import excluded_terms_added
+from app.core.resume_tailoring.model import LineKind, ResumeDocument
 from app.core.resume_tailoring.plan import BANNED_PHRASES, ProposedEdit
 
 #: Any figure a bullet can carry: counts, percentages, money, durations, versions.
@@ -115,8 +116,20 @@ _MAX_INSERT_RUN = 4
 #: sprinkling a clause in pieces.
 _MAX_INSERT_TOTAL = 8
 
-#: Share of the document's words that must survive a tailoring pass untouched.
-MIN_PRESERVED_RATIO = 0.80
+#: Limits for an edit that draws on trusted evidence beyond the CV (the profile, other résumés, the
+#: owner's declared experience). Recovering a capability the CV left out takes more words than
+#: re-wording one it has, and the page itself still caps the line's length.
+_TRUSTED_INSERT_RUN = 9
+_TRUSTED_INSERT_TOTAL = 18
+_TRUSTED_LENGTH_RATIO = 1.8
+_TRUSTED_LENGTH_GROWTH = 110
+#: Most items a skills-row edit may append.
+_MAX_SKILL_ITEMS = 6
+
+#: Share of the document's words that must survive a tailoring pass untouched. The owner permits
+#: rewriting weak bullets from first principles, so this is a floor against replacing the CV, not
+#: against improving it.
+MIN_PRESERVED_RATIO = 0.60
 
 
 @dataclass
@@ -248,13 +261,33 @@ def _stem(word: str) -> str:
     return out
 
 
+def _attributable(number: str, after: str, evidence_text: str) -> bool:
+    """Whether a figure the edit introduces is stated, for this same work, in trusted evidence.
+
+    Finding the number somewhere in the evidence is not enough — "70%" appears in a dozen
+    places, and attaching it to the wrong bullet is a fabricated result. The evidence line that
+    carries the number must also share real subject matter with the sentence it is moving into.
+    """
+    wanted = set(_content_words(after))
+    for line in evidence_text.splitlines():
+        if number in _numbers(line) and len(wanted & set(_content_words(line))) >= 3:
+            return True
+    return False
+
+
 def check_edit(
     edit: ProposedEdit,
     before: str,
     cv_text: str,
     allowed_terms: frozenset[str] = frozenset(),
+    evidence_text: str = "",
+    kind: LineKind | None = None,
 ) -> Rejection | None:
     """Validate one proposed edit against the bullet it changes and the CV as a whole.
+
+    ``evidence_text`` is trusted career evidence beyond this CV (profile, previous résumés).
+    A fact the CV omitted may be surfaced from it — the same checks still apply, with the
+    evidence counted as part of what the candidate has demonstrably done.
 
     Returns ``None`` when the edit is acceptable, otherwise the reason it is not.
     """
@@ -265,9 +298,19 @@ def check_edit(
     low_after = after.lower()
     low_before = before.lower()
 
+    # 0. The one domain the owner did not work in is never claimed.
+    finance = excluded_terms_added(before, after)
+    if finance:
+        return Rejection(
+            edit.line_id, "excluded_domain",
+            f"introduces {finance}; finance-related technology is not part of the candidate's work",
+        )
+
     # 1. No invented figures. The single highest-risk fabrication, and the one the previous
     #    guard had no check for at all.
-    new_numbers = _numbers(after) - _numbers(before)
+    new_numbers = {
+        n for n in _numbers(after) - _numbers(before) if not _attributable(n, after, evidence_text)
+    }
     if new_numbers:
         return Rejection(
             edit.line_id, "fabricated_metric",
@@ -277,7 +320,7 @@ def check_edit(
     # 2. No technology, tool or proper noun that the CV does not contain somewhere. Checked
     #    against the whole CV, not just this bullet, so surfacing something the candidate
     #    genuinely has elsewhere stays legal.
-    cv_tokens = _tokens(cv_text)
+    cv_tokens = _tokens(cv_text + " " + evidence_text)
     invented = {
         token
         for token in _named_things(after) - _named_things(before)
@@ -299,7 +342,7 @@ def check_edit(
     #    requirement the evidence matcher confirmed the CV satisfies under other wording.
     #    Without this an edit can append a whole clause of capabilities the candidate never
     #    described, which is the most damaging kind of fabrication because it reads well.
-    cv_tokens_all = _tokens(cv_text)
+    cv_tokens_all = _tokens(cv_text + " " + evidence_text)
     before_words = set(_content_words(before))
     unearned = sorted(
         {
@@ -314,6 +357,13 @@ def check_edit(
             edit.line_id, "unsupported_claim",
             f"introduces {unearned}, which the CV does not evidence anywhere",
         )
+
+    # 4b. A skills row only grows: its label and every item stay, in order, and items are appended.
+    if kind is LineKind.SKILL:
+        problem = _skill_row_problem(before, after)
+        if problem:
+            return Rejection(edit.line_id, "skills_row", problem)
+        return _evidence_problem(edit, after, before)
 
     # 5. No newly asserted ownership. Saying the candidate owned, led or defined something
     #    they only described participating in is a seniority claim, not a wording choice.
@@ -344,13 +394,16 @@ def check_edit(
     #    claim. The difference is measurable as the size of the inserted run.
     runs, inserted_total = _insertions(before, after)
     longest = max(runs, default=0)
-    if longest > _MAX_INSERT_RUN:
+    trusted = bool(evidence_text.strip())
+    max_run = _TRUSTED_INSERT_RUN if trusted else _MAX_INSERT_RUN
+    max_total = _TRUSTED_INSERT_TOTAL if trusted else _MAX_INSERT_TOTAL
+    if longest > max_run:
         return Rejection(
             edit.line_id, "appended_clause",
             f"inserts {longest} consecutive new words; an edit weaves terms in, it does not "
             "append a new clause",
         )
-    if inserted_total > _MAX_INSERT_TOTAL:
+    if inserted_total > max_total:
         return Rejection(
             edit.line_id, "excessive_insertion",
             f"inserts {inserted_total} new words across the line",
@@ -372,7 +425,9 @@ def check_edit(
     #    larger of the ratio and a flat character allowance.
     ratio = len(after) / max(1, len(before))
     grew_by = len(after) - len(before)
-    if ratio > _MAX_LENGTH_RATIO and grew_by > _MAX_LENGTH_GROWTH:
+    ratio_cap = _TRUSTED_LENGTH_RATIO if trusted else _MAX_LENGTH_RATIO
+    growth_cap = _TRUSTED_LENGTH_GROWTH if trusted else _MAX_LENGTH_GROWTH
+    if ratio > ratio_cap and grew_by > growth_cap:
         return Rejection(
             edit.line_id, "excessive_expansion", f"grows {ratio:.2f}x (+{grew_by} chars)"
         )
@@ -380,16 +435,9 @@ def check_edit(
         return Rejection(edit.line_id, "excessive_removal", f"shrinks to {ratio:.2f}x")
 
     # 10. Evidence that actually points at something.
-    # Substance is what matters, not whether the sentence happens to contain the words "the
-    # CV". Rejecting on a contained phrase threw out "The CV describes integrating Google
-    # Cloud services for geospatial and model-serving capabilities" — a direct, specific
-    # citation — purely for naming the document it was citing.
-    evidence = (edit.evidence or "").strip().lower()
-    stripped = evidence
-    for filler in _VAGUE_EVIDENCE:
-        stripped = stripped.replace(filler, " ")
-    if len(evidence) < 12 or len(_content_words(stripped)) < 4:
-        return Rejection(edit.line_id, "vague_evidence", f"evidence was {edit.evidence!r}")
+    problem = _evidence_problem(edit, after, before)
+    if problem:
+        return problem
 
     # 11. An edit that changes nothing is noise in the change log.
     if after == before.strip():
@@ -398,10 +446,46 @@ def check_edit(
     return None
 
 
+def _evidence_problem(edit: ProposedEdit, after: str, before: str) -> Rejection | None:
+    """The edit's cited evidence must say something, and the edit must change the line.
+
+    Substance is what matters, not whether the sentence happens to contain the words "the CV".
+    Rejecting on a contained phrase threw out "The CV describes integrating Google Cloud services
+    for geospatial and model-serving capabilities", a direct, specific citation, purely for
+    naming the document it was citing.
+    """
+    evidence = (edit.evidence or "").strip().lower()
+    stripped = evidence
+    for filler in _VAGUE_EVIDENCE:
+        stripped = stripped.replace(filler, " ")
+    if len(evidence) < 12 or len(_content_words(stripped)) < 4:
+        return Rejection(edit.line_id, "vague_evidence", f"evidence was {edit.evidence!r}")
+    if after.strip() == before.strip():
+        return Rejection(edit.line_id, "no_op", "after_text is identical to the original")
+    return None
+
+
+def _skill_row_problem(before: str, after: str) -> str | None:
+    """Why ``after`` is not the same skills row with items appended, or ``None`` if it is."""
+    kept = before.rstrip().rstrip(",;")
+    if not after.startswith(kept):
+        return "the row's label and existing items must stay exactly as they are, in order"
+    tail = after[len(kept):].strip()
+    if not tail:
+        return "no item was added"
+    if not tail.startswith((",", ";")):
+        return "new items must be appended after a comma"
+    items = [t for t in re.split(r"[,;]", tail) if t.strip()]
+    if len(items) > _MAX_SKILL_ITEMS:
+        return f"{len(items)} items appended; at most {_MAX_SKILL_ITEMS} per row"
+    return None
+
+
 def validate_edits(
     doc: ResumeDocument,
     edits: list[ProposedEdit],
     allowed_terms: frozenset[str] = frozenset(),
+    evidence_text: str = "",
 ) -> ValidationReport:
     """Filter a plan down to the edits that obey the rules.
 
@@ -425,7 +509,7 @@ def validate_edits(
                 Rejection(edit.line_id, "duplicate", "line already edited in this plan")
             )
             continue
-        failure = check_edit(edit, line.text, cv_text, allowed_terms)
+        failure = check_edit(edit, line.text, cv_text, allowed_terms, evidence_text, line.kind)
         if failure:
             report.rejected.append(failure)
             continue

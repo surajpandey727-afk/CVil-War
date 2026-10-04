@@ -22,6 +22,11 @@ from app.core.llm.prompts.resume_intelligence_tailor import (
     RESUME_TAILOR_SYSTEM_PROMPT,
     render_resume_tailor_prompt,
 )
+from app.core.llm.prompts.standing import (
+    ATS_EVALUATION_STANDARD,
+    RESUME_GENERATION_STANDARD,
+    with_standing,
+)
 from app.models.enums import LLMPurpose, ResumeChangeStatus, ResumeChangeType, ResumeVersionSource
 from app.models.job import Job
 from app.models.resume_intelligence import JobResumeAnalysis, ResumeBranch, ResumeChange
@@ -207,7 +212,9 @@ async def tailor_job(
         llm_out = await llm.complete_with_structured_output(
             prompt=render_resume_tailor_prompt(content, job.title, job.description or ""),
             output_schema=TailorLLMOutput,
-            system_prompt=RESUME_TAILOR_SYSTEM_PROMPT,
+            system_prompt=with_standing(
+                RESUME_TAILOR_SYSTEM_PROMPT, RESUME_GENERATION_STANDARD, ATS_EVALUATION_STANDARD
+            ),
             purpose=LLMPurpose.RESUME_INTELLIGENCE_TAILOR.value,
         )
     except LLMError as exc:

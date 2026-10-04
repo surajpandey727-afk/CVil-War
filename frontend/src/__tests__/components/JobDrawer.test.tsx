@@ -248,3 +248,117 @@ describe('JobDrawer as the decision centre', () => {
     });
   });
 });
+
+describe('getting a tailored résumé from the drawer', () => {
+  const tailoredResume = (over: Record<string, unknown> = {}) => ({
+    id: 'resume-t1', name: 'AI Product Manager CV - Senior Product Manager (Zartis)', type: 'tailored',
+    template_id: 'modern', base_resume_id: 'resume-1', job_id: 'job-1', has_pdf: true, has_docx: false,
+    ats_score: 0.83, used_in_applications: 0, submitted_applications: 0, archived: false,
+    created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z',
+    tailoring_audit: {
+      generation_status: 'generated', original_ats_score: 72, final_ats_score: 83,
+      keywords_added: ['product management'], keywords_not_added: ['compliance'],
+      changes: [{
+        line_id: 'L1', section: 'WORK HISTORY', before_text: 'Led product strategy and roadmap.',
+        after_text: 'Led product management, roadmap and delivery.', reason: 'Posting says product management.',
+        evidence: 'Summary', keywords_added: ['product management'],
+      }],
+      rejected_edits: [], checks: { ok: true, problems: [], pages: 3, pixels_changed_outside_edits: 0 },
+    },
+    ...over,
+  });
+
+  const withPdfPreview = () =>
+    server.use(
+      http.get('/api/v1/resumes/:id/download', () =>
+        new HttpResponse(new Blob(['%PDF-1.4'], { type: 'application/pdf' }), { headers: { 'Content-Type': 'application/pdf' } })),
+    );
+
+  it('sends the selected base CV and this job, then shows the ATS change and what was edited', async () => {
+    withPdfPreview();
+    let sent: Record<string, unknown> | null = null;
+    server.use(
+      http.post('/api/v1/resumes/generate', async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(tailoredResume(), { status: 201 });
+      }),
+    );
+    renderDrawer();
+
+    await userEvent.click(screen.getByRole('button', { name: /get tailored résumé/i }));
+
+    expect(await screen.findByTestId('tailoring-summary')).toHaveTextContent('ATS 72 → 83');
+    expect(sent).toMatchObject({ base_resume_id: 'resume-1', job_id: 'job-1' });
+    expect(screen.getByText('Led product management, roadmap and delivery.')).toBeInTheDocument();
+    expect(screen.getByTestId('tailoring-summary')).toHaveTextContent(/Layout verified.*0 pixels changed outside the edited lines/);
+    expect(screen.getByText('compliance')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /download pdf/i })).toBeInTheDocument();
+  });
+
+  it('says plainly when nothing could honestly be changed, instead of claiming success', async () => {
+    withPdfPreview();
+    server.use(
+      http.post('/api/v1/resumes/generate', () =>
+        HttpResponse.json(tailoredResume({
+          tailoring_audit: {
+            generation_status: 'unchanged', original_ats_score: 82, final_ats_score: 82,
+            keywords_added: [], keywords_not_added: [], changes: [], rejected_edits: [],
+            checks: { ok: true, problems: [], pages: 3, pixels_changed_outside_edits: 0 },
+          },
+        }), { status: 201 })),
+    );
+    renderDrawer();
+    await userEvent.click(screen.getByRole('button', { name: /get tailored résumé/i }));
+
+    const summary = await screen.findByTestId('tailoring-summary');
+    expect(summary).toHaveTextContent('No changes made');
+    expect(summary).toHaveTextContent('identical to the original');
+  });
+
+  it("shows the server's own reason when generation fails, and lets the person retry", async () => {
+    let calls = 0;
+    server.use(
+      http.post('/api/v1/resumes/generate', () => {
+        calls += 1;
+        return calls === 1
+          ? HttpResponse.json({ detail: 'The stored PDF for this résumé is missing — upload it again.' }, { status: 422 })
+          : HttpResponse.json(tailoredResume(), { status: 201 });
+      }),
+    );
+    withPdfPreview();
+    renderDrawer();
+    await userEvent.click(screen.getByRole('button', { name: /get tailored résumé/i }));
+
+    expect(await screen.findByText(/stored PDF for this résumé is missing/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(await screen.findByTestId('tailoring-summary')).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
+  it('sends one request however fast the button is clicked', async () => {
+    withPdfPreview();
+    let calls = 0;
+    server.use(
+      http.post('/api/v1/resumes/generate', async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 150));
+        return HttpResponse.json(tailoredResume(), { status: 201 });
+      }),
+    );
+    renderDrawer();
+    const button = screen.getByRole('button', { name: /get tailored résumé/i });
+    button.click(); button.click(); button.click();
+
+    await screen.findByTestId('tailoring-summary');
+    expect(calls).toBe(1);
+  });
+
+  it('shows an already-stored version for this job straight away (survives a refresh)', async () => {
+    withPdfPreview();
+    renderDrawer({ resumes: [...resumes, tailoredResume() as unknown as Resume] });
+
+    expect(screen.getByRole('button', { name: /view tailored résumé/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /view tailored résumé/i }));
+    expect(await screen.findByTestId('tailoring-summary')).toHaveTextContent('ATS 72 → 83');
+  });
+});

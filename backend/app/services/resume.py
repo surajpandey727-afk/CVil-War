@@ -4,7 +4,6 @@ Handles upload, listing, generation, and scoring of resumes.
 Uses DocumentParser for real file parsing and SkillMatcher for skill extraction.
 """
 
-import asyncio
 import contextlib
 import re
 import tempfile
@@ -448,6 +447,12 @@ async def generate_tailored_resume(
     base = await get_resume(db, request.base_resume_id)
     job = await _get_job(db, request.job_id)
 
+    if base.file_path_pdf and not base.file_path_docx:
+        # A PDF is edited in place and comes back as the same PDF — never rebuilt from text.
+        from app.services.tailored_resume import generate_from_pdf
+
+        return await generate_from_pdf(db, base, job, request, user_id)
+
     original, docx_source = await _load_base_document(base, user_id)
     if not original.all_lines():
         raise GenerationError("The base resume has no readable content to tailor.")
@@ -501,7 +506,7 @@ async def generate_tailored_resume(
         # The tailored text, not the base's. The previous implementation stored
         # base.content_text here, so the saved record never reflected the tailoring at all.
         content_text=result.tailored.to_text(),
-        ats_score=float(result.after.total),
+        ats_score=result.after.total / 100.0,
         tailoring_audit=audit,
     )
     db.add(tailored)
@@ -527,11 +532,12 @@ async def score_resume(
     resume_id: str,
     request: ResumeScoreRequest,
 ) -> ResumeScoreResponse:
-    """Score a resume against a job listing using multi-factor ATS analysis.
+    """Score a resume against a job listing with the ATS evaluation engine.
 
-    Loads the resume text and job description from the database, then
-    uses ResumeScorer for real scoring. Falls back to a basic keyword
-    overlap score if spaCy is not available.
+    Reads the stored résumé (its PDF when there is one, since that is what a recruiter's system
+    reads) and the posting, and returns the evidence-based match with its explanation. The same
+    engine scores the Jobs and Applications lists and the generated tailored files, so one pair
+    always shows one number. Falls back to a plain keyword overlap only if the engine itself fails.
 
     Args:
         db: Async database session.
@@ -544,59 +550,49 @@ async def score_resume(
     resume = await get_resume(db, resume_id)
     job = await _get_job(db, request.job_id)
 
-    resume_text = resume.content_text or ""
-    job_description = job.description or ""
+    from app.services import ats_evaluation as ats
 
-    if not resume_text.strip():
-        logger.warning("score_resume_empty_text", resume_id=resume_id)
+    if not ats.usable_posting(job):
         return ResumeScoreResponse(
-            resume_id=resume_id,
-            job_id=request.job_id,
-            overall_score=0.0,
-            skill_score=0.0,
-            experience_score=0.0,
-            education_score=0.0,
-            keyword_score=0.0,
-            missing_skills=["Resume has no parsed text content"],
-            suggestions=["Re-upload your resume to enable parsing"],
+            resume_id=resume_id, job_id=request.job_id, overall_score=0.0, skill_score=0.0,
+            experience_score=0.0, education_score=0.0, keyword_score=0.0,
+            missing_skills=["This job has no description to score against"],
+            suggestions=["Open the posting and add its description, or re-run discovery for it."],
         )
 
-    # The candidate's structured work history/education — set up once in Settings, not
-    # re-derived from the resume file each time. Without this, experience_score and
-    # education_score were computed against permanently-empty lists (see the two bugs this
-    # replaces below): every résumé scored a flat 0.0 on experience and an arbitrary 0.2/1.0
-    # on education, regardless of which job or which résumé — the "multi-factor" score's other
-    # two factors, 50% of the total weight, were pure noise.
-    settings_row = (
-        await db.execute(select(UserSettings).where(UserSettings.user_id == resume.user_id))
-    ).scalar_one_or_none()
-    profile = (settings_row.candidate_profile or {}) if settings_row else {}
-    candidate_experience = _experience_entries_for_scoring(profile.get("experience") or [])
-    candidate_education = _education_entries_for_scoring(profile.get("education") or [])
-
+    loader = ats.ResumeLoader(resume.user_id)
     try:
-        # Offload the synchronous, CPU-bound spaCy scoring to a thread so it never blocks the
-        # event loop (the cached model in core.ats.nlp keeps the load cost one-time).
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            _score_with_full_engine,
-            resume_id,
-            request.job_id,
-            resume_text,
-            job_description,
-            job,
-            candidate_experience,
-            candidate_education,
-        )
+        loaded = await loader.load(resume)
+        if loaded is None:
+            logger.warning("score_resume_empty_text", resume_id=resume_id)
+            return ResumeScoreResponse(
+                resume_id=resume_id, job_id=request.job_id, overall_score=0.0, skill_score=0.0,
+                experience_score=0.0, education_score=0.0, keyword_score=0.0,
+                missing_skills=["Resume has no parsed text content"],
+                suggestions=["Re-upload your resume to enable parsing"],
+            )
+        ev = await ats.evaluate_pair(loaded, job)
     except Exception as exc:
-        logger.warning(
-            "full_scoring_failed_using_fallback",
-            error=str(exc),
-        )
-        return _score_with_text_fallback(
-            resume_id, request.job_id, resume_text, job_description,
-        )
+        logger.warning("ats_engine_failed_using_fallback", error=str(exc))
+        return _score_with_text_fallback(resume_id, request.job_id, resume.content_text or "", job.description or "")
+    finally:
+        loader.close()
+
+    return ResumeScoreResponse(
+        resume_id=resume_id,
+        job_id=request.job_id,
+        overall_score=round(ev.ats_match / 100, 4),
+        skill_score=round(ev.components["skill_technology"] / 100, 4),
+        experience_score=round(ev.components["experience_responsibility"] / 100, 4),
+        education_score=round(ev.components["education_certification"] / 100, 4),
+        keyword_score=round(ev.components["requirement_coverage"] / 100, 4),
+        missing_skills=[f.requirement for f in ev.missing if f.tier in ("critical", "important")][:10],
+        suggestions=[p.what for p in ev.problems] + ([ev.verdict.tailoring_limit] if ev.verdict.tailoring_limit else []),
+        parsing_score=round(ev.parsing / 100, 4),
+        shortlist_score=round(ev.shortlist / 100, 4),
+        band=ev.band,
+        evaluation=ev.to_dict(),
+    )
 
 
 async def review_resume_with_llm(
@@ -625,13 +621,14 @@ async def review_resume_with_llm(
         ATS_REVIEW_SYSTEM_PROMPT,
         render_ats_review_prompt,
     )
+    from app.core.llm.prompts.standing import ATS_EVALUATION_STANDARD, with_standing
 
     llm = await build_llm_client_for_user(db, user_id)
     try:
         review = await llm.complete_with_structured_output(
             prompt=render_ats_review_prompt(resume_text, job.description or "", job.title),
             output_schema=LLMAtsReview,
-            system_prompt=ATS_REVIEW_SYSTEM_PROMPT,
+            system_prompt=with_standing(ATS_REVIEW_SYSTEM_PROMPT, ATS_EVALUATION_STANDARD),
             purpose=LLMPurpose.ATS_REVIEW.value,
         )
     except LLMError as exc:
@@ -766,66 +763,6 @@ async def extract_candidate_profile_from_resume(
     )
 
 
-def _score_with_full_engine(
-    resume_id: str,
-    job_id: str,
-    resume_text: str,
-    job_description: str,
-    job: Job,
-    candidate_experience: list[dict[str, object]],
-    candidate_education: list[dict[str, object]],
-) -> ResumeScoreResponse:
-    """Score using the full ResumeScorer with spaCy."""
-    from app.core.ats.experience_analyzer import ExperienceAnalyzer
-    from app.core.ats.keyword_analyzer import KeywordAnalyzer
-    from app.core.ats.nlp import get_nlp
-    from app.core.ats.scorer import ResumeScorer
-    from app.core.ats.skill_matcher import SkillMatcher
-
-    nlp = get_nlp()
-    skill_matcher = SkillMatcher(nlp)
-    keyword_analyzer = KeywordAnalyzer(nlp)
-    experience_analyzer = ExperienceAnalyzer(nlp)
-    scorer = ResumeScorer(skill_matcher, keyword_analyzer, experience_analyzer)
-
-    # Build candidate profile from resume text plus the operator's own structured profile
-    # (Settings > Candidate profile) for the two dimensions a resume file alone cannot supply
-    # reliable structured data for.
-    candidate_skills = sorted(skill_matcher.extract_skills(resume_text))
-    candidate_profile = {
-        "skills": candidate_skills,
-        "experience": candidate_experience,
-        "education": candidate_education,
-    }
-
-    # Build job metadata from the Job model
-    required_skills: list[str] = []
-    preferred_skills: list[str] = []
-    if job.skills_required and isinstance(job.skills_required, dict):
-        required_skills = job.skills_required.get("required", [])
-        preferred_skills = job.skills_required.get("preferred", [])
-    job_metadata = {
-        "required_skills": required_skills,
-        "preferred_skills": preferred_skills,
-    }
-
-    details = scorer.score_resume(
-        resume_text, job_description, candidate_profile, job_metadata,
-    )
-
-    return ResumeScoreResponse(
-        resume_id=resume_id,
-        job_id=job_id,
-        overall_score=details.overall_score,
-        skill_score=details.skill_score,
-        experience_score=details.experience_score,
-        education_score=details.education_score,
-        keyword_score=details.keyword_score,
-        missing_skills=details.missing_required_skills,
-        suggestions=details.improvement_suggestions,
-    )
-
-
 def _score_with_text_fallback(
     resume_id: str,
     job_id: str,
@@ -957,6 +894,11 @@ async def optimize_resume(
         render_ats_optimize_prompt,
     )
     from app.core.llm.prompts.resume_tailor import TailoredResumeData
+    from app.core.llm.prompts.standing import (
+        ATS_EVALUATION_STANDARD,
+        RESUME_GENERATION_STANDARD,
+        with_standing,
+    )
 
     llm = await build_llm_client_for_user(db, user_id)
     prompt = render_ats_optimize_prompt(
@@ -965,7 +907,9 @@ async def optimize_resume(
     optimized_data = await llm.complete_with_structured_output(
         prompt=prompt,
         output_schema=TailoredResumeData,
-        system_prompt=ATS_OPTIMIZE_SYSTEM_PROMPT,
+        system_prompt=with_standing(
+            ATS_OPTIMIZE_SYSTEM_PROMPT, RESUME_GENERATION_STANDARD, ATS_EVALUATION_STANDARD
+        ),
         purpose="ats_optimize",
     )
 

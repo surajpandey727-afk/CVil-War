@@ -11,14 +11,16 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    port: Number(process.env.VITE_PORT ?? 5174),
     proxy: {
+      // The API the dev server forwards to. Override with VITE_API_PORT to point at a second,
+      // isolated backend (for example one running against a scratch database).
       '/api': {
-        target: 'http://localhost:8000',
+        target: `http://localhost:${process.env.VITE_API_PORT ?? 8000}`,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: `ws://localhost:${process.env.VITE_API_PORT ?? 8000}`,
         ws: true,
       },
     },

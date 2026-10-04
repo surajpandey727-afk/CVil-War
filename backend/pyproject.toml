@@ -51,6 +51,15 @@ dependencies = [
     # fallback for whatever pdfplumber cannot open. (PyPDF2 was replaced with its
     # actively-maintained successor, pypdf, to drop an unpatched known CVE.)
     "pdfplumber>=0.11.0",
+    # In-place PDF editing for tailored résumés (core/resume_tailoring/pdf_*). Every library
+    # here is permissively licensed (MIT / BSD / Apache-2.0); the AGPL PyMuPDF that an earlier
+    # version used is deliberately NOT a dependency. pypdf edits the file, pdfplumber reads
+    # glyph geometry, pypdfium2 renders pages for the visual comparison, fontTools subsets
+    # the fonts, reportlab supplies the standard-font metrics.
+    "pypdfium2>=4.30",
+    "reportlab>=4.0",
+    "numpy>=1.26",
+    "fonttools>=4.40",
 
     # ML / NLP
     # spaCy is the only one of these actually imported (core/ats/nlp.py). It needs the
@@ -178,6 +187,13 @@ known-first-party = ["app"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ANN", "SIM117", "E501"]  # relaxed rules for test files
+# The owner's standing briefs are stored verbatim, long lines and typography included.
+"app/core/llm/prompts/standing/*" = ["E501", "RUF001", "RUF002"]
+# PDF content-stream and layout internals: tight numeric helpers over operators and geometry,
+# where per-argument annotations and pairwise() rewrites add noise rather than safety.
+"app/core/resume_tailoring/pdf_*.py" = ["ANN001", "ANN202", "RUF007", "RUF005", "RUF002", "B007", "B023"]
+"app/core/ats_engine/*.py" = ["ANN001", "ANN202", "RUF007"]
+"app/services/application_tailoring.py" = ["ANN001"]
 
 [tool.mypy]
 python_version = "3.11"
