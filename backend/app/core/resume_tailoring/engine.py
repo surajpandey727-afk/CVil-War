@@ -57,8 +57,29 @@ from app.core.resume_tailoring.validate import (
 
 logger = structlog.get_logger(__name__)
 
-#: How long one planning call may take before the model is treated as unavailable.
-PLAN_TIMEOUT_SECONDS = 90
+
+def _plan_timeout() -> int:
+    """Planning-call timeout, from settings (``LLM__PLAN_TIMEOUT_SECONDS``).
+
+    Read at call time rather than import time so ops can tune it for a slow gateway without a
+    restart, and so tests can monkeypatch the module constant below.
+    """
+    from app.config.settings import get_settings
+
+    return PLAN_TIMEOUT_SECONDS or get_settings().llm.plan_timeout_seconds
+
+
+def _plan_model() -> str:
+    """Planning model, from settings (``LLM__PLAN_MODEL``), falling back to the module default."""
+    from app.config.settings import get_settings
+
+    return get_settings().llm.plan_model or PLAN_MODEL
+
+
+#: Default planning-call timeout. 0 means "use the settings value"; a non-zero value here (set
+#: by a test) wins. The prompt carries the owner's full verbatim brief, which is large, so a
+#: slow gateway can legitimately need well over a minute per call.
+PLAN_TIMEOUT_SECONDS = 0
 
 
 class PlanningFailed(GenerationError):  # noqa: N818 (a condition the caller handles, not a bug)
@@ -164,10 +185,10 @@ async def tailor(
                     output_schema=EditPlan,
                     system_prompt=system,
                     purpose="resume_tailor_minimal_diff",
-                    model=PLAN_MODEL,
+                    model=_plan_model(),
                     temperature=PLAN_TEMPERATURE,
                 ),
-                timeout=PLAN_TIMEOUT_SECONDS,
+                timeout=_plan_timeout(),
             )
         except Exception as exc:
             # Never a broken or silently unchanged CV: the caller is told the model could not be

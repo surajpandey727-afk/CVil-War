@@ -218,7 +218,7 @@ def render_plan_prompt(
     evidence_block = (
         f"""
 TRUSTED CAREER EVIDENCE — what the candidate's own records and the owner's standing declaration say they did, beyond what this CV prints. A fact from here may be surfaced in an edit where it belongs to that line's work, and the edit's "evidence" must then name the source in square brackets (for example "[Owner-declared experience (standing brief)] Power BI"). Nothing outside this block or the CV may be written.
-{trusted_text[:12000]}
+{trusted_text[:8000]}
 
 TERMS THE POSTING WANTS THAT ONLY THIS EVIDENCE SUPPORTS — recoverable, where a bullet fits:
 {json.dumps(recoverable, indent=2)}
@@ -250,7 +250,7 @@ omitted from the list, not repeated back.
 
 TARGET ROLE: {spec.title or "(untitled)"}
 
-{wrap_untrusted(spec.raw_text[:8000], label="JOB POSTING")}
+{wrap_untrusted(spec.raw_text[:5000], label="JOB POSTING")}
 
 TERMS YOU MUST NOT WRITE. The posting asks for these and this CV evidences none of them
 anywhere. Using one would be a fabricated capability, and the edit will be discarded:
@@ -266,7 +266,7 @@ OF THOSE, THESE ARE MANDATORY FOR THE ROLE:
 
 {evidence_block}{focus_block}
 THE FULL CV, FOR CONTEXT (use it to judge what the candidate can legitimately claim):
-{doc.to_text()[:9000]}
+{doc.to_text()[:4000]}
 
 THE ONLY LINES YOU MAY EDIT — refer to them by line_id:
 {json.dumps(inventory, indent=2)}

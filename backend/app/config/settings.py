@@ -52,6 +52,12 @@ class LLMSettings(BaseSettings):
     default_model: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
+    # Résumé-tailoring planning call, tunable without a code change. The planning prompt is
+    # large (the product owner's verbatim brief is prepended), so a slow gateway needs a
+    # generous timeout; ``plan_model`` lets ops point the single highest-latency call at a
+    # faster gateway model when throughput matters more than reasoning depth.
+    plan_model: str = "openai/auto/claude-sonnet"
+    plan_timeout_seconds: int = 180
     # AWS Bedrock: platform-authenticated via the standard AWS credential chain (env vars,
     # ~/.aws, or an instance/role) — no per-user key. Use a ``bedrock/<model-id>`` default_model
     # (e.g. ``bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0``) to route through Bedrock.
