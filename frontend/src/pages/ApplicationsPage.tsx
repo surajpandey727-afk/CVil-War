@@ -10,6 +10,7 @@ import {
 } from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
 import { useResumes } from '@/hooks/useResumes';
+import { usePlatforms } from '@/hooks/useSettings';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
@@ -244,6 +245,13 @@ export default function ApplicationsPage() {
 
       {tab === 'needs_action' && (
         <>
+          {needsAction.length > 0 && (
+            <SubmitBlockerBanner
+              count={needsAction.length}
+              missingResumes={needsAction.filter((a) => !a.resume_id).length}
+              navigate={navigate}
+            />
+          )}
           {needsAction.length > 0 && (
             <BulkTailorBar
               selectedCount={needsAction.filter((a) => selected.has(a.id)).length}
@@ -662,6 +670,61 @@ function ConfirmationBadge({ app }: { app: Application }) {
     >
       <Icon name="alert" size={10} /> {spec.label}
     </span>
+  );
+}
+
+/** Why "Approve" doesn't make an application go out, and what to do about it.
+ *  The common dead-end: with no signed-in job-board session, every approval is held for review
+ *  again (the first run on a source can't clear until one submission succeeds), so nothing ever
+ *  submits and no email is sent — which reads as "nothing happens". Say so, and point at the fix. */
+function SubmitBlockerBanner({ count, missingResumes, navigate }: {
+  count: number; missingResumes: number; navigate: (p: string) => void;
+}) {
+  const { data: platforms } = usePlatforms();
+  const connected = platforms?.connected ?? null;
+  const noSessions = connected === 0;
+  if (!noSessions && missingResumes === 0) return null;
+  return (
+    <div
+      role="alert"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 11, padding: '13px 15px', marginBottom: 12,
+        borderRadius: 'var(--r-lg)', background: 'var(--review-soft)', border: '1px solid var(--review-line)',
+      }}
+    >
+      <span style={{ color: 'var(--review)', marginTop: 1, flex: '0 0 auto' }}><Icon name="alert" size={16} /></span>
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <div style={{ font: '700 12.5px/1.35 var(--font)', color: 'var(--text)' }}>
+          {noSessions
+            ? `These ${count} applications can't be submitted yet — no job board is connected.`
+            : `${missingResumes} of these applications have no résumé attached.`}
+        </div>
+        <div style={{ marginTop: 4, font: '500 11.5px/1.5 var(--font)', color: 'var(--text-2)' }}>
+          {noSessions
+            ? 'The agent signs in with your own session for each board — it never sees or stores your password. '
+              + 'Until a session is connected, approving an application re-queues it for review instead of sending it, '
+              + 'and no confirmation email goes out. '
+            : 'An application needs a résumé to be scored and submitted. Tailor one above, or attach it from the application. '}
+          {missingResumes > 0 && noSessions && `Also, ${missingResumes} have no résumé yet. `}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
+          {noSessions && (
+            <button
+              onClick={() => navigate('/settings')}
+              style={{ height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}
+            >
+              Connect a job board
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/communications')}
+            style={{ height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer' }}
+          >
+            Set up email notifications
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

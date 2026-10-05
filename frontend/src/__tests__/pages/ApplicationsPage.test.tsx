@@ -60,6 +60,20 @@ describe('ApplicationsPage — merged Active / Needs action / History', () => {
     expect(screen.getByRole('columnheader', { name: 'Role' })).toBeInTheDocument();
   });
 
+  it('warns on Needs action that nothing can submit when no job board is connected', async () => {
+    server.use(
+      http.get('/api/v1/applications/', () =>
+        HttpResponse.json(listOf(app({ id: 'p1', status: 'pending_review', job_title: 'Reed Role', resume_id: 'r1' })))),
+      http.get('/api/v1/settings/platforms', () =>
+        HttpResponse.json({ items: [], total: 3, usable: 0, connected: 0 })),
+    );
+    renderPage('/applications?tab=needs_action');
+
+    expect(await screen.findByText('Reed Role')).toBeInTheDocument();
+    expect(await screen.findByText(/can't be submitted yet — no job board is connected/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect a job board/i })).toBeInTheDocument();
+  });
+
   it('marks an applied-but-unconfirmed application honestly, and a simulated one, but not a confirmed one', async () => {
     server.use(http.get('/api/v1/applications/', () =>
       HttpResponse.json(listOf(
