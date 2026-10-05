@@ -22,7 +22,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import numpy as np
+# numpy is imported lazily inside check_edited_pdf — it is only reached after render_gray (which
+# needs numpy + pypdfium2) succeeds, so the serverless API can import this module and run the
+# non-visual checks without the heavy dependency present.
 
 from app.core.resume_tailoring import pdf_read
 from app.core.resume_tailoring.model import ResumeDocument
@@ -193,6 +195,8 @@ def check_edited_pdf(
             )
         if len(words_after[index]) < 0.4 * max(1, len(words_before[index])):
             problems.append(f"page {index + 1} lost most of its text")
+
+        import numpy as np
 
         gb, ga = gray_before[index], gray_after[index]
         if gb.shape != ga.shape:

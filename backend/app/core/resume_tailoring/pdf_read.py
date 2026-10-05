@@ -13,9 +13,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pdfplumber
-import pypdfium2 as pdfium
+
+# numpy and pypdfium2 are imported lazily (inside render_gray) rather than at module top: they
+# are needed only for the pixel-level visual-regression render used while *writing* a tailored
+# PDF, not for reading text (pdfplumber) or scoring. Keeping them out of the import path lets the
+# serverless API — which bundles neither heavy dependency — boot and serve every text/scoring
+# endpoint, degrading only the visual check it can never run in a 60s function anyway.
 
 #: Where a glyph's box sits relative to its baseline, as a share of the font size. pdfminer's own
 #: box is exactly one font size tall and floats with the font descent; a fixed ascent/descent
@@ -211,8 +215,10 @@ def page_texts(path: Path | str | bytes) -> list[str]:
     return out
 
 
-def render_gray(path: Path | str | bytes, dpi: int) -> list[np.ndarray]:
-    """Each page rendered to a grey-level array at ``dpi``."""
+def render_gray(path: Path | str | bytes, dpi: int) -> list:
+    """Each page rendered to a grey-level array at ``dpi`` (requires numpy + pypdfium2)."""
+    import pypdfium2 as pdfium
+
     pdf = pdfium.PdfDocument(path if isinstance(path, (bytes, bytearray)) else str(path))
     try:
         return [_gray_page(pdf[i], dpi) for i in range(len(pdf))]
@@ -220,6 +226,8 @@ def render_gray(path: Path | str | bytes, dpi: int) -> list[np.ndarray]:
         pdf.close()
 
 
-def _gray_page(page: pdfium.PdfPage, dpi: int) -> np.ndarray:
+def _gray_page(page, dpi: int):
+    import numpy as np
+
     arr = np.asarray(page.render(scale=dpi / 72.0, grayscale=True).to_numpy())
     return arr.reshape(arr.shape[0], arr.shape[1]).astype(np.int16)
