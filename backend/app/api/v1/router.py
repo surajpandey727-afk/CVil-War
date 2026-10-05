@@ -18,6 +18,7 @@ from app.api.v1.resume_intelligence import router as resume_intelligence_router
 from app.api.v1.resumes import router as resumes_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.sources import router as sources_router
+from app.api.v1.system import router as system_router
 
 v1_router = APIRouter()
 
@@ -46,6 +47,7 @@ v1_router.include_router(
 )
 v1_router.include_router(settings_router, prefix="/settings", tags=["Settings"], dependencies=_auth)
 v1_router.include_router(sources_router, prefix="/sources", tags=["Sources"], dependencies=_auth)
+v1_router.include_router(system_router, prefix="/system", tags=["System"], dependencies=_auth)
 v1_router.include_router(
     platform_sessions_router,
     prefix="/platform-sessions",

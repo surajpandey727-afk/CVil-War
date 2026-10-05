@@ -827,6 +827,15 @@ export const handlers = [
     }),
   ),
 
+  http.get('/api/v1/system/status', () =>
+    HttpResponse.json({
+      services: [
+        { key: 'llm', label: 'AI model gateway', status: 'connected', detail: 'ok', action_path: '', action_label: '' },
+        { key: 'database', label: 'Database', status: 'connected', detail: 'ok', action_path: '', action_label: '' },
+      ],
+      all_ok: true,
+      attention: 0,
+    })),
   http.get('/api/v1/communications/gmail/status', () =>
     HttpResponse.json({ configured: false, connected: false, authorize_url: null }),
   ),

@@ -10,6 +10,7 @@ import {
 } from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
 import { useResumes } from '@/hooks/useResumes';
+import SystemStatus from '@/components/ui/SystemStatus';
 import { usePlatforms } from '@/hooks/useSettings';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAppStore } from '@/store/useAppStore';
@@ -177,17 +178,7 @@ export default function ApplicationsPage() {
             Your live pipeline — what&apos;s moving, what needs you, and what&apos;s settled.
           </p>
         </div>
-        <span
-          title={connected ? 'Live updates connected' : 'Reconnecting…'}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 7, height: 34, padding: '0 12px',
-            borderRadius: 'var(--r-md)', background: 'var(--surface-3)', border: '1px solid var(--border)',
-            font: '600 11.5px/1 var(--font)', color: 'var(--text-3)',
-          }}
-        >
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: connected ? 'var(--applied)' : 'var(--review)', animation: connected ? 'aaPulse 1.8s var(--ease-io) infinite' : 'none' }} />
-          {connected ? 'Live' : 'Reconnecting'}
-        </span>
+        <SystemStatus wsConnected={connected} />
       </div>
 
       {intervention && (
