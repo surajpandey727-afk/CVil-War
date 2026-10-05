@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import RecordNotFoundError
 from app.models.application import Application
-from app.models.enums import ApplicationStatus
+from app.models.enums import ApplicationStatus, ConfirmationState, SubmissionMethod
 from app.models.job import Job
 from app.models.resume import Resume
 from app.schemas.application import (
@@ -344,21 +344,33 @@ async def update_status(
         app.resume_id = update.resume_id
     if update.status == ApplicationStatus.APPLIED:
         app.applied_at = datetime.now(UTC)
+        if not was_applied:
+            # The operator is asserting they applied themselves. Record that as a MANUAL,
+            # CONFIRMED submission rather than leaving it NONE/PENDING, so the evidence panel
+            # and the confirmation email reflect a real (operator-attested) submission instead
+            # of looking like a placeholder run that never happened.
+            app.submission_method = SubmissionMethod.MANUAL
+            app.confirmation_state = ConfirmationState.CONFIRMED
     await db.commit()
     await db.refresh(app)
     logger.info("application_status_updated", app_id=app_id, status=update.status)
 
     # Only the transition INTO applied fires a notification — not every subsequent edit to an
-    # already-applied row (e.g. adding notes later). Best-effort, mirrors workers.tasks._apply.
+    # already-applied row (e.g. adding notes later). Self-recording and best-effort, mirroring
+    # workers.tasks._apply: the outcome lands on the timeline and never fails the status update.
     if update.status == ApplicationStatus.APPLIED and not was_applied:
         with contextlib.suppress(Exception):
-            from app.services.gmail_send import send_application_confirmation
+            from app.services.gmail_send import notify_application_submitted
 
             job = await db.get(Job, app.job_id)
-            await send_application_confirmation(
-                db, app.user_id,
+            await notify_application_submitted(
+                db, app,
                 job_title=(job.title if job else "this role"),
                 company=(job.company if job else "the employer"),
                 platform=(job.platform if job else "manual"),
             )
+        # notify_application_submitted commits a timeline note, which expires `app`'s
+        # attributes; reload them so the caller (and response serialization) does not trip a
+        # lazy load outside the async context.
+        await db.refresh(app)
     return app

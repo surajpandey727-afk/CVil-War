@@ -439,17 +439,18 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         await _publish(ctx, app.user_id, application_id, ApplicationStatus.APPLIED.value)
         logger.info("apply.applied", application_id=application_id, confirmation=confirmation)
 
-        # Best-effort: a notification email failing must never undo or flag an otherwise
-        # successful submission — see services.gmail_send's own docstring.
-        with contextlib.suppress(Exception):
-            from app.services.gmail_send import send_application_confirmation
+        # Best-effort and self-recording: the confirmation email is worded for the
+        # confirmation state (a simulated run sends nothing), and the outcome — sent, or why
+        # not — lands on the application's own timeline so it is never a silent no-op. A
+        # failure here never undoes the committed submission.
+        from app.services.gmail_send import notify_application_submitted
 
-            await send_application_confirmation(
-                db, app.user_id,
-                job_title=(job.title if job else "this role"),
-                company=(job.company if job else "the employer"),
-                platform=platform,
-            )
+        await notify_application_submitted(
+            db, app,
+            job_title=(job.title if job else "this role"),
+            company=(job.company if job else "the employer"),
+            platform=platform,
+        )
     finally:
         current_user_id.reset(token)
 

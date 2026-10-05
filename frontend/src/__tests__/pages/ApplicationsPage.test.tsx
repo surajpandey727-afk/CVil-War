@@ -60,6 +60,23 @@ describe('ApplicationsPage — merged Active / Needs action / History', () => {
     expect(screen.getByRole('columnheader', { name: 'Role' })).toBeInTheDocument();
   });
 
+  it('marks an applied-but-unconfirmed application honestly, and a simulated one, but not a confirmed one', async () => {
+    server.use(http.get('/api/v1/applications/', () =>
+      HttpResponse.json(listOf(
+        app({ id: 'u1', status: 'applied', confirmation_state: 'unconfirmed', job_title: 'Unconfirmed Role' }),
+        app({ id: 's1', status: 'applied', confirmation_state: 'simulated', job_title: 'Simulated Role' }),
+        app({ id: 'c1', status: 'applied', confirmation_state: 'confirmed', job_title: 'Confirmed Role' }),
+      ))));
+    renderPage();
+
+    await userEvent.click(screen.getByRole('tab', { name: /^history/i }));
+    expect(await screen.findByText('Unconfirmed Role')).toBeInTheDocument();
+    expect(screen.getByText('Unconfirmed')).toBeInTheDocument();
+    expect(screen.getByText('Simulated')).toBeInTheDocument();
+    // A genuinely confirmed application carries no caveat badge.
+    expect(screen.queryByText('Not confirmed')).not.toBeInTheDocument();
+  });
+
   it('History sub-tabs filter within the settled set', async () => {
     server.use(http.get('/api/v1/applications/', () =>
       HttpResponse.json(listOf(

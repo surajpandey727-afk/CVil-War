@@ -502,6 +502,7 @@ function RunRow({ app, onOpen, onApprove, approving, showTimeline, selection }: 
         <span style={{ display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 10px', borderRadius: 999, font: '700 11px/1 var(--font)', color: meta.color, background: meta.soft }}>
           {meta.label}
         </span>
+        <ConfirmationBadge app={app} />
         <button
           onClick={() => setFocusedJob(app.job_id, app.job_title ?? 'This role', { openWidget: true })}
           title="Open the AI ATS review for this job"
@@ -621,9 +622,12 @@ function Row({ app, selected, onToggle, onOpen }: { app: Application; selected: 
         <span style={{ font: '600 10.5px/1 var(--mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.03em' }}>{app.apply_mode}</span>
       </td>
       <td style={{ padding: '0 16px' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: sm.soft, color: sm.color, font: '700 11px/1 var(--font)' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: sm.color }} /> {sm.label}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: sm.soft, color: sm.color, font: '700 11px/1 var(--font)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: sm.color }} /> {sm.label}
+          </span>
+          <ConfirmationBadge app={app} />
+        </div>
       </td>
       <td style={{ padding: '0 16px', textAlign: 'center' }}>
         <span style={{ font: '700 12.5px/1 var(--mono)', color: app.ats_score != null ? atsColor(atsPercent(app.ats_score)) : 'var(--text-4)' }}>{app.ats_score != null ? atsPercent(app.ats_score) : '—'}</span>
@@ -633,6 +637,31 @@ function Row({ app, selected, onToggle, onOpen }: { app: Application; selected: 
       </td>
       <td style={{ padding: '0 16px', textAlign: 'right', color: 'var(--text-4)' }}><Icon name="chevR" size={15} /></td>
     </tr>
+  );
+}
+
+/** Honest sub-status for an `applied` row whose submission was not actually confirmed.
+ *  An `applied` status with confirmation_state simulated/unconfirmed/failed is a distinct
+ *  outcome the operator must see — never let the status chip alone imply a clean success. */
+function ConfirmationBadge({ app }: { app: Application }) {
+  if (app.status !== 'applied') return null;
+  const cs = app.confirmation_state;
+  const spec =
+    cs === 'simulated'
+      ? { label: 'Simulated', color: 'var(--text-3)', soft: 'var(--surface-3)', title: 'This run only simulated a submission — nothing was sent to the employer. Enable live apply and a connected session to really submit.' }
+      : cs === 'unconfirmed'
+        ? { label: 'Unconfirmed', color: 'var(--review)', soft: 'var(--review-soft)', title: 'Submitted, but the portal returned no confirmation. Open the application to verify it landed.' }
+        : cs === 'failed'
+          ? { label: 'Not confirmed', color: 'var(--rejected)', soft: 'var(--rejected-soft)', title: 'The submission could not be confirmed.' }
+          : null;
+  if (!spec) return null;
+  return (
+    <span
+      title={spec.title}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 22, padding: '0 9px', borderRadius: 999, background: spec.soft, color: spec.color, font: '700 10.5px/1 var(--font)' }}
+    >
+      <Icon name="alert" size={10} /> {spec.label}
+    </span>
   );
 }
 

@@ -89,7 +89,7 @@ async def tailor_for_application(
     app.resume_id = tailored.id
     # The application's score is the score of the file it will submit, taken from that file.
     app.ats_score = tailored.ats_score
-    record_event(
+    await record_event(
         db,
         app,
         ApplicationEventType.CV_TAILORED,

@@ -21,6 +21,13 @@ export interface Application {
   resume_version_id: string | null;
   status: string;
   apply_mode: string;
+  /** How it was delivered: automated | manual | email | simulated | none. */
+  submission_method: string;
+  /** Whether the far end acknowledged it: confirmed | unconfirmed | simulated | pending | failed.
+   *  An `applied` status with a non-`confirmed` state is NOT a clean success — surface it. */
+  confirmation_state: string;
+  /** What the agent actually reported, verbatim — shown rather than paraphrased. */
+  confirmation_detail: string | null;
   ats_score: number | null;
   cover_letter_path: string | null;
   applied_at: string | null;

@@ -79,6 +79,13 @@ class ApplicationResponse(BaseModel):
     resume_version_id: str | None = None
     status: str
     apply_mode: str
+    #: How the application was actually delivered and whether the far end acknowledged it.
+    #: Exposed so the UI never presents a simulated or unconfirmed run as a clean "Applied":
+    #: ``status == applied`` with ``confirmation_state`` in {simulated, unconfirmed} is a real,
+    #: distinct outcome the operator needs to see, not a success.
+    submission_method: str = "none"
+    confirmation_state: str = "pending"
+    confirmation_detail: str | None = None
     ats_score: float | None = None
     cover_letter_path: str | None = None
     applied_at: datetime | None = None
