@@ -26,6 +26,10 @@ export function useApolloStatus() {
   });
 }
 
+export function useGmailTest() {
+  return useMutation({ mutationFn: service.sendGmailTest });
+}
+
 export function useInboxSync() {
   const qc = useQueryClient();
   return useMutation({

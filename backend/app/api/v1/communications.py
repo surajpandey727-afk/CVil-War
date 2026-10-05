@@ -13,6 +13,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +60,37 @@ async def gmail_status(user: CurrentUser, db: AsyncSession = Depends(get_tenant_
         configured=configured,
         connected=connected,
         authorize_url=gmail_auth.authorize_url(user.id) if configured and not connected else None,
+    )
+
+
+class GmailTestResult(BaseModel):
+    """Outcome of a test-email send, worded for the operator."""
+
+    outcome: str
+    sent: bool
+    message: str
+
+
+@router.post("/gmail/test", response_model=GmailTestResult, summary="Send a test email to yourself")
+async def gmail_test(
+    user: CurrentUser, db: AsyncSession = Depends(get_tenant_db)
+) -> GmailTestResult:
+    """Send a one-off test from the connected account to its own inbox, so the operator can
+    verify notifications work without waiting for a real application to go out."""
+    from app.services.gmail_send import NotifyOutcome, send_test_email
+
+    outcome = await send_test_email(db, user.id)
+    messages = {
+        NotifyOutcome.SENT: "Test email sent. Check your inbox.",
+        NotifyOutcome.NOT_CONFIGURED: "Gmail is not set up on this deployment.",
+        NotifyOutcome.NOT_CONNECTED: "Gmail is not connected yet — connect it first.",
+        NotifyOutcome.INSUFFICIENT_SCOPE: "Reconnect Gmail to grant the send permission.",
+        NotifyOutcome.FAILED: "Gmail returned an error; please try again.",
+    }
+    return GmailTestResult(
+        outcome=outcome.value,
+        sent=outcome is NotifyOutcome.SENT,
+        message=messages.get(outcome, "Could not send a test email."),
     )
 
 

@@ -17,6 +17,14 @@ export async function disconnectGmail(): Promise<void> {
   await api.delete('/communications/gmail');
 }
 
+export interface GmailTestResult { outcome: string; sent: boolean; message: string }
+
+/** Send a test email from the connected account to its own inbox, to verify notifications. */
+export async function sendGmailTest(): Promise<GmailTestResult> {
+  const { data } = await api.post<GmailTestResult>('/communications/gmail/test');
+  return data;
+}
+
 export async function getApolloStatus(): Promise<ApolloStatus> {
   const { data } = await api.get<ApolloStatus>('/communications/apollo/status');
   return data;

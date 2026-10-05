@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/Icon';
 import { useApplications } from '@/hooks/useApplications';
 import {
-  useApolloStatus, useCommunications, useDisconnectGmail, useGmailStatus,
+  useApolloStatus, useCommunications, useDisconnectGmail, useGmailStatus, useGmailTest,
   useInboxSync, useLinkApplication,
 } from '@/hooks/useCommunications';
 import { useAppStore } from '@/store/useAppStore';
@@ -39,6 +39,7 @@ export default function CommunicationsPage() {
   const { data: gmail, isLoading: gmailLoading } = useGmailStatus();
   const { data: apollo } = useApolloStatus();
   const disconnectGmail = useDisconnectGmail();
+  const gmailTest = useGmailTest();
   const inboxSync = useInboxSync();
   const { data, isLoading, isError, refetch } = useCommunications(unmatchedOnly);
 
@@ -73,7 +74,12 @@ export default function CommunicationsPage() {
                 notify(detail || 'Inbox sync failed', 'error');
               },
             })}
+            onTest={() => gmailTest.mutate(undefined, {
+              onSuccess: (r) => notify(r.message, r.sent ? 'success' : 'warning'),
+              onError: () => notify('Could not send a test email', 'error'),
+            })}
             syncing={inboxSync.isPending}
+            testing={gmailTest.isPending}
             disconnecting={disconnectGmail.isPending}
           />
           <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
@@ -118,12 +124,14 @@ export default function CommunicationsPage() {
   );
 }
 
-function GmailCard({ status, loading, onDisconnect, onSync, syncing, disconnecting }: {
+function GmailCard({ status, loading, onDisconnect, onSync, onTest, syncing, testing, disconnecting }: {
   status: { configured: boolean; connected: boolean; authorize_url: string | null } | undefined;
   loading: boolean;
   onDisconnect: () => void;
   onSync: () => void;
+  onTest: () => void;
   syncing: boolean;
+  testing: boolean;
   disconnecting: boolean;
 }) {
   return (
@@ -159,6 +167,14 @@ function GmailCard({ status, loading, onDisconnect, onSync, syncing, disconnecti
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={onSync} disabled={syncing} style={{ ...ghost, padding: '0 14px' }}>
             {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
+          <button
+            onClick={onTest}
+            disabled={testing}
+            title="Send a test email from this account to your own inbox, to confirm notifications work."
+            style={{ ...ghost, padding: '0 14px' }}
+          >
+            {testing ? 'Sending…' : 'Send test email'}
           </button>
           <button
             onClick={onDisconnect}

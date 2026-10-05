@@ -167,6 +167,50 @@ async def send_application_confirmation(
     return NotifyOutcome.SENT
 
 
+async def send_test_email(db: AsyncSession, user_id: str) -> NotifyOutcome:
+    """Send a one-off test message from the connected account to itself, to prove it works.
+
+    Returns the outcome so the caller can show the operator exactly what happened. Never raises.
+    The recipient is the authenticated account's own address, so "verify in your inbox" means
+    checking the same mailbox CVil-War will send future notifications to.
+    """
+    if not gmail_auth.is_configured():
+        return NotifyOutcome.NOT_CONFIGURED
+    if not await gmail_auth.is_connected(db, user_id):
+        return NotifyOutcome.NOT_CONNECTED
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        return NotifyOutcome.NOT_CONNECTED
+    try:
+        token = await gmail_auth.get_valid_access_token(db, user_id)
+    except gmail_auth.GmailNotConnectedError:
+        return NotifyOutcome.NOT_CONNECTED
+
+    raw = _build_raw_message(
+        to=user.email,
+        subject="CVil-War: email notifications are working",
+        body=(
+            "This is a test from CVil-War.\n\n"
+            "Your Gmail is connected, and application-confirmation emails will arrive here when "
+            "your applications go out. You can disconnect any time under Communications.\n\n"
+            "— CVil-War"
+        ),
+    )
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.post(
+                _SEND_URL, headers={"Authorization": f"Bearer {token}"}, json={"raw": raw}
+            )
+        if response.status_code == 403:
+            return NotifyOutcome.INSUFFICIENT_SCOPE
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("gmail_send.test_failed", user_id=user_id, error=str(exc))
+        return NotifyOutcome.FAILED
+    logger.info("gmail_send.test_sent", user_id=user_id)
+    return NotifyOutcome.SENT
+
+
 _TIMELINE_NOTE: dict[NotifyOutcome, str] = {
     NotifyOutcome.SENT: "Confirmation email sent.",
     NotifyOutcome.NOT_CONFIGURED: (
