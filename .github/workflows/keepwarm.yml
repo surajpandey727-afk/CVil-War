@@ -1,0 +1,43 @@
+name: Keep-warm & uptime
+
+# Why this exists: the production database lives on Supabase's free tier, which pauses a
+# project after ~7 days with no connections and tears down its host — which is exactly how the
+# app went dark for a fortnight with nothing watching it (see docs/ARCHITECTURE_AUDIT.md §2).
+#
+# This workflow does two jobs at once, for free, with nothing to run or pay for:
+#   1. Keep-warm — a scheduled request every ~10 minutes keeps a connection flowing, so the
+#      free tier never considers the project idle. The DB-touching health probe is what counts;
+#      a static-page ping would not keep the database warm.
+#   2. Uptime — if /health does not return 200 with "db": true, the job fails and GitHub emails
+#      the repo owner. That is the alert whose absence let §2 go unnoticed.
+#
+# It polls the API's /health, which already returns 503 with {"db": false} when the database is
+# unreachable — the endpoint was built for exactly this and nothing was reading it.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes (GitHub's minimum is 5)
+  workflow_dispatch: {} # allow a manual run from the Actions tab
+
+# Never pile up: if a run is somehow still going, skip rather than stack.
+concurrency:
+  group: keepwarm
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe /health (keep-warm + uptime)
+        env:
+          HEALTH_URL: https://cvil-war-api.vercel.app/health
+        run: |
+          set -uo pipefail
+          body="$(curl -sS --max-time 25 "$HEALTH_URL" || true)"
+          echo "health: $body"
+          # Pass only when the database is actually reachable, not merely when the API answers.
+          echo "$body" | grep -q '"db": *true' || echo "$body" | grep -q '"db":true' || {
+            echo "::error::Health check failed — database not reachable. Check the Supabase project."
+            exit 1
+          }
+          echo "OK — database reachable."
