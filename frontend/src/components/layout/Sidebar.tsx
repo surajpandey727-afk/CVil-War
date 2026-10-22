@@ -20,6 +20,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'grid' },
   { to: '/jobs', label: 'Jobs', icon: 'briefcase' },
+  { to: '/skills', label: 'Skill Radar', icon: 'gauge' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },
   { to: '/resumes', label: 'Résumés', icon: 'file' },
   { to: '/resume-intelligence', label: 'Resume Intelligence', icon: 'wand' },

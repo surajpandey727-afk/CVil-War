@@ -5,6 +5,7 @@ import Toaster from '@/components/ui/Toaster';
 import OfflineBanner from '@/components/ui/OfflineBanner';
 import DashboardPage from '@/pages/DashboardPage';
 import JobSearchPage from '@/pages/JobSearchPage';
+import SkillRadarPage from '@/pages/SkillRadarPage';
 import ApplicationsPage from '@/pages/ApplicationsPage';
 import AppDetailPage from '@/pages/AppDetailPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
@@ -50,6 +51,7 @@ function App() {
         >
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/jobs" element={<JobSearchPage />} />
+          <Route path="/skills" element={<SkillRadarPage />} />
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/applications/:id" element={<AppDetailPage />} />
           <Route path="/resumes" element={<ResumesPage />} />
