@@ -15,12 +15,9 @@ name: Keep-warm & uptime
 # unreachable — the endpoint was built for exactly this and nothing was reading it.
 
 on:
-  # Scheduled run is PAUSED until production points at the restored database — otherwise it
-  # emails a failure every 10 minutes while prod is knowingly down. Re-enable the cron below
-  # once the cvil-war-api DATABASE_URL is updated and /health returns 200.
-  # schedule:
-  #   - cron: "*/10 * * * *" # every 10 minutes (GitHub's minimum is 5)
-  workflow_dispatch: {} # manual run from the Actions tab (use this to test once prod is fixed)
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes (GitHub's minimum is 5)
+  workflow_dispatch: {} # allow a manual run from the Actions tab
 
 # Never pile up: if a run is somehow still going, skip rather than stack.
 concurrency:

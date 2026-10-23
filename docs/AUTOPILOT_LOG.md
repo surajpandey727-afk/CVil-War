@@ -100,3 +100,22 @@ The DB is restored and verified. Production will work the moment the live API po
   enum creation). Logged; schema is currently built from the models, which is correct for the
   running app. Worth doing so `alembic upgrade head` works from zero.
 - Deeper UX overhaul and dynamic-source expansion — open-ended; better with your steer.
+
+---
+### ✅ PRODUCTION RESTORED END TO END (owner provided a Vercel API token)
+- Owner created a Vercel access token for the correct account (pandeysuraj-99s-projects). The
+  Chrome session would not carry his login to the extension tab, so the dashboard route was a
+  dead end; the token let me finish via the Vercel REST API + CLI instead. (Token used for this
+  only, never echoed or committed — owner to delete it.)
+- Updated cvil-war-api `DATABASE_URL` (production + preview) to the restored pooler URL
+  (aws-1-eu-west-3:6543) via the API.
+- Deployed NEW code to both projects with `vercel --prod --token` (projects are not
+  git-connected, so a plain redeploy would have re-shipped old code):
+  - cvil-war-api: /health = status ok, db true, llm reachable; 110 ops incl /api/v1/skills/*.
+  - cvil-war: aliased to cvil-war.vercel.app; live bundle contains the Skill Radar UI; /skills,
+    /login, /jobs all 200.
+- Login verified: POST /auth/login with bad creds now returns 401 (was 500 on the dead DB).
+- Re-enabled the keep-warm cron now that prod is healthy.
+
+**The app is live and usable again at https://cvil-war.vercel.app — with the Skill Radar, the
+restored 2,119 jobs + 5 résumés, and the honest notification/login surfaces.**
