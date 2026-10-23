@@ -35,6 +35,19 @@ class TestSystemStatus:
         assert by_key["llm"]["status"] == "connected"
         assert body["attention"] >= 1 and body["all_ok"] is False
 
+
+    async def test_reports_email_delivery_readiness(self, client):
+        """The owner's "why have I never received an email" must be answerable here. With the
+        default log provider, email delivery is reported as not actually sending, with the
+        concrete thing to enable."""
+        resp = await client.get(f"{API}/status")
+        by_key = {s["key"]: s for s in resp.json()["services"]}
+        assert "email" in by_key, "email delivery state must be surfaced"
+        email = by_key["email"]
+        assert email["status"] in ("pending", "not_configured", "connected")
+        # Default (log provider) must say plainly that nothing is delivered and how to fix it.
+        assert "not delivered" in email["detail"].lower() or email["status"] == "connected"
+
     async def test_a_down_gateway_is_reported_not_raised(self, client):
         async def _down():
             raise TimeoutError("gateway slow")

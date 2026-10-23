@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_tenant_db
+from app.config.settings import get_settings
 from app.services import gmail_auth
 
 router = APIRouter()
@@ -40,6 +41,35 @@ class SystemStatusResponse(BaseModel):
     all_ok: bool
     #: Convenience summary for the pill label, e.g. "2 need attention".
     attention: int
+
+
+def _email_state() -> ServiceState:
+    """Transactional email delivery (password reset, and any SMTP-routed notification).
+
+    Answers the owner's actual question — "why have I never received an email" — plainly: with
+    the default ``log`` provider, nothing is ever delivered; it is written to the server log so
+    the flows work in dev without a mail server. Real delivery needs ``EMAIL__PROVIDER=smtp`` and
+    SMTP credentials. (Application-submitted confirmations are a separate channel that goes
+    through the user's connected Gmail — see the Gmail row.)
+    """
+    cfg = get_settings().email
+    if cfg.provider == "smtp":
+        if cfg.smtp_host:
+            return ServiceState(
+                key="email", label="Email delivery", status="connected",
+                detail=f"Transactional email sends via SMTP ({cfg.smtp_host}).",
+            )
+        return ServiceState(
+            key="email", label="Email delivery", status="not_configured",
+            detail="SMTP is selected but no SMTP host is set — email cannot be delivered.",
+            action_path="/settings", action_label="Configure",
+        )
+    return ServiceState(
+        key="email", label="Email delivery", status="pending",
+        detail="Emails are written to the server log, not delivered. Set EMAIL__PROVIDER=smtp "
+        "with SMTP credentials to send real email (password reset, alerts).",
+        action_path="/settings", action_label="Enable sending",
+    )
 
 
 async def _gmail_state(db: AsyncSession, user_id: str) -> ServiceState:
@@ -137,6 +167,7 @@ async def system_status(
     boards = await _platforms_state(db, user.id)
     agent = await _agent_state(db, user.id)
     llm = await llm_task
-    services = [agent, llm, gmail, boards, database]
+    email = _email_state()
+    services = [agent, llm, gmail, email, boards, database]
     attention = sum(1 for s in services if s.status in ("pending", "unavailable", "not_configured"))
     return SystemStatusResponse(services=services, all_ok=attention == 0, attention=attention)
