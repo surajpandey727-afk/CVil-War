@@ -54,6 +54,7 @@ _HTML_HEADERS = {"Accept": "text/html,application/xhtml+xml"}
 #: raw (uncommented) HTML instead.
 _MOVEJOBS_URL_RE = re.compile(r'<!--\s*<a href="(https://movejobs\.uk/jobs/[^"]+)"')
 
+
 def _movejobs_url(card_html: str) -> str:
     match = _MOVEJOBS_URL_RE.search(card_html)
     return match.group(1) if match else ""
@@ -99,8 +100,7 @@ class MoveJobsSource(ApiJobSource):
             job_type = badge.get_text(strip=True) if badge else ""
 
             list_items = [
-                _collapse_ws(li.get_text(" ", strip=True))
-                for li in card.select(".rt-list > li")
+                _collapse_ws(li.get_text(" ", strip=True)) for li in card.select(".rt-list > li")
             ]
             location_text = list_items[0] if len(list_items) > 0 else ""
             salary_text = list_items[1] if len(list_items) > 1 else ""
@@ -113,22 +113,22 @@ class MoveJobsSource(ApiJobSource):
 
             description_el = card.select_one(".jddv")
             description = (
-                _collapse_ws(description_el.get_text(" ", strip=True))
-                if description_el
-                else ""
+                _collapse_ws(description_el.get_text(" ", strip=True)) if description_el else ""
             )
 
-            records.append({
-                "title": title,
-                "job_type": job_type,
-                "location": location_text,
-                # The salary line is one of the search form's own bucket labels (e.g.
-                # "10K - 100K GBP" for a role that pays far less), not a per-job figure —
-                # see _to_listing for why this is deliberately not parsed into a number.
-                "salary_text": salary_text,
-                "description": description,
-                "url": _movejobs_url(str(card)),
-            })
+            records.append(
+                {
+                    "title": title,
+                    "job_type": job_type,
+                    "location": location_text,
+                    # The salary line is one of the search form's own bucket labels (e.g.
+                    # "10K - 100K GBP" for a role that pays far less), not a per-job figure —
+                    # see _to_listing for why this is deliberately not parsed into a number.
+                    "salary_text": salary_text,
+                    "description": description,
+                    "url": _movejobs_url(str(card)),
+                }
+            )
             if len(records) >= limit:
                 break
         return records
@@ -208,13 +208,15 @@ class TarveSource(ApiJobSource):
                     company = parts[0] if len(parts) > 0 else ""
                     location_text = parts[1] if len(parts) > 1 else ""
                     posted = parts[2] if len(parts) > 2 else ""
-                records.append({
-                    "title": title,
-                    "company": company,
-                    "location": location_text,
-                    "posted_at": posted,
-                    "url": f"https://tarve.co.uk{href}" if href.startswith("/") else href,
-                })
+                records.append(
+                    {
+                        "title": title,
+                        "company": company,
+                        "location": location_text,
+                        "posted_at": posted,
+                        "url": f"https://tarve.co.uk{href}" if href.startswith("/") else href,
+                    }
+                )
                 if len(records) >= limit:
                     return records
         return records

@@ -33,7 +33,10 @@ def needs_intervention_event(
     return {
         "type": "intervention_required",
         "payload": {
-            "application_id": application_id, "kind": kind, "prompt": prompt, "url": url,
+            "application_id": application_id,
+            "kind": kind,
+            "prompt": prompt,
+            "url": url,
             "screenshot_b64": screenshot_b64,
         },
     }

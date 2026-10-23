@@ -272,9 +272,7 @@ class LinkedInPlatform(JobPlatform):
         if "date_posted" in filters:
             parts.append(f"Filter by date posted: {filters['date_posted']}. ")
         if "experience_level" in filters:
-            parts.append(
-                f"Filter by experience level: {filters['experience_level']}. "
-            )
+            parts.append(f"Filter by experience level: {filters['experience_level']}. ")
         if filters.get("remote"):
             parts.append("Filter for remote positions only. ")
         if "job_type" in filters:

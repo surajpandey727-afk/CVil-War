@@ -107,15 +107,17 @@ def to_matches(result: _LlmResult) -> list[RequirementMatch]:
         if not requirement:
             continue
         level = row.level.strip().casefold()
-        out.append(RequirementMatch(
-            requirement=requirement[:200],
-            # An unrecognised level is treated as missing, not as a pass. A model that
-            # invents a level must not thereby invent a match.
-            level=MatchLevel(level) if level in valid else MatchLevel.MISSING,
-            evidence=(row.evidence or "").strip()[:400],
-            semantic=bool(row.semantic),
-            required=row.required,
-        ))
+        out.append(
+            RequirementMatch(
+                requirement=requirement[:200],
+                # An unrecognised level is treated as missing, not as a pass. A model that
+                # invents a level must not thereby invent a match.
+                level=MatchLevel(level) if level in valid else MatchLevel.MISSING,
+                evidence=(row.evidence or "").strip()[:400],
+                semantic=bool(row.semantic),
+                required=row.required,
+            )
+        )
     return out
 
 
@@ -125,7 +127,8 @@ def to_matches(result: _LlmResult) -> list[RequirementMatch]:
 _BULLET = re.compile(r"^\s*[-*•·▪]\s*(.{8,180})$", re.M)
 _REQUIREMENT_CUE = re.compile(
     r"\b(experience|proficien|familiar|knowledge|degree|skilled|expert|background|"
-    r"ability to|proven|track record|understanding of)\b", re.I
+    r"ability to|proven|track record|understanding of)\b",
+    re.I,
 )
 
 
@@ -163,13 +166,15 @@ def keyword_requirements(
     matches: list[RequirementMatch] = []
     for term in terms[:16]:
         evidence = _find_evidence(cv_text, term)
-        matches.append(RequirementMatch(
-            requirement=_phrase_for(term, bullets),
-            level=MatchLevel.STRONG if evidence else MatchLevel.MISSING,
-            evidence=evidence,
-            semantic=False,
-            required=None,
-        ))
+        matches.append(
+            RequirementMatch(
+                requirement=_phrase_for(term, bullets),
+                level=MatchLevel.STRONG if evidence else MatchLevel.MISSING,
+                evidence=evidence,
+                semantic=False,
+                required=None,
+            )
+        )
     return matches
 
 

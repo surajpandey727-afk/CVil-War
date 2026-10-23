@@ -27,7 +27,6 @@ editor has to remember and a validator has to police. It is a property of the re
 # to recognise the characters real CVs are typeset with. ASCII look-alikes would stop
 # them matching the documents they are written for.
 
-
 from __future__ import annotations
 
 import hashlib
@@ -66,7 +65,7 @@ def _strip_bullet(text: str) -> tuple[str, str]:
     match = BULLET_PREFIX.match(text)
     if not match:
         return "", text.strip()
-    return match.group(0), text[match.end():].strip()
+    return match.group(0), text[match.end() :].strip()
 
 
 @dataclass
@@ -221,7 +220,9 @@ class ResumeDocument:
         """
         fixed = [ln.text for ln in self.all_lines() if not ln.editable]
         # A skills row's label is as fixed as any heading; only its list of items may grow.
-        fixed.extend(ln.text.split(":", 1)[0] for ln in self.all_lines() if ln.kind is LineKind.SKILL)
+        fixed.extend(
+            ln.text.split(":", 1)[0] for ln in self.all_lines() if ln.kind is LineKind.SKILL
+        )
         fixed.extend(s.heading for s in self.sections)
         return hashlib.sha256("\u0000".join(fixed).encode()).hexdigest()
 
@@ -229,8 +230,7 @@ class ResumeDocument:
         """A deep copy, so an edit plan can be applied without mutating the original."""
         return ResumeDocument(
             header=[
-                Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent, ln.style)
-                for ln in self.header
+                Line(ln.id, ln.kind, ln.text, ln.marker, ln.indent, ln.style) for ln in self.header
             ],
             sections=[
                 Section(

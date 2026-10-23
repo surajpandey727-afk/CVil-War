@@ -97,16 +97,20 @@ async def other_jobs(db: AsyncSession, job: Job) -> tuple[list[CompanyJob], int]
         return [], 0
 
     rows = (
-        await db.execute(
-            select(Job)
-            .where(
-                func.lower(Job.company) == company.casefold(),
-                Job.id != job.id,
+        (
+            await db.execute(
+                select(Job)
+                .where(
+                    func.lower(Job.company) == company.casefold(),
+                    Job.id != job.id,
+                )
+                .order_by(Job.created_at.desc())
+                .limit(_MAX_OTHER_JOBS)
             )
-            .order_by(Job.created_at.desc())
-            .limit(_MAX_OTHER_JOBS)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     total = (
         await db.execute(
@@ -151,7 +155,7 @@ async def profile_for(db: AsyncSession, job: Job) -> CompanyProfile:
             "which this deployment deliberately does not use."
             if not website
             else "Company details beyond the official site would need a paid enrichment "
-                 "service, which this deployment deliberately does not use."
+            "service, which this deployment deliberately does not use."
         ),
     )
     logger.info(

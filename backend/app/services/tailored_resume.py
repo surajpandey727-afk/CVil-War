@@ -69,12 +69,17 @@ async def trusted_sources(db: AsyncSession, base: Resume, user_id: str) -> list[
     if settings is not None and (found := profile_source(settings.candidate_profile)):
         sources.append(found)
     others = (
-        await db.execute(
-            select(Resume).where(
-                Resume.type == "base", Resume.id != base.id, Resume.archived_at.is_(None)
-            ).order_by(Resume.created_at.desc()).limit(4)
+        (
+            await db.execute(
+                select(Resume)
+                .where(Resume.type == "base", Resume.id != base.id, Resume.archived_at.is_(None))
+                .order_by(Resume.created_at.desc())
+                .limit(4)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for other in others:
         if found := resume_source(other.name, other.content_text):
             sources.append(found)
@@ -122,7 +127,7 @@ async def _generate(
 ) -> ResumeResponse:
     if not ats.usable_posting(job):
         raise GenerationError(
-            "This job has no description to tailor against. Open the posting and add its text first."
+            "This job has no description to tailor against. Open the posting and add its text first."  # noqa: E501
         )
     try:
         source = await storage.materialize_to_temp(base.file_path_pdf or "", suffix=".pdf")
@@ -141,7 +146,11 @@ async def _generate(
     try:
         llm = await build_llm_client_for_user(db, user_id)
         outcome = await tailor_pdf(
-            source, out_path, job_text=ats.job_text(job), job_title=job.title or "", llm=llm,
+            source,
+            out_path,
+            job_text=ats.job_text(job),
+            job_title=job.title or "",
+            llm=llm,
             trusted=await trusted_sources(db, base, user_id),
         )
 

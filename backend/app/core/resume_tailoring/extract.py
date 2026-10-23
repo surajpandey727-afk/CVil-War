@@ -21,7 +21,6 @@ Lines carrying an email, a URL or a date range are never headings however they a
 # to recognise the characters real CVs are typeset with. ASCII look-alikes would stop
 # them matching the documents they are written for.
 
-
 from __future__ import annotations
 
 import re
@@ -198,8 +197,16 @@ def parse_styled_lines(
 #: Words that name a skills block. Substring matching, deliberately: word-boundary
 #: patterns kept failing on the plural, and a heading is short enough that a substring
 #: test is both sufficient and impossible to mis-escape.
-_SKILLS_WORDS = ("skill", "competenc", "technolog", "technical", "highlight",
-                 "proficienc", "toolkit", "stack")
+_SKILLS_WORDS = (
+    "skill",
+    "competenc",
+    "technolog",
+    "technical",
+    "highlight",
+    "proficienc",
+    "toolkit",
+    "stack",
+)
 
 
 def _is_skills_heading(heading: str) -> bool:
@@ -207,11 +214,10 @@ def _is_skills_heading(heading: str) -> bool:
     low = heading.lower()
     return any(word in low for word in _SKILLS_WORDS)
 
+
 #: An entry header: an employer, a role-and-dates line, a project sub-heading. These follow
 #: bullets all the time and must never be swallowed into the bullet above them.
-_ENTRY_HEADER_HINT = re.compile(
-    r"\((?:Technology|Product|Engineering|Data)\s+Team\)|–|—", re.I
-)
+_ENTRY_HEADER_HINT = re.compile(r"\((?:Technology|Product|Engineering|Data)\s+Team\)|–|—", re.I)
 
 
 def _stitch(left: str, right: str) -> str:
@@ -359,8 +365,11 @@ def _line_style(line: dict, page_width: float, previous_bottom: float | None) ->
 
     dominant_colour_key = colours.most_common(1)[0][0]
     swatch = next(
-        (c.get("non_stroking_color") for c in chars
-         if str(c.get("non_stroking_color")) == dominant_colour_key),
+        (
+            c.get("non_stroking_color")
+            for c in chars
+            if str(c.get("non_stroking_color")) == dominant_colour_key
+        ),
         None,
     )
 

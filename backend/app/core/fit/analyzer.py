@@ -394,9 +394,7 @@ def overall_score(categories: list[FitCategory]) -> float:
     total = sum(weights)
     if total <= 0:
         return 0.0
-    return round(
-        sum(c.score * w for c, w in zip(categories, weights, strict=True)) / total, 4
-    )
+    return round(sum(c.score * w for c, w in zip(categories, weights, strict=True)) / total, 4)
 
 
 def build_recommendations(matches: list[RequirementMatch]) -> list[Recommendation]:

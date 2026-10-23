@@ -78,25 +78,25 @@ class AccessMechanism(StrEnum):
     browser session the candidate is already entitled to use.
     """
 
-    API = "api"                                    # official, documented
-    PUBLIC_ENDPOINT = "public_endpoint"            # keyless JSON/ATS board
-    FEED = "feed"                                  # RSS/Atom
-    PUBLIC_WEBSITE = "public_website"              # server-rendered, automation permitted
+    API = "api"  # official, documented
+    PUBLIC_ENDPOINT = "public_endpoint"  # keyless JSON/ATS board
+    FEED = "feed"  # RSS/Atom
+    PUBLIC_WEBSITE = "public_website"  # server-rendered, automation permitted
     AUTHENTICATED_BROWSER = "authenticated_browser"  # user-authorised persistent session
-    INTERACTIVE_BROWSER = "interactive_browser"    # user drives, system assists
-    APPLICATION_URL = "application_url"            # hand off a deep link
-    STATUS_SYNC = "status_sync"                    # read application state only
-    HUMAN = "human"                                # entirely manual
+    INTERACTIVE_BROWSER = "interactive_browser"  # user drives, system assists
+    APPLICATION_URL = "application_url"  # hand off a deep link
+    STATUS_SYNC = "status_sync"  # read application state only
+    HUMAN = "human"  # entirely manual
 
 
 class MechanismState(StrEnum):
     """Whether one mechanism is usable for one portal right now."""
 
     AVAILABLE = "available"
-    BLOCKED = "blocked"            # upstream refuses automation (403/anti-bot)
+    BLOCKED = "blocked"  # upstream refuses automation (403/anti-bot)
     AUTH_REQUIRED = "auth_required"
-    UNKNOWN = "unknown"            # never probed — not the same as unavailable
-    UNSUPPORTED = "unsupported"    # the portal has no such mechanism
+    UNKNOWN = "unknown"  # never probed — not the same as unavailable
+    UNSUPPORTED = "unsupported"  # the portal has no such mechanism
 
 
 @dataclass(frozen=True)
@@ -148,7 +148,11 @@ CATALOGUE: tuple[SourceSpec, ...] = (
     # Discovery reads the public listing, which needs no account and puts nothing at risk;
     # the connected session is reserved for applying, where it is genuinely required.
     SourceSpec(
-        "linkedin", "LinkedIn Jobs", "linkedin.com", SourceTier.TIER1, True,
+        "linkedin",
+        "LinkedIn Jobs",
+        "linkedin.com",
+        SourceTier.TIER1,
+        True,
         mechanisms={
             AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE,
             AccessMechanism.AUTHENTICATED_BROWSER: MechanismState.AUTH_REQUIRED,
@@ -159,11 +163,14 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         "indeed", "Indeed UK", "indeed.co.uk", SourceTier.TIER1, True, known_broken=_BROKEN_SCRAPER
     ),
     SourceSpec(
-        "glassdoor", "Glassdoor", "glassdoor.co.uk", SourceTier.TIER1, True,
+        "glassdoor",
+        "Glassdoor",
+        "glassdoor.co.uk",
+        SourceTier.TIER1,
+        True,
         known_broken=_BROKEN_SCRAPER,
     ),
     SourceSpec("wellfound", "Wellfound", "wellfound.com", SourceTier.TIER1),
-
     # The keyless API sources that work today.
     SourceSpec("remotive", "Remotive", "remotive.com", SourceTier.TIER4, True),
     SourceSpec("jobicy", "Jobicy", "jobicy.com", SourceTier.TIER4, True),
@@ -172,17 +179,29 @@ CATALOGUE: tuple[SourceSpec, ...] = (
     SourceSpec(
         "exa", "Exa semantic search", "exa.ai", SourceTier.TIER4, True, api_key_field="exa_api_key"
     ),
-
     SourceSpec(
-        "reed", "Reed", "reed.co.uk", SourceTier.TIER2, True, api_key_field="reed_api_key",
+        "reed",
+        "Reed",
+        "reed.co.uk",
+        SourceTier.TIER2,
+        True,
+        api_key_field="reed_api_key",
     ),
     SourceSpec(
-        "movejobs", "MoveJobs", "movejobs.uk", SourceTier.TIER2, True,
+        "movejobs",
+        "MoveJobs",
+        "movejobs.uk",
+        SourceTier.TIER2,
+        True,
         mechanisms={AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE},
         note="Visa-sponsorship-framed UK board; server-side keyword search confirmed live.",
     ),
     SourceSpec(
-        "tarve", "Tarve", "tarve.co.uk", SourceTier.TIER2, True,
+        "tarve",
+        "Tarve",
+        "tarve.co.uk",
+        SourceTier.TIER2,
+        True,
         mechanisms={AccessMechanism.PUBLIC_WEBSITE: MechanismState.AVAILABLE},
         note=(
             "UK board that cross-checks postings against the Home Office Skilled Worker "
@@ -191,7 +210,10 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         ),
     ),
     SourceSpec(
-        "workinstartups", "WorkInStartups", "workinstartups.com", SourceTier.TIER2,
+        "workinstartups",
+        "WorkInStartups",
+        "workinstartups.com",
+        SourceTier.TIER2,
         mechanisms={
             AccessMechanism.PUBLIC_WEBSITE: MechanismState.BLOCKED,
         },
@@ -206,11 +228,19 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         ),
     ),
     SourceSpec(
-        "adzuna", "Adzuna", "adzuna.co.uk", SourceTier.TIER2, True,
-        api_key_field="adzuna_app_key", note="Live — app id configured.",
+        "adzuna",
+        "Adzuna",
+        "adzuna.co.uk",
+        SourceTier.TIER2,
+        True,
+        api_key_field="adzuna_app_key",
+        note="Live — app id configured.",
     ),
     SourceSpec(
-        "findajob", "Work Hub — GOV.UK", "jobs.service.gov.uk", SourceTier.TIER2,
+        "findajob",
+        "Work Hub — GOV.UK",
+        "jobs.service.gov.uk",
+        SourceTier.TIER2,
         blocked_reason=(
             "DWP's jobseeker service moved to a new platform (jobs.service.gov.uk, "
             "'Work Hub' — replaces the old findajob.dwp.gov.uk) sometime before "
@@ -222,15 +252,17 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         ),
         note="Follow-up: retry reconnaissance, then adapt if the listings are keylessly reachable.",
     ),
-
     # Tier 2 entries that need the operator's own one-time login before anything can be
     # built against them — the Connect flow (core.automation.connect) already supports both;
     # what's missing is the discovery adapter that would consume the resulting session, which
     # cannot be written correctly before that session exists to inspect.
     SourceSpec(
-        "civilservice", "Civil Service Jobs", "civilservicejobs.service.gov.uk", SourceTier.TIER2,
+        "civilservice",
+        "Civil Service Jobs",
+        "civilservicejobs.service.gov.uk",
+        SourceTier.TIER2,
         blocked_reason=(
-            "Every page — including the base domain — serves a \"Quick check needed\" "
+            'Every page — including the base domain — serves a "Quick check needed" '
             "bot-verification gate before any content, confirmed live in a real browser "
             "(not just a scripted request). robots.txt allows crawling, but the gate itself "
             "cannot be automated through (verified 2026-08-29)."
@@ -248,7 +280,10 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         note="Connect this in Settings (the one-time human check), then discovery can be built.",
     ),
     SourceSpec(
-        "ukvisajobs", "UK Visa Jobs", "ukvisajobs.com", SourceTier.TIER2,
+        "ukvisajobs",
+        "UK Visa Jobs",
+        "ukvisajobs.com",
+        SourceTier.TIER2,
         mechanisms={
             # The public homepage's "Featured Jobs" carry no real per-job URL (every link is
             # a client-side-routed placeholder) — nothing worth adapting sits on this rung.
@@ -257,7 +292,7 @@ CATALOGUE: tuple[SourceSpec, ...] = (
         },
         blocked_reason=(
             "The public homepage's job cards have no real per-job URL (placeholder "
-            "href=\"/\", routed client-side) — the working catalogue with real links lives "
+            'href="/", routed client-side) — the working catalogue with real links lives '
             "behind login on my.ukvisajobs.com (verified 2026-08-29)."
         ),
         note="Connect this in Settings (the one-time human login), then discovery can be built.",
@@ -299,7 +334,6 @@ CAREER_PAGES: tuple[tuple[str, str, str], ...] = (
     ("expedia", "Expedia", "expedia.com"),
     ("trainline", "Trainline", "thetrainline.com"),
     ("king", "King", "king.com"),
-
     # Added 2026-08-30 — UK-headquartered and UK-hiring AI/data/fintech/product employers,
     # each with a live-verified board (see the date-stamped block in COMPANY_BOARDS above).
     ("quantexa", "Quantexa", "quantexa.com"),
@@ -315,7 +349,6 @@ CAREER_PAGES: tuple[tuple[str, str, str], ...] = (
     ("clearbank", "ClearBank", "clearbank.co.uk"),
     ("marshmallow", "Marshmallow", "marshmallow.com"),
     ("cleo", "Cleo", "cleo.com"),
-
     # Global remote-friendly AI/data/product employers that also hire UK-based roles.
     ("snowflake", "Snowflake", "snowflake.com"),
     ("databricks", "Databricks", "databricks.com"),

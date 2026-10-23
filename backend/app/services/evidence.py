@@ -121,9 +121,7 @@ def _job_section(job: Job | None, app: Application) -> EvidenceJob:
         # Only when it genuinely differs — repeating the job URL under a second heading
         # implies a separate application page that does not exist.
         application_url=(
-            app.application_url
-            if app.application_url and app.application_url != job.url
-            else None
+            app.application_url if app.application_url and app.application_url != job.url else None
         ),
         posted_at=_aware(job.posted_date),
     )
@@ -196,12 +194,14 @@ def _cover_letter_section(app: Application) -> EvidenceCoverLetter:
     if not path:
         return EvidenceCoverLetter(recorded=True, used=False)
     origin = "generated" if "/letters/" in path or "cover" in path.lower() else None
-    return EvidenceCoverLetter(recorded=True, used=True, name=path.rsplit("/", 1)[-1],
-                               origin=origin)
+    return EvidenceCoverLetter(
+        recorded=True, used=True, name=path.rsplit("/", 1)[-1], origin=origin
+    )
 
 
-async def _account_section(db: AsyncSession, app: Application, platform: str | None
-                           ) -> EvidenceAccount:
+async def _account_section(
+    db: AsyncSession, app: Application, platform: str | None
+) -> EvidenceAccount:
     """Which login was used, with nothing secret in it.
 
     The encrypted cookies and passwords live in ``user_credentials`` and are not read here at
@@ -250,12 +250,16 @@ async def _log_entries(db: AsyncSession, app: Application) -> list[EvidenceLogEn
     entries: list[EvidenceLogEntry] = []
 
     events = (
-        await db.execute(
-            select(ApplicationEvent)
-            .where(ApplicationEvent.application_id == app.id)
-            .order_by(ApplicationEvent.occurred_at)
+        (
+            await db.execute(
+                select(ApplicationEvent)
+                .where(ApplicationEvent.application_id == app.id)
+                .order_by(ApplicationEvent.occurred_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for event in events:
         entries.append(
             EvidenceLogEntry(
@@ -269,12 +273,16 @@ async def _log_entries(db: AsyncSession, app: Application) -> list[EvidenceLogEn
         )
 
     runs = (
-        await db.execute(
-            select(RunTrajectory)
-            .where(RunTrajectory.application_id == app.id)
-            .order_by(RunTrajectory.created_at)
+        (
+            await db.execute(
+                select(RunTrajectory)
+                .where(RunTrajectory.application_id == app.id)
+                .order_by(RunTrajectory.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for run in runs:
         started = _aware(run.created_at) or datetime.now(UTC)
         for index, step in enumerate(run.steps or []):

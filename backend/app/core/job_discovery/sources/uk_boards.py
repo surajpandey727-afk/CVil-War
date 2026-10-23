@@ -117,9 +117,7 @@ class AdzunaSource(ApiJobSource):
             platform_job_id=str(record.get("id") or ""),
             title=(record.get("title") or "").strip(),
             company=(
-                (company.get("display_name") or "").strip()
-                if isinstance(company, dict)
-                else ""
+                (company.get("display_name") or "").strip() if isinstance(company, dict) else ""
             ),
             location=(where.get("display_name") or "") if isinstance(where, dict) else "",
             url=record.get("redirect_url") or "",

@@ -62,8 +62,16 @@ MAX_TRIES = 3  # shared by WorkerSettings.max_tries and the retry-exhaustion che
 
 # Substrings marking a retryable infrastructure failure (vs a terminal non-submission).
 _TRANSIENT_HINTS = (
-    "rate limit", "timeout", "timed out", "429", "503", "502",
-    "connection", "temporarily", "unavailable", "network",
+    "rate limit",
+    "timeout",
+    "timed out",
+    "429",
+    "503",
+    "502",
+    "connection",
+    "temporarily",
+    "unavailable",
+    "network",
 )
 
 
@@ -94,9 +102,7 @@ async def _publish(
     )
 
 
-async def _submit_application(
-    db: AsyncSession, app: Application, redis: Any | None = None
-) -> str:
+async def _submit_application(db: AsyncSession, app: Application, redis: Any | None = None) -> str:
     """Submit the application.
 
     Default (``BROWSER__LIVE_APPLY`` false): a provable placeholder so the end-to-end
@@ -241,9 +247,7 @@ async def _enforce_policy(
         app.status = ApplicationStatus.PENDING_REVIEW
         app.notes = reason
         await db.commit()
-        await _publish(
-            ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, reason
-        )
+        await _publish(ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, reason)
         logger.info("apply.policy_escalate", application_id=app.id, reason=reason)
         run.status = AgentRunStatus.NEEDS_REVIEW
         run.output_summary = f"Escalated: {reason}"[:300]
@@ -268,8 +272,12 @@ async def _mark_failed(
     # would let the evidence panel imply a submission was still in flight.
     app.confirmation_state = ConfirmationState.FAILED
     await record_event(
-        db, app, ApplicationEventType.ERROR, f"Apply failed on {platform}",
-        detail=note, actor="system",
+        db,
+        app,
+        ApplicationEventType.ERROR,
+        f"Apply failed on {platform}",
+        detail=note,
+        actor="system",
     )
     await db.commit()
     applications_total.labels(status="failed", platform=platform).inc()
@@ -301,19 +309,27 @@ async def _mark_needs_verification(
     app.resume_state = {**(app.resume_state or {}), "blocked_reason": "captcha"}
     app.paused_at = datetime.now(UTC)
     await record_event(
-        db, app, ApplicationEventType.USER_ACTION_REQUIRED,
-        f"Verification required on {platform}", detail=exc.reason, actor="system",
+        db,
+        app,
+        ApplicationEventType.USER_ACTION_REQUIRED,
+        f"Verification required on {platform}",
+        detail=exc.reason,
+        actor="system",
     )
     await db.commit()
     await _publish(ctx, app.user_id, app.id, ApplicationStatus.PENDING_REVIEW.value, exc.reason)
     redis = ctx.get("redis")
     if redis is not None:
         await publish_progress(
-            redis, app.user_id,
+            redis,
+            app.user_id,
             needs_intervention_event(app.id, "captcha", exc.reason, url=exc.url),
         )
     logger.info(
-        "apply.needs_verification", application_id=app.id, url=exc.url, reason=exc.reason,
+        "apply.needs_verification",
+        application_id=app.id,
+        url=exc.url,
+        reason=exc.reason,
     )
 
 
@@ -364,9 +380,13 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         from app.core.automation.runtime.confirmation import SubmissionNotApprovedError
 
         async with record_agent_run(
-            db, app.user_id, AgentName.APPLICATION,
+            db,
+            app.user_id,
+            AgentName.APPLICATION,
             input_summary=f"Submit application to {platform} for job {app.job_id}",
-            linked_entity_type="application", linked_entity_id=app.id, redis=ctx.get("redis"),
+            linked_entity_type="application",
+            linked_entity_id=app.id,
+            redis=ctx.get("redis"),
         ) as run:
             # The automation policy gate — the one place submission is permitted or refused.
             # A hold/escalate/block is a real, visible agent outcome too (see _enforce_policy),
@@ -431,8 +451,12 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         # row: CAPTCHA pauses and (as of the fix above) failures both recorded one, but a
         # clean submission committed the status change directly and skipped it.
         await record_event(
-            db, app, ApplicationEventType.APPLICATION_SUBMITTED,
-            f"Submitted via {platform}", detail=confirmation, actor="system",
+            db,
+            app,
+            ApplicationEventType.APPLICATION_SUBMITTED,
+            f"Submitted via {platform}",
+            detail=confirmation,
+            actor="system",
         )
         await db.commit()
         applications_total.labels(status="applied", platform=platform).inc()
@@ -446,7 +470,8 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         from app.services.gmail_send import notify_application_submitted
 
         await notify_application_submitted(
-            db, app,
+            db,
+            app,
             job_title=(job.title if job else "this role"),
             company=(job.company if job else "the employer"),
             platform=platform,
@@ -547,10 +572,14 @@ async def purge_deleted_accounts(ctx: dict[str, Any]) -> None:
     cutoff = datetime.now(UTC) - timedelta(days=PURGE_GRACE_DAYS)
     async with async_session_factory() as db:
         user_ids = (
-            await db.execute(
-                select(User.id).where(User.deleted_at.isnot(None), User.deleted_at < cutoff)
+            (
+                await db.execute(
+                    select(User.id).where(User.deleted_at.isnot(None), User.deleted_at < cutoff)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         purged = 0
         for user_id in user_ids:
             result = await delete_user_data(db, user_id)
@@ -607,8 +636,10 @@ class WorkerSettings:
     # on demand — an n8n workflow triggering "sync now" reuses the exact same code path as
     # the schedule, never a second implementation that could drift from it.
     functions: ClassVar = [
-        apply_to_job, review_application_run,
-        run_discovery_for_all_users, run_inbox_sync_for_all_users,
+        apply_to_job,
+        review_application_run,
+        run_discovery_for_all_users,
+        run_inbox_sync_for_all_users,
     ]
     cron_jobs: ClassVar = [
         cron(monitor_system_health, minute={0, 15, 30, 45}),

@@ -58,9 +58,7 @@ class CredentialStore:
             existing.kek_id = blob.kek_id
         await db.commit()
 
-    async def _get(
-        self, db: AsyncSession, user_id: str, kind: str, provider: str
-    ) -> bytes | None:
+    async def _get(self, db: AsyncSession, user_id: str, kind: str, provider: str) -> bytes | None:
         row = (
             await db.execute(
                 select(UserCredential).where(
@@ -81,9 +79,7 @@ class CredentialStore:
         """Encrypt and upsert a user's BYO LLM provider key."""
         await self._put(db, user_id, _KIND_LLM_KEY, provider_name, api_key.encode())
 
-    async def get_llm_key(
-        self, db: AsyncSession, user_id: str, provider_name: str
-    ) -> str | None:
+    async def get_llm_key(self, db: AsyncSession, user_id: str, provider_name: str) -> str | None:
         """Return a user's decrypted LLM provider key, or ``None`` if not set."""
         data = await self._get(db, user_id, _KIND_LLM_KEY, provider_name)
         return data.decode() if data is not None else None
@@ -101,9 +97,7 @@ class CredentialStore:
         data = await self._get(db, user_id, _KIND_COOKIES, platform)
         return json.loads(data.decode()) if data is not None else None
 
-    async def delete_session_cookies(
-        self, db: AsyncSession, user_id: str, platform: str
-    ) -> bool:
+    async def delete_session_cookies(self, db: AsyncSession, user_id: str, platform: str) -> bool:
         """Delete a platform's stored session cookies. Returns True if a row was removed."""
         result = await db.execute(
             delete(UserCredential).where(
@@ -130,9 +124,7 @@ class CredentialStore:
         data = await self._get(db, user_id, _KIND_OAUTH, provider_name)
         return json.loads(data.decode()) if data is not None else None
 
-    async def delete_oauth_token(
-        self, db: AsyncSession, user_id: str, provider_name: str
-    ) -> bool:
+    async def delete_oauth_token(self, db: AsyncSession, user_id: str, provider_name: str) -> bool:
         """Delete a provider's stored OAuth token. Returns True if a row was removed."""
         result = await db.execute(
             delete(UserCredential).where(

@@ -15,7 +15,6 @@ sort is stable, so bullets of equal relevance stay in the order the candidate ch
 # suggested list literal puts sixty quoted words on a single line, which is how a
 # 563-character line got into this file in the first place.
 
-
 from __future__ import annotations
 
 import re
@@ -71,8 +70,7 @@ def posting_vocabulary(spec: JobSpec) -> set[str]:
     from collections import Counter
 
     words = [
-        w for w in _re.findall(r"[a-z][a-z-]{3,}", (spec.raw_text or "").lower())
-        if w not in _STOP
+        w for w in _re.findall(r"[a-z][a-z-]{3,}", (spec.raw_text or "").lower()) if w not in _STOP
     ]
     counts = Counter(words)
     return {word for word, n in counts.items() if n >= 2}

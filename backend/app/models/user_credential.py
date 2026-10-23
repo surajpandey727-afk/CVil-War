@@ -22,9 +22,7 @@ class UserCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """
 
     __tablename__ = "user_credentials"
-    __table_args__ = (
-        UniqueConstraint("user_id", "kind", "provider", name="uq_user_credential"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "kind", "provider", name="uq_user_credential"),)
 
     user_id: Mapped[str] = mapped_column(
         String(32),

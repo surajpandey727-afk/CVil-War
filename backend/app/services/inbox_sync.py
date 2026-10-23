@@ -86,9 +86,11 @@ async def _fetch_message(client: httpx.AsyncClient, token: str, message_id: str)
     response.raise_for_status()
     body = response.json()
     headers = body.get("payload", {}).get("headers", [])
-    occurred_at = datetime.fromtimestamp(
-        int(body["internalDate"]) / 1000, tz=UTC
-    ) if body.get("internalDate") else datetime.now(UTC)
+    occurred_at = (
+        datetime.fromtimestamp(int(body["internalDate"]) / 1000, tz=UTC)
+        if body.get("internalDate")
+        else datetime.now(UTC)
+    )
     return {
         "id": body["id"],
         "sender": _header(headers, "From"),
@@ -190,36 +192,63 @@ async def sync_inbox(
 
             if app is not None:
                 await record_event(
-                    db, app, _EVENT_TYPE_FOR_CLASSIFICATION[classification],
+                    db,
+                    app,
+                    _EVENT_TYPE_FOR_CLASSIFICATION[classification],
                     f"Email reply detected: {msg['subject'][:200] or '(no subject)'}",
                     detail=msg["snippet"][:500],
                     payload={"sender": msg["sender"], "gmail_message_id": message_id},
-                    actor="system", occurred_at=msg["occurred_at"],
+                    actor="system",
+                    occurred_at=msg["occurred_at"],
                 )
-                db.add(CommunicationEvent(
-                    user_id=user_id, source="gmail", external_id=message_id,
-                    application_id=app.id, sender=msg["sender"][:300], subject=msg["subject"][:500],
-                    snippet=msg["snippet"][:2000], occurred_at=msg["occurred_at"],
-                    matched_confidence=1.0, classified_as=classification,
-                ))
+                db.add(
+                    CommunicationEvent(
+                        user_id=user_id,
+                        source="gmail",
+                        external_id=message_id,
+                        application_id=app.id,
+                        sender=msg["sender"][:300],
+                        subject=msg["subject"][:500],
+                        snippet=msg["snippet"][:2000],
+                        occurred_at=msg["occurred_at"],
+                        matched_confidence=1.0,
+                        classified_as=classification,
+                    )
+                )
                 matched += 1
             else:
-                db.add(CommunicationEvent(
-                    user_id=user_id, source="gmail", external_id=message_id,
-                    application_id=None, sender=msg["sender"][:300], subject=msg["subject"][:500],
-                    snippet=msg["snippet"][:2000], occurred_at=msg["occurred_at"],
-                    matched_confidence=0.0, classified_as=classification,
-                ))
+                db.add(
+                    CommunicationEvent(
+                        user_id=user_id,
+                        source="gmail",
+                        external_id=message_id,
+                        application_id=None,
+                        sender=msg["sender"][:300],
+                        subject=msg["subject"][:500],
+                        snippet=msg["snippet"][:2000],
+                        occurred_at=msg["occurred_at"],
+                        matched_confidence=0.0,
+                        classified_as=classification,
+                    )
+                )
                 unmatched += 1
 
     await db.commit()
     logger.info(
-        "inbox_sync.complete", user_id=user_id, fetched=len(message_ids),
-        matched=matched, unmatched=unmatched, already_seen=already_seen, errors=len(errors),
+        "inbox_sync.complete",
+        user_id=user_id,
+        fetched=len(message_ids),
+        matched=matched,
+        unmatched=unmatched,
+        already_seen=already_seen,
+        errors=len(errors),
     )
     return InboxSyncResult(
-        fetched=len(message_ids), already_seen=already_seen,
-        matched_to_application=matched, unmatched=unmatched, errors=errors,
+        fetched=len(message_ids),
+        already_seen=already_seen,
+        matched_to_application=matched,
+        unmatched=unmatched,
+        errors=errors,
     )
 
 
@@ -235,10 +264,14 @@ async def run_inbox_sync_for_all_users(ctx: dict) -> None:
     redis = ctx.get("redis")
     async with async_session_factory() as db:
         user_ids = (
-            await db.execute(
-                select(User.id).where(User.is_active.is_(True), User.deleted_at.is_(None))
+            (
+                await db.execute(
+                    select(User.id).where(User.is_active.is_(True), User.deleted_at.is_(None))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         synced = 0
         for user_id in user_ids:
@@ -247,9 +280,13 @@ async def run_inbox_sync_for_all_users(ctx: dict) -> None:
                 if not await gmail_auth.is_connected(db, user_id):
                     continue
                 async with record_agent_run(
-                    db, user_id, AgentName.TRACKING,
+                    db,
+                    user_id,
+                    AgentName.TRACKING,
                     input_summary="Sync Gmail for reply detection",
-                    linked_entity_type="user", linked_entity_id=user_id, redis=redis,
+                    linked_entity_type="user",
+                    linked_entity_id=user_id,
+                    redis=redis,
                 ) as run:
                     result = await sync_inbox(db, user_id)
                     run.output_summary = (

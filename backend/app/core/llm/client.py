@@ -95,9 +95,7 @@ class LLMClient:
             if value:
                 setattr(litellm, attr, value)
 
-    def _build_messages(
-        self, prompt: str, system_prompt: str
-    ) -> list[dict[str, str]]:
+    def _build_messages(self, prompt: str, system_prompt: str) -> list[dict[str, str]]:
         """Build the messages list for a chat completion request."""
         messages: list[dict[str, str]] = []
         if system_prompt:
@@ -116,8 +114,7 @@ class LLMClient:
         if primary.startswith("bedrock/"):
             return [primary]
         fallbacks = [
-            f"{provider}/{primary.split('/')[-1]}"
-            for provider in self._llm.fallback_providers
+            f"{provider}/{primary.split('/')[-1]}" for provider in self._llm.fallback_providers
         ]
         return [primary, *fallbacks]
 
@@ -250,9 +247,7 @@ class LLMClient:
                     # A model missing from litellm's static price map raises here even
                     # though the call already succeeded — never fail a billed call on it.
                     cost = 0.0
-                    logger.warning(
-                        "llm_cost_unavailable", model=attempt_model, error=str(cost_exc)
-                    )
+                    logger.warning("llm_cost_unavailable", model=attempt_model, error=str(cost_exc))
 
                 self._record_metrics(
                     provider=provider,
@@ -303,9 +298,7 @@ class LLMClient:
                     status="rate_limited",
                     latency_s=(time.perf_counter() - start),
                 )
-                logger.warning(
-                    "llm_rate_limited", model=attempt_model, error=str(exc)
-                )
+                logger.warning("llm_rate_limited", model=attempt_model, error=str(exc))
                 continue
 
             except litellm.Timeout as exc:
@@ -317,9 +310,7 @@ class LLMClient:
                     status="timeout",
                     latency_s=(time.perf_counter() - start),
                 )
-                logger.warning(
-                    "llm_timeout", model=attempt_model, error=str(exc)
-                )
+                logger.warning("llm_timeout", model=attempt_model, error=str(exc))
                 continue
 
             except litellm.APIError as exc:
@@ -335,9 +326,7 @@ class LLMClient:
                     status="error",
                     latency_s=(time.perf_counter() - start),
                 )
-                logger.error(
-                    "llm_api_error", model=attempt_model, error=str(exc)
-                )
+                logger.error("llm_api_error", model=attempt_model, error=str(exc))
                 continue
 
             except Exception as exc:
@@ -449,19 +438,17 @@ class LLMClient:
         cost: float = 0.0,
     ) -> None:
         """Record Prometheus metrics for an LLM call."""
-        llm_requests_total.labels(
-            provider=provider, model=model, status=status
-        ).inc()
-        llm_latency_seconds.labels(
-            provider=provider, model=model, purpose=purpose
-        ).observe(latency_s)
+        llm_requests_total.labels(provider=provider, model=model, status=status).inc()
+        llm_latency_seconds.labels(provider=provider, model=model, purpose=purpose).observe(
+            latency_s
+        )
         if prompt_tokens:
-            llm_tokens_total.labels(
-                provider=provider, model=model, direction="prompt"
-            ).inc(prompt_tokens)
+            llm_tokens_total.labels(provider=provider, model=model, direction="prompt").inc(
+                prompt_tokens
+            )
         if completion_tokens:
-            llm_tokens_total.labels(
-                provider=provider, model=model, direction="completion"
-            ).inc(completion_tokens)
+            llm_tokens_total.labels(provider=provider, model=model, direction="completion").inc(
+                completion_tokens
+            )
         if cost > 0:
             llm_cost_usd.labels(provider=provider, model=model).inc(cost)

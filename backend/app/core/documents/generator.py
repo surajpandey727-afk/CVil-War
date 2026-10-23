@@ -119,7 +119,8 @@ class DocumentGenerator:
         fabrication_rejected = False
         if self._llm and job_description:
             context, unsupported_skills, fabrication_rejected = await self._tailor_resume(
-                resume_data, job_description,
+                resume_data,
+                job_description,
             )
 
         # Render requested formats in parallel
@@ -223,7 +224,10 @@ class DocumentGenerator:
 
         # Generate content via LLM
         content = await self._generate_letter_content(
-            template, job_description, resume_text, company_info,
+            template,
+            job_description,
+            resume_text,
+            company_info,
         )
 
         # Render in parallel
@@ -235,7 +239,9 @@ class DocumentGenerator:
             tasks.append(
                 asyncio.ensure_future(
                     self._render_cover_letter_pdf(
-                        content, template, pdf_out,
+                        content,
+                        template,
+                        pdf_out,
                     ),
                 ),
             )
@@ -376,10 +382,14 @@ class DocumentGenerator:
             return self._fallback_cover_letter(job_description)
 
         prompt = render_prompt(
-            template, job_description, resume_text, company_info,
+            template,
+            job_description,
+            resume_text,
+            company_info,
         )
         response = await self._llm.complete(
-            prompt=prompt, purpose="cover_letter",
+            prompt=prompt,
+            purpose="cover_letter",
         )
         return response.content
 
@@ -403,9 +413,7 @@ class DocumentGenerator:
         output_path: Path,
     ) -> Path:
         """Render cover letter text to PDF using a template."""
-        template_dir = (
-            self._templates_dir / "cover_letter" / template.value
-        )
+        template_dir = self._templates_dir / "cover_letter" / template.value
 
         # Use template if available, otherwise fall back to inline HTML
         if (template_dir / "template.html").exists():
@@ -431,7 +439,9 @@ class DocumentGenerator:
                 css_string = css_path.read_text(encoding="utf-8")
 
             return await self._pdf.render_html_string(
-                html_content, output_path, css_string,
+                html_content,
+                output_path,
+                css_string,
             )
 
         # Inline fallback
@@ -441,7 +451,8 @@ class DocumentGenerator:
             f"{_text_to_html(content)}</body></html>"
         )
         return await self._pdf.render_html_string(
-            html, output_path,
+            html,
+            output_path,
         )
 
 

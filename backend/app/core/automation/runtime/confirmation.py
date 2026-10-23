@@ -121,9 +121,11 @@ def build_confirmation_tools(
             logger.warning("submission_approval.screenshot_failed", error=str(exc))
 
         event = needs_intervention_event(
-            application_id, "submit_confirmation",
+            application_id,
+            "submit_confirmation",
             f"Ready to submit to {company or 'this employer'}: {params.summary}",
-            url=url, screenshot_b64=screenshot_b64,
+            url=url,
+            screenshot_b64=screenshot_b64,
         )
         if redis is None:
             # No pub/sub, and nothing to rendezvous through — fail closed rather than

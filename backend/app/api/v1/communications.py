@@ -123,15 +123,15 @@ async def inbox_sync(
     except (gmail_auth.GmailNotConfiguredError, gmail_auth.GmailNotConnectedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return InboxSyncResponse(
-        fetched=result.fetched, already_seen=result.already_seen,
-        matched_to_application=result.matched_to_application, unmatched=result.unmatched,
+        fetched=result.fetched,
+        already_seen=result.already_seen,
+        matched_to_application=result.matched_to_application,
+        unmatched=result.unmatched,
         errors=result.errors,
     )
 
 
-@router.get(
-    "/", response_model=CommunicationEventListResponse, summary="The communications feed"
-)
+@router.get("/", response_model=CommunicationEventListResponse, summary="The communications feed")
 async def list_communications(
     user: CurrentUser,
     unmatched_only: bool = Query(default=False),
@@ -145,25 +145,32 @@ async def list_communications(
     query = select(CommunicationEvent).where(CommunicationEvent.user_id == user.id)
     if unmatched_only:
         query = query.where(CommunicationEvent.application_id.is_(None))
-    total = (
-        await db.execute(select(func.count()).select_from(query.subquery()))
-    ).scalar_one()
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     rows = (
-        await db.execute(
-            query.order_by(CommunicationEvent.occurred_at.desc())
-            .offset((page - 1) * page_size).limit(page_size)
+        (
+            await db.execute(
+                query.order_by(CommunicationEvent.occurred_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     unmatched = (
         await db.execute(
-            select(func.count()).select_from(CommunicationEvent).where(
-                CommunicationEvent.user_id == user.id, CommunicationEvent.application_id.is_(None),
+            select(func.count())
+            .select_from(CommunicationEvent)
+            .where(
+                CommunicationEvent.user_id == user.id,
+                CommunicationEvent.application_id.is_(None),
             )
         )
     ).scalar_one()
     return CommunicationEventListResponse(
         items=[CommunicationEventItem.model_validate(r) for r in rows],
-        total=total, unmatched=unmatched,
+        total=total,
+        unmatched=unmatched,
     )
 
 
@@ -213,8 +220,12 @@ async def link_application(
         event.classified_as, ApplicationEventType.EMAIL_REPLY_RECEIVED
     )
     await record_event(
-        db, app, event_type, f"Email reply linked: {event.subject or '(no subject)'}",
-        detail=event.snippet, payload={"sender": event.sender, "linked_manually": True},
+        db,
+        app,
+        event_type,
+        f"Email reply linked: {event.subject or '(no subject)'}",
+        detail=event.snippet,
+        payload={"sender": event.sender, "linked_manually": True},
         occurred_at=event.occurred_at,
     )
     await db.commit()

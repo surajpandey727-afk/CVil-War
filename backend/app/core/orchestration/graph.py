@@ -43,9 +43,13 @@ class PipelineState(TypedDict):
 async def _eligibility_node(state: PipelineState) -> dict[str, Any]:
     db, user_id, redis = state["db"], state["user_id"], state["redis"]
     async with record_agent_run(
-        db, user_id, AgentName.ELIGIBILITY,
+        db,
+        user_id,
+        AgentName.ELIGIBILITY,
         input_summary=f"Re-classify sponsorship for job {state['job_id']}",
-        linked_entity_type="job", linked_entity_id=state["job_id"], redis=redis,
+        linked_entity_type="job",
+        linked_entity_id=state["job_id"],
+        redis=redis,
     ) as run:
         confidence, evidence = classify_sponsor(state["company"], state["description"])
         job = await db.get(Job, state["job_id"])
@@ -60,9 +64,13 @@ async def _eligibility_node(state: PipelineState) -> dict[str, Any]:
 async def _scoring_node(state: PipelineState) -> dict[str, Any]:
     db, user_id, redis = state["db"], state["user_id"], state["redis"]
     async with record_agent_run(
-        db, user_id, AgentName.SCORING,
+        db,
+        user_id,
+        AgentName.SCORING,
         input_summary=f"Recommend best résumé for job {state['job_id']}",
-        linked_entity_type="job", linked_entity_id=state["job_id"], redis=redis,
+        linked_entity_type="job",
+        linked_entity_id=state["job_id"],
+        redis=redis,
     ) as run:
         recommendation = await recommend_best_resume(db, state["job_id"])
         run.output_summary = (recommendation.synopsis or "No résumés to score.")[:300]
@@ -104,10 +112,16 @@ async def run_post_enrichment_pipeline(
     """
     graph = _get_graph()
     try:
-        await graph.ainvoke({
-            "db": db, "user_id": user_id, "redis": redis,
-            "job_id": job.id, "company": job.company, "description": job.description or "",
-        })
+        await graph.ainvoke(
+            {
+                "db": db,
+                "user_id": user_id,
+                "redis": redis,
+                "job_id": job.id,
+                "company": job.company,
+                "description": job.description or "",
+            }
+        )
     except Exception as exc:
         logger.warning(
             "orchestration.post_enrichment_pipeline_failed", job_id=job.id, error=str(exc)

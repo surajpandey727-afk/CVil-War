@@ -23,48 +23,101 @@ logger = structlog.get_logger(__name__)
 # Terms that indicate experience level in job descriptions.
 SENIORITY_TERMS: dict[str, list[str]] = {
     "entry": [
-        "entry level", "junior", "associate", "intern", "internship",
-        "graduate", "new grad", "early career", "0-2 years",
+        "entry level",
+        "junior",
+        "associate",
+        "intern",
+        "internship",
+        "graduate",
+        "new grad",
+        "early career",
+        "0-2 years",
     ],
     "mid": [
-        "mid level", "mid-level", "intermediate", "3-5 years",
-        "2-5 years", "3+ years", "several years",
+        "mid level",
+        "mid-level",
+        "intermediate",
+        "3-5 years",
+        "2-5 years",
+        "3+ years",
+        "several years",
     ],
     "senior": [
-        "senior", "sr.", "lead", "principal", "5+ years",
-        "7+ years", "extensive experience", "seasoned",
+        "senior",
+        "sr.",
+        "lead",
+        "principal",
+        "5+ years",
+        "7+ years",
+        "extensive experience",
+        "seasoned",
     ],
     "staff": [
-        "staff", "staff engineer", "distinguished", "10+ years",
-        "expert level", "deep expertise",
+        "staff",
+        "staff engineer",
+        "distinguished",
+        "10+ years",
+        "expert level",
+        "deep expertise",
     ],
     "management": [
-        "manager", "director", "vp", "vice president", "head of",
-        "chief", "c-level", "executive", "leadership role",
+        "manager",
+        "director",
+        "vp",
+        "vice president",
+        "head of",
+        "chief",
+        "c-level",
+        "executive",
+        "leadership role",
     ],
 }
 
 # Responsibility categories used for matching.
 RESPONSIBILITY_CATEGORIES: dict[str, list[str]] = {
     "technical_leadership": [
-        "architect", "design system", "technical direction",
-        "code review", "mentoring", "technical strategy",
+        "architect",
+        "design system",
+        "technical direction",
+        "code review",
+        "mentoring",
+        "technical strategy",
     ],
     "project_delivery": [
-        "deliver", "ship", "launch", "deploy", "release",
-        "project management", "sprint", "milestone",
+        "deliver",
+        "ship",
+        "launch",
+        "deploy",
+        "release",
+        "project management",
+        "sprint",
+        "milestone",
     ],
     "collaboration": [
-        "cross-functional", "stakeholder", "collaborate",
-        "team", "coordinate", "partner with",
+        "cross-functional",
+        "stakeholder",
+        "collaborate",
+        "team",
+        "coordinate",
+        "partner with",
     ],
     "problem_solving": [
-        "troubleshoot", "debug", "optimize", "improve",
-        "resolve", "investigate", "root cause",
+        "troubleshoot",
+        "debug",
+        "optimize",
+        "improve",
+        "resolve",
+        "investigate",
+        "root cause",
     ],
     "communication": [
-        "present", "document", "report", "communicate",
-        "write", "proposal", "specification",
+        "present",
+        "document",
+        "report",
+        "communicate",
+        "write",
+        "proposal",
+        "specification",
     ],
 }
 
@@ -126,14 +179,13 @@ class ExperienceAnalyzer:
             return 0.5, []
 
         required_years = self._extract_required_years(
-            job_description, job_metadata,
+            job_description,
+            job_metadata,
         )
         job_seniority = self._detect_seniority(job_description)
         key_responsibilities = self._extract_key_responsibilities(job_description)
 
-        total_years = sum(
-            entry.get("duration_years", 0) for entry in candidate_experience
-        )
+        total_years = sum(entry.get("duration_years", 0) for entry in candidate_experience)
 
         # --- Years-of-experience score (0-1) ---
         if required_years > 0:
@@ -144,15 +196,18 @@ class ExperienceAnalyzer:
 
         # --- Seniority alignment score ---
         candidate_seniority = self._infer_candidate_seniority(
-            candidate_experience, total_years,
+            candidate_experience,
+            total_years,
         )
         seniority_score = self._seniority_alignment(
-            candidate_seniority, job_seniority,
+            candidate_seniority,
+            job_seniority,
         )
 
         # --- Responsibility match score ---
         resp_score, entry_details = self._match_responsibilities(
-            candidate_experience, key_responsibilities,
+            candidate_experience,
+            key_responsibilities,
         )
 
         # Weighted combination
@@ -173,7 +228,8 @@ class ExperienceAnalyzer:
     # ------------------------------------------------------------------
 
     def _sanitize_experience(
-        self, candidate_experience: list[Any],
+        self,
+        candidate_experience: list[Any],
     ) -> list[dict[str, Any]]:
         """Drop non-dict entries and coerce every field this class reads to its expected type.
 
@@ -196,14 +252,16 @@ class ExperienceAnalyzer:
             responsibilities = entry.get("responsibilities") or []
             if not isinstance(responsibilities, list):
                 responsibilities = [responsibilities]
-            clean.append({
-                **entry,
-                "duration_years": duration,
-                "title": str(entry.get("title") or ""),
-                "company": str(entry.get("company") or ""),
-                "description": str(entry.get("description") or ""),
-                "responsibilities": [str(r) for r in responsibilities if r is not None],
-            })
+            clean.append(
+                {
+                    **entry,
+                    "duration_years": duration,
+                    "title": str(entry.get("title") or ""),
+                    "company": str(entry.get("company") or ""),
+                    "description": str(entry.get("description") or ""),
+                    "responsibilities": [str(r) for r in responsibilities if r is not None],
+                }
+            )
         return clean
 
     def _extract_required_years(
@@ -262,9 +320,7 @@ class ExperienceAnalyzer:
         total_years: float,
     ) -> str:
         """Infer candidate seniority from their experience history."""
-        titles = " ".join(
-            entry.get("title", "").lower() for entry in experience
-        )
+        titles = " ".join(entry.get("title", "").lower() for entry in experience)
         for level, terms in SENIORITY_TERMS.items():
             for term in terms:
                 if term in titles:
@@ -309,20 +365,24 @@ class ExperienceAnalyzer:
         all_matched: set[str] = set()
 
         for entry in candidate_experience:
-            entry_text = " ".join([
-                entry.get("description", ""),
-                " ".join(entry.get("responsibilities", [])),
-                entry.get("title", ""),
-            ]).lower()
+            entry_text = " ".join(
+                [
+                    entry.get("description", ""),
+                    " ".join(entry.get("responsibilities", [])),
+                    entry.get("title", ""),
+                ]
+            ).lower()
 
             matched = [r for r in key_responsibilities if r in entry_text]
             all_matched.update(matched)
-            details.append({
-                "title": entry.get("title", "Unknown"),
-                "company": entry.get("company", "Unknown"),
-                "matched_responsibilities": matched,
-                "match_count": len(matched),
-            })
+            details.append(
+                {
+                    "title": entry.get("title", "Unknown"),
+                    "company": entry.get("company", "Unknown"),
+                    "matched_responsibilities": matched,
+                    "match_count": len(matched),
+                }
+            )
 
         score = len(all_matched) / len(key_responsibilities)
         return min(score, 1.0), details

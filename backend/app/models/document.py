@@ -58,9 +58,7 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     """
 
     __tablename__ = "document_versions"
-    __table_args__ = (
-        Index("ix_docver_document", "document_id", "version", unique=True),
-    )
+    __table_args__ = (Index("ix_docver_document", "document_id", "version", unique=True),)
 
     document_id: Mapped[str] = mapped_column(
         String(32), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False

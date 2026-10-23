@@ -212,7 +212,10 @@ class AutomationPolicy(BaseModel):
     enabled_sources: list[str] = Field(default_factory=list)
 
     @field_validator(
-        "seniority", "exclude_employment_types", "blocked_companies", "enabled_sources",
+        "seniority",
+        "exclude_employment_types",
+        "blocked_companies",
+        "enabled_sources",
         mode="before",
     )
     @classmethod

@@ -17,9 +17,18 @@ import re
 #: (after stripping a leading bullet glyph/whitespace) — a passive verb mid-sentence is a
 #: different, much noisier signal to chase, so this stays intentionally narrow.
 _WEAK_OPENERS = (
-    "responsible for", "duties included", "worked on", "worked with",
-    "helped with", "helped to", "assisted with", "involved in",
-    "participated in", "tasked with", "in charge of", "handled",
+    "responsible for",
+    "duties included",
+    "worked on",
+    "worked with",
+    "helped with",
+    "helped to",
+    "assisted with",
+    "involved in",
+    "participated in",
+    "tasked with",
+    "in charge of",
+    "handled",
 )
 
 #: A bullet with any of these carries a quantifiable result — the thing weak bullets lack.
@@ -94,7 +103,9 @@ def check_bullet_impact(candidate_experience: list[dict]) -> list[str]:
         # but it gets the same minimum-length filter as a `description` fragment — a stray
         # short entry ("Handled it") is a parsing artifact, not a real bullet to critique.
         raw_responsibilities = [str(r) for r in (entry.get("responsibilities") or [])]
-        bullets = [r.strip(" -\t") for r in raw_responsibilities if len(r.strip(" -\t")) >= _MIN_BULLET_LEN]
+        bullets = [
+            r.strip(" -\t") for r in raw_responsibilities if len(r.strip(" -\t")) >= _MIN_BULLET_LEN
+        ]
         bullets += _split_bullets(str(entry.get("description") or ""))
         for bullet in bullets:
             if len(weak_examples) >= _MAX_EXAMPLES:

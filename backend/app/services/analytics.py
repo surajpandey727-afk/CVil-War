@@ -103,12 +103,14 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
     # Local midnight, not a rolling 24h window — "today" on a dashboard means the
     # calendar day, matching how an operator reads "jobs found today" at a glance.
     today_start = datetime.now(UTC).replace(
-        hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+        tzinfo=None,
     )
     jobs_found_today = (
-        await db.execute(
-            select(func.count(Job.id)).where(Job.created_at >= today_start)
-        )
+        await db.execute(select(func.count(Job.id)).where(Job.created_at >= today_start))
     ).scalar() or 0
 
     # A job with no canonical_job_id is its own canonical representative — one row is
@@ -176,14 +178,12 @@ async def get_funnel(db: AsyncSession) -> list[ApplicationFunnelData]:
         List of funnel stage data.
     """
     result = await db.execute(
-        select(Application.status, func.count(Application.id))
-        .group_by(Application.status),
+        select(Application.status, func.count(Application.id)).group_by(Application.status),
     )
     counts = {row[0]: row[1] for row in result.all()}
 
     return [
-        ApplicationFunnelData(stage=stage, count=counts.get(stage, 0))
-        for stage in _FUNNEL_STAGES
+        ApplicationFunnelData(stage=stage, count=counts.get(stage, 0)) for stage in _FUNNEL_STAGES
     ]
 
 
@@ -262,6 +262,7 @@ async def get_timeline(db: AsyncSession) -> list[TimelineEntry]:
     Returns:
         Daily timeline entries.
     """
+
     async def _per_day(col: Any, *, only_non_null: bool = False) -> dict[str, int]:
         # Truncate to the day (YYYY-MM-DD) IN SQL so each day is one group; grouping by the
         # full timestamp would make every row its own group and the dict would overwrite

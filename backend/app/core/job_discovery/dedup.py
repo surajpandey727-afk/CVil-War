@@ -37,25 +37,70 @@ logger = structlog.get_logger(__name__)
 #: Software Engineer" are two postings, and dropping the level entirely merged them. Compared
 #: separately from the role itself — see :func:`titles_match`.
 _SENIORITY = {
-    "senior": "senior", "snr": "senior", "sr": "senior",
-    "junior": "junior", "jnr": "junior", "jr": "junior", "graduate": "junior",
+    "senior": "senior",
+    "snr": "senior",
+    "sr": "senior",
+    "junior": "junior",
+    "jnr": "junior",
+    "jr": "junior",
+    "graduate": "junior",
     "staff": "staff",
     "principal": "principal",
     "lead": "lead",
-    "head": "head", "chief": "chief", "director": "director",
-    "intern": "intern", "trainee": "intern", "apprentice": "intern",
+    "head": "head",
+    "chief": "chief",
+    "director": "director",
+    "intern": "intern",
+    "trainee": "intern",
+    "apprentice": "intern",
 }
 
 #: Words that carry no identity at all — grammar, contract shape, gender markers, and the
 #: location fragments boards append to titles.
-_TITLE_NOISE = frozenset({
-    "the", "of", "and", "a", "an", "for", "to", "in", "at", "with", "or", "deputy",
-    "i", "ii", "iii", "iv",
-    "m", "w", "d", "f", "x",  # German "(m/w/d)" gender markers, extremely common on EU boards
-    "all", "genders", "gender", "divers",
-    "fulltime", "full", "time", "part", "permanent", "contract", "fte", "hybrid", "remote",
-    "uk", "usa", "us", "eu", "onsite", "office",
-})
+_TITLE_NOISE = frozenset(
+    {
+        "the",
+        "of",
+        "and",
+        "a",
+        "an",
+        "for",
+        "to",
+        "in",
+        "at",
+        "with",
+        "or",
+        "deputy",
+        "i",
+        "ii",
+        "iii",
+        "iv",
+        "m",
+        "w",
+        "d",
+        "f",
+        "x",  # German "(m/w/d)" gender markers, extremely common on EU boards
+        "all",
+        "genders",
+        "gender",
+        "divers",
+        "fulltime",
+        "full",
+        "time",
+        "part",
+        "permanent",
+        "contract",
+        "fte",
+        "hybrid",
+        "remote",
+        "uk",
+        "usa",
+        "us",
+        "eu",
+        "onsite",
+        "office",
+    }
+)
 
 #: Corporate suffixes that differ between sources for the same employer.
 _COMPANY_NOISE = re.compile(
@@ -143,8 +188,7 @@ def title_tokens(title: str) -> frozenset[str]:
     """The role-identifying words of a title, with seniority and filler removed."""
     words = _NON_WORD.sub(" ", (title or "").casefold()).split()
     return frozenset(
-        w for w in words
-        if w and w not in _TITLE_NOISE and w not in _SENIORITY and len(w) > 1
+        w for w in words if w and w not in _TITLE_NOISE and w not in _SENIORITY and len(w) > 1
     )
 
 
@@ -197,7 +241,8 @@ def canonical_url(url: str) -> str:
     host = (parts.hostname or "").casefold().removeprefix("www.")
     path = parts.path.rstrip("/")
     kept = [
-        pair for pair in parts.query.split("&")
+        pair
+        for pair in parts.query.split("&")
         if pair and not _TRACKING.match(pair.split("=", 1)[0])
     ]
     return urlunsplit(("https", host, path, "&".join(sorted(kept)), ""))
@@ -332,7 +377,7 @@ def group(identities: list[JobIdentity]) -> list[list[int]]:
 
     for indexes in by_company.values():
         for position, left in enumerate(indexes):
-            for right in indexes[position + 1:]:
+            for right in indexes[position + 1 :]:
                 if same_job(identities[left], identities[right]):
                     union(left, right)
 

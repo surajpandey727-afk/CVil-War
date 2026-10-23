@@ -97,9 +97,7 @@ async def dispatch_for_mode(db: AsyncSession, pool: ArqRedis | None, app: Applic
         await db.refresh(app)
 
 
-async def bulk_approve(
-    db: AsyncSession, pool: ArqRedis | None, application_ids: list[str]
-) -> int:
+async def bulk_approve(db: AsyncSession, pool: ArqRedis | None, application_ids: list[str]) -> int:
     """Approve a set of staged applications and enqueue them together (batch flow).
 
     The SELECT is tenant-scoped by the ``do_orm_execute`` filter, so a caller can only
@@ -110,9 +108,7 @@ async def bulk_approve(
     result = await db.execute(
         select(Application).where(
             Application.id.in_(application_ids),
-            Application.status.in_(
-                (ApplicationStatus.PENDING_REVIEW, ApplicationStatus.QUEUED)
-            ),
+            Application.status.in_((ApplicationStatus.PENDING_REVIEW, ApplicationStatus.QUEUED)),
         )
     )
     apps = list(result.scalars().all())

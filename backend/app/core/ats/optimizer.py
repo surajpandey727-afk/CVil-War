@@ -17,53 +17,129 @@ logger = structlog.get_logger(__name__)
 # Ported verbatim from v1 resume_optimizer.py lines 130-177.
 _INDUSTRY_KEYWORDS: dict[str, dict[str, float]] = {
     "software_engineering": {
-        "agile": 0.8, "scrum": 0.7, "ci/cd": 0.9, "devops": 0.8,
-        "microservices": 0.85, "api": 0.9, "rest": 0.8, "graphql": 0.7,
-        "cloud": 0.85, "aws": 0.8, "docker": 0.85, "kubernetes": 0.8,
-        "testing": 0.9, "unit testing": 0.8, "integration testing": 0.75,
-        "code review": 0.7, "git": 0.9, "system design": 0.85,
-        "scalability": 0.8, "performance": 0.75, "security": 0.7,
-        "monitoring": 0.7, "logging": 0.65, "debugging": 0.7,
+        "agile": 0.8,
+        "scrum": 0.7,
+        "ci/cd": 0.9,
+        "devops": 0.8,
+        "microservices": 0.85,
+        "api": 0.9,
+        "rest": 0.8,
+        "graphql": 0.7,
+        "cloud": 0.85,
+        "aws": 0.8,
+        "docker": 0.85,
+        "kubernetes": 0.8,
+        "testing": 0.9,
+        "unit testing": 0.8,
+        "integration testing": 0.75,
+        "code review": 0.7,
+        "git": 0.9,
+        "system design": 0.85,
+        "scalability": 0.8,
+        "performance": 0.75,
+        "security": 0.7,
+        "monitoring": 0.7,
+        "logging": 0.65,
+        "debugging": 0.7,
     },
     "data_science": {
-        "machine learning": 0.95, "deep learning": 0.85, "nlp": 0.8,
-        "computer vision": 0.75, "statistics": 0.9, "python": 0.95,
-        "r": 0.7, "sql": 0.85, "tensorflow": 0.8, "pytorch": 0.8,
-        "pandas": 0.85, "numpy": 0.8, "scikit-learn": 0.85,
-        "data visualization": 0.75, "feature engineering": 0.8,
-        "model evaluation": 0.8, "a/b testing": 0.7, "etl": 0.75,
-        "big data": 0.7, "spark": 0.7, "hadoop": 0.6,
+        "machine learning": 0.95,
+        "deep learning": 0.85,
+        "nlp": 0.8,
+        "computer vision": 0.75,
+        "statistics": 0.9,
+        "python": 0.95,
+        "r": 0.7,
+        "sql": 0.85,
+        "tensorflow": 0.8,
+        "pytorch": 0.8,
+        "pandas": 0.85,
+        "numpy": 0.8,
+        "scikit-learn": 0.85,
+        "data visualization": 0.75,
+        "feature engineering": 0.8,
+        "model evaluation": 0.8,
+        "a/b testing": 0.7,
+        "etl": 0.75,
+        "big data": 0.7,
+        "spark": 0.7,
+        "hadoop": 0.6,
     },
     "product_management": {
-        "roadmap": 0.9, "strategy": 0.85, "stakeholder management": 0.85,
-        "user research": 0.8, "data-driven": 0.8, "analytics": 0.8,
-        "kpi": 0.75, "okr": 0.7, "agile": 0.85, "scrum": 0.75,
-        "prioritization": 0.85, "go-to-market": 0.7, "mvp": 0.75,
-        "user stories": 0.8, "competitive analysis": 0.7,
-        "market research": 0.7, "customer feedback": 0.75,
+        "roadmap": 0.9,
+        "strategy": 0.85,
+        "stakeholder management": 0.85,
+        "user research": 0.8,
+        "data-driven": 0.8,
+        "analytics": 0.8,
+        "kpi": 0.75,
+        "okr": 0.7,
+        "agile": 0.85,
+        "scrum": 0.75,
+        "prioritization": 0.85,
+        "go-to-market": 0.7,
+        "mvp": 0.75,
+        "user stories": 0.8,
+        "competitive analysis": 0.7,
+        "market research": 0.7,
+        "customer feedback": 0.75,
     },
     "devops": {
-        "ci/cd": 0.95, "docker": 0.9, "kubernetes": 0.9, "terraform": 0.85,
-        "ansible": 0.75, "jenkins": 0.7, "github actions": 0.75,
-        "monitoring": 0.85, "prometheus": 0.75, "grafana": 0.7,
-        "aws": 0.85, "gcp": 0.8, "azure": 0.8, "linux": 0.9,
-        "networking": 0.75, "security": 0.8, "iac": 0.8,
-        "observability": 0.8, "sre": 0.75, "incident management": 0.7,
+        "ci/cd": 0.95,
+        "docker": 0.9,
+        "kubernetes": 0.9,
+        "terraform": 0.85,
+        "ansible": 0.75,
+        "jenkins": 0.7,
+        "github actions": 0.75,
+        "monitoring": 0.85,
+        "prometheus": 0.75,
+        "grafana": 0.7,
+        "aws": 0.85,
+        "gcp": 0.8,
+        "azure": 0.8,
+        "linux": 0.9,
+        "networking": 0.75,
+        "security": 0.8,
+        "iac": 0.8,
+        "observability": 0.8,
+        "sre": 0.75,
+        "incident management": 0.7,
     },
     "cybersecurity": {
-        "penetration testing": 0.9, "vulnerability assessment": 0.9,
-        "siem": 0.8, "soc": 0.8, "incident response": 0.85,
-        "encryption": 0.8, "firewall": 0.75, "ids/ips": 0.75,
-        "compliance": 0.8, "risk assessment": 0.85, "threat modeling": 0.85,
-        "zero trust": 0.7, "devsecops": 0.75, "owasp": 0.8,
-        "forensics": 0.7, "malware analysis": 0.7,
+        "penetration testing": 0.9,
+        "vulnerability assessment": 0.9,
+        "siem": 0.8,
+        "soc": 0.8,
+        "incident response": 0.85,
+        "encryption": 0.8,
+        "firewall": 0.75,
+        "ids/ips": 0.75,
+        "compliance": 0.8,
+        "risk assessment": 0.85,
+        "threat modeling": 0.85,
+        "zero trust": 0.7,
+        "devsecops": 0.75,
+        "owasp": 0.8,
+        "forensics": 0.7,
+        "malware analysis": 0.7,
     },
     "cloud_engineering": {
-        "aws": 0.9, "gcp": 0.85, "azure": 0.85, "terraform": 0.9,
-        "cloudformation": 0.75, "serverless": 0.8, "lambda": 0.75,
-        "ec2": 0.7, "s3": 0.7, "vpc": 0.7, "load balancing": 0.75,
-        "auto scaling": 0.75, "cost optimization": 0.7,
-        "multi-cloud": 0.65, "hybrid cloud": 0.65,
+        "aws": 0.9,
+        "gcp": 0.85,
+        "azure": 0.85,
+        "terraform": 0.9,
+        "cloudformation": 0.75,
+        "serverless": 0.8,
+        "lambda": 0.75,
+        "ec2": 0.7,
+        "s3": 0.7,
+        "vpc": 0.7,
+        "load balancing": 0.75,
+        "auto scaling": 0.75,
+        "cost optimization": 0.7,
+        "multi-cloud": 0.65,
+        "hybrid cloud": 0.65,
     },
 }
 
@@ -127,9 +203,7 @@ class ATSOptimizer:
             missing_kw = self.get_missing_keywords(resume_text, industry)
             if missing_kw:
                 top = missing_kw[:5]
-                suggestions.append(
-                    f"Add industry-relevant keywords: {', '.join(top)}"
-                )
+                suggestions.append(f"Add industry-relevant keywords: {', '.join(top)}")
 
         # Keyword density suggestions
         if score_details.keyword_score < 0.3:
@@ -184,9 +258,7 @@ class ATSOptimizer:
         best_score = 0.0
 
         for industry, keywords in _INDUSTRY_KEYWORDS.items():
-            score = sum(
-                weight for kw, weight in keywords.items() if kw in lower
-            )
+            score = sum(weight for kw, weight in keywords.items() if kw in lower)
             if score > best_score:
                 best_score = score
                 best_industry = industry
@@ -242,8 +314,7 @@ class ATSOptimizer:
             skills = score_details.missing_required_skills
             if len(skills) <= 3:
                 suggestions.append(
-                    f"Critical: add required skills to your resume: "
-                    f"{', '.join(skills)}"
+                    f"Critical: add required skills to your resume: {', '.join(skills)}"
                 )
             else:
                 top = skills[:3]
@@ -255,8 +326,7 @@ class ATSOptimizer:
         if score_details.missing_preferred_skills:
             skills = score_details.missing_preferred_skills[:3]
             suggestions.append(
-                f"Recommended: highlight preferred skills if applicable: "
-                f"{', '.join(skills)}"
+                f"Recommended: highlight preferred skills if applicable: {', '.join(skills)}"
             )
 
         # Suggest similar skills the candidate might already have.
@@ -288,8 +358,7 @@ class ATSOptimizer:
         missing = [s for s in expected_sections if s not in lower]
         if missing:
             suggestions.append(
-                f"Add standard sections that may be missing: "
-                f"{', '.join(missing).title()}"
+                f"Add standard sections that may be missing: {', '.join(missing).title()}"
             )
 
         return suggestions

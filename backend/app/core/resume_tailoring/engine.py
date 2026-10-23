@@ -85,6 +85,7 @@ PLAN_TIMEOUT_SECONDS = 0
 class PlanningFailed(GenerationError):  # noqa: N818 (a condition the caller handles, not a bug)
     """The language model could not be used for this pass (down, timed out, or unusable output)."""
 
+
 #: Editing a CV is a precision task, not a creative one. The account default is tuned for
 #: prose and made this pass non-reproducible — the same CV and posting produced a different
 #: set of edits on every run, several of them malformed. Near-zero sampling makes the plan
@@ -118,7 +119,9 @@ def recovered_facts(
         if line is None:
             continue
         words = {
-            w for w in _tokens(edit.after_text) - _tokens(line.text) if w not in cv_tokens and len(w) > 2
+            w
+            for w in _tokens(edit.after_text) - _tokens(line.text)
+            if w not in cv_tokens and len(w) > 2
         }
         figures = _numbers(edit.after_text) - _numbers(line.text) - cv_numbers
         terms = sorted(words | figures)
@@ -173,7 +176,13 @@ async def tailor(
 
     plan = EditPlan()
     base_prompt = render_plan_prompt(
-        doc, spec, coverage, budget=budget, trusted=tuple(trusted), exclude=exclude, focus=tuple(focus)
+        doc,
+        spec,
+        coverage,
+        budget=budget,
+        trusted=tuple(trusted),
+        exclude=exclude,
+        focus=tuple(focus),
     )
     system = with_standing(SYSTEM_PROMPT, RESUME_GENERATION_STANDARD, ATS_EVALUATION_STANDARD)
 
@@ -226,7 +235,8 @@ async def tailor(
         review = (
             base_prompt
             + "\n\nREVIEW OF YOUR PREVIOUS ATTEMPT. These edits were rejected by the validators, "
-            "so they cannot be used as written:\n" + feedback
+            "so they cannot be used as written:\n"
+            + feedback
             + "\n\nPropose corrected edits only where the improvement can be made using wording "
             "that already appears in the CV or in the trusted evidence, and keep every figure and "
             "technology exactly as the source states it. If a line cannot be improved that way, "
@@ -235,10 +245,12 @@ async def tailor(
         try:
             second = await ask(review)
         except PlanningFailed:
-            second = EditPlan()  # the first plan already stands; a failed second opinion adds nothing
-        retry_edits = [e for e in second.edits if e.line_id not in taken and e.line_id not in exclude][
-            : budget - len(report.accepted)
-        ]
+            second = (
+                EditPlan()
+            )  # the first plan already stands; a failed second opinion adds nothing
+        retry_edits = [
+            e for e in second.edits if e.line_id not in taken and e.line_id not in exclude
+        ][: budget - len(report.accepted)]
         retry_report = validate_edits(doc, retry_edits, allowed, evidence)
         seen_rejections = {(r.line_id, r.rule) for r in report.rejected}
         report.accepted.extend(retry_report.accepted)
@@ -260,7 +272,9 @@ async def tailor(
 
     if not report.ok:
         logger.warning(
-            "resume_tailor_rejected", failures=report.document_failures, job=job_title,
+            "resume_tailor_rejected",
+            failures=report.document_failures,
+            job=job_title,
         )
         tailored = doc.copy()
 

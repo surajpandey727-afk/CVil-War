@@ -12,27 +12,41 @@ from app.core.exceptions import ParseError
 logger = structlog.get_logger(__name__)
 
 _SECTION_HEADERS: list[str] = [
-    "summary", "objective", "professional summary", "profile",
-    "experience", "work experience", "professional experience", "employment",
-    "education", "academic background",
-    "skills", "technical skills", "core competencies", "competencies",
-    "certifications", "certificates", "licenses",
-    "projects", "personal projects", "key projects",
-    "publications", "awards", "honors",
-    "volunteer", "volunteering", "community involvement",
-    "languages", "interests", "references",
+    "summary",
+    "objective",
+    "professional summary",
+    "profile",
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment",
+    "education",
+    "academic background",
+    "skills",
+    "technical skills",
+    "core competencies",
+    "competencies",
+    "certifications",
+    "certificates",
+    "licenses",
+    "projects",
+    "personal projects",
+    "key projects",
+    "publications",
+    "awards",
+    "honors",
+    "volunteer",
+    "volunteering",
+    "community involvement",
+    "languages",
+    "interests",
+    "references",
 ]
 
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-_PHONE_RE = re.compile(
-    r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"
-)
-_LINKEDIN_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+"
-)
-_GITHUB_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?github\.com/[a-zA-Z0-9_-]+"
-)
+_PHONE_RE = re.compile(r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+_LINKEDIN_RE = re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+")
+_GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[a-zA-Z0-9_-]+")
 
 
 class ParsedResume(BaseModel):
@@ -86,13 +100,9 @@ class DocumentParser:
 
         try:
             if suffix == ".pdf":
-                raw_text = await loop.run_in_executor(
-                    None, self._parse_pdf_sync, path
-                )
+                raw_text = await loop.run_in_executor(None, self._parse_pdf_sync, path)
             else:
-                raw_text = await loop.run_in_executor(
-                    None, self._parse_docx_sync, path
-                )
+                raw_text = await loop.run_in_executor(None, self._parse_docx_sync, path)
         except ParseError:
             raise
         except Exception as exc:
@@ -154,9 +164,7 @@ class DocumentParser:
             with pdfplumber.open(str(file_path)) as pdf:
                 pages = [page.extract_text() or "" for page in pdf.pages]
         except Exception as exc:
-            logger.debug(
-                "pdfplumber_extraction_failed", file_path=str(file_path), error=str(exc)
-            )
+            logger.debug("pdfplumber_extraction_failed", file_path=str(file_path), error=str(exc))
             return ""
         return "\n".join(p for p in pages if p)
 
@@ -176,9 +184,7 @@ class DocumentParser:
         try:
             from pypdf import PdfReader
         except ImportError as exc:
-            raise ParseError(
-                str(file_path), "pypdf is required for PDF parsing"
-            ) from exc
+            raise ParseError(str(file_path), "pypdf is required for PDF parsing") from exc
 
         reader = PdfReader(str(file_path))
         pages: list[str] = []
@@ -208,9 +214,7 @@ class DocumentParser:
         try:
             from docx import Document
         except ImportError as exc:
-            raise ParseError(
-                str(file_path), "python-docx is required for DOCX parsing"
-            ) from exc
+            raise ParseError(str(file_path), "python-docx is required for DOCX parsing") from exc
 
         doc = Document(str(file_path))
         chunks: list[str] = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -292,9 +296,7 @@ class DocumentParser:
 
         return info
 
-    def _extract_skills_from_text(
-        self, text: str, sections: dict[str, str]
-    ) -> list[str]:
+    def _extract_skills_from_text(self, text: str, sections: dict[str, str]) -> list[str]:
         """Extract skill keywords from resume text.
 
         Prioritizes the skills section if found; otherwise scans
@@ -324,9 +326,7 @@ class DocumentParser:
             # Skills often listed with commas, pipes, bullets, or semicolons
             for delimiter in [",", "|", ";", "\u2022", "\u2023", "\u25e6"]:
                 if delimiter in line:
-                    raw_skills.extend(
-                        s.strip() for s in line.split(delimiter) if s.strip()
-                    )
+                    raw_skills.extend(s.strip() for s in line.split(delimiter) if s.strip())
                     break
             else:
                 # Single skill per line (common in bullet-point resumes)

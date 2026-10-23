@@ -58,9 +58,7 @@ async def recommend_best_resume(db: AsyncSession, job_id: str) -> ResumeRecommen
     rankings: list[ResumeRanking] = []
     for resume in resumes:
         score = await resume_service.score_resume(db, resume.id, ResumeScoreRequest(job_id=job_id))
-        rankings.append(
-            ResumeRanking(resume_id=resume.id, resume_name=resume.name, score=score)
-        )
+        rankings.append(ResumeRanking(resume_id=resume.id, resume_name=resume.name, score=score))
 
     rankings.sort(key=lambda item: item.score.overall_score, reverse=True)
     top = rankings[0]
@@ -83,9 +81,7 @@ def _build_synopsis(rankings: list[ResumeRanking]) -> str:
         gap = top.score.overall_score - runner_up.score.overall_score
         if gap <= _CLOSE_CALL_THRESHOLD:
             runner_pct = round(runner_up.score.overall_score * 100)
-            sentences.append(
-                f'It\'s a close call with "{runner_up.resume_name}" ({runner_pct}%).'
-            )
+            sentences.append(f'It\'s a close call with "{runner_up.resume_name}" ({runner_pct}%).')
 
     if top.score.missing_skills:
         skills = ", ".join(top.score.missing_skills[:_MAX_SUGGESTED_SKILLS])

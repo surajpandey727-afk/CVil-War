@@ -50,7 +50,10 @@ _COSTLY = Depends(rate_limit(30, 60))
 
 
 @router.post(
-    "/", response_model=ApplicationResponse, status_code=201, dependencies=[_COSTLY],
+    "/",
+    response_model=ApplicationResponse,
+    status_code=201,
+    dependencies=[_COSTLY],
     summary="Create an application",
 )
 async def create_application(
@@ -128,7 +131,9 @@ async def score_applications(
     nothing is saved, since no résumé is attached to submit. Postings with no description are
     reported as such rather than given a made-up number.
     """
-    items = await ats_evaluation.score_applications(db, user.id, data.application_ids, resume_id=data.resume_id)
+    items = await ats_evaluation.score_applications(
+        db, user.id, data.application_ids, resume_id=data.resume_id
+    )
     scored = sum(1 for i in items if i.scored)
     return ApplicationScoreResponse(items=items, scored=scored, skipped=len(items) - scored)
 
@@ -292,8 +297,11 @@ async def log_recruiter_contact(
     job = await db.get(Job, app.job_id)
     try:
         result = await apollo_service.log_contact(
-            email=data.email, first_name=data.first_name, last_name=data.last_name,
-            organization_name=job.company if job else "", title=data.title,
+            email=data.email,
+            first_name=data.first_name,
+            last_name=data.last_name,
+            organization_name=job.company if job else "",
+            title=data.title,
         )
     except apollo_service.ApolloNotConfiguredError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -303,13 +311,19 @@ async def log_recruiter_contact(
         ) from exc
     summary = f"Contacted {data.first_name} {data.last_name}".strip() or f"Contacted {data.email}"
     await record_event(
-        db, app, ApplicationEventType.RECRUITER_CONTACTED, summary,
+        db,
+        app,
+        ApplicationEventType.RECRUITER_CONTACTED,
+        summary,
         payload={"email": data.email, "apollo_contact_id": result.contact_id},
     )
     await record_event(
-        db, app, ApplicationEventType.APOLLO_CONTACT_LOGGED,
+        db,
+        app,
+        ApplicationEventType.APOLLO_CONTACT_LOGGED,
         "Logged to Apollo" + (" (existing contact updated)" if result.matched_existing else ""),
-        payload={"apollo_contact_id": result.contact_id}, recompute=False,
+        payload={"apollo_contact_id": result.contact_id},
+        recompute=False,
     )
     await db.commit()
     return LogRecruiterContactResponse(
@@ -370,7 +384,9 @@ async def get_apply_readiness(
         "manual_possible": all(b.manual_possible for b in blockers),
         "blockers": [
             {
-                "code": b.code, "message": b.message, "action": b.action,
+                "code": b.code,
+                "message": b.message,
+                "action": b.action,
                 "platform": b.platform,
             }
             for b in blockers

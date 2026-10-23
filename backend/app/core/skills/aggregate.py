@@ -155,8 +155,12 @@ def match_resume(
         form = _present(a.skill, low)
         hits.append(
             SkillHit(
-                skill=a.skill, demand=a.demand, roles_wanting=a.roles_wanting,
-                must_have=a.must_have, present=form is not None, matched_form=form,
+                skill=a.skill,
+                demand=a.demand,
+                roles_wanting=a.roles_wanting,
+                must_have=a.must_have,
+                present=form is not None,
+                matched_form=form,
             )
         )
 

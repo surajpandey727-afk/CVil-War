@@ -138,14 +138,14 @@ def _focus_terms(score_: AtsScore, trusted: Sequence[TrustedSource] = ()) -> lis
         if a.requirement.tier not in (ReqTier.CRITICAL, ReqTier.IMPORTANT) or a.requirement.family:
             continue
         term = a.requirement.term
-        if a.strength is Strength.MENTIONED or (
-            a.strength is Strength.SUPPORTED and a.match == "semantic"
-        ):
-            out.append(term)
-        elif (
-            a.strength is Strength.NONE
-            and term.lower() in known
-            and not excluded_terms_added("", term)
+        if (
+            a.strength is Strength.MENTIONED
+            or (a.strength is Strength.SUPPORTED and a.match == "semantic")
+            or (
+                a.strength is Strength.NONE
+                and term.lower() in known
+                and not excluded_terms_added("", term)
+            )
         ):
             out.append(term)
     return out[:12]

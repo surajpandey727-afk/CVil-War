@@ -55,9 +55,7 @@ def apply_plan(
             line.text = edit.after_text.strip()
 
     for request in reorder or []:
-        section = next(
-            (s for s in out.sections if s.heading == request.section_heading), None
-        )
+        section = next((s for s in out.sections if s.heading == request.section_heading), None)
         if section is None:
             continue
         wanted = [lid for lid in request.line_ids]
@@ -230,9 +228,7 @@ def build_audit(
         original_components=dict(before_score.components),
         final_components=dict(after_score.components),
         keywords_added=keywords,
-        keywords_not_added=(
-            after_score.missing_mandatory + after_score.missing_preferred
-        ),
+        keywords_not_added=(after_score.missing_mandatory + after_score.missing_preferred),
         reason_not_added=(
             "No supporting evidence in the CV" if after_score.missing_mandatory else ""
         ),

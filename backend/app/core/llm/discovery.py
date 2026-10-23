@@ -49,10 +49,24 @@ REQUEST_TIMEOUT_S = 8.0
 #: litellm adapter prefixes. A configured model of ``openai/Full-Send`` means "route via the
 #: OpenAI-compatible adapter to the model Full-Send" — the prefix is not part of the id the
 #: gateway publishes, so it is stripped before matching against the catalogue.
-_ROUTING_PREFIXES = frozenset({
-    "openai", "azure", "anthropic", "bedrock", "vertex_ai", "gemini", "groq", "openrouter",
-    "ollama", "deepseek", "mistral", "together_ai", "fireworks_ai", "github",
-})
+_ROUTING_PREFIXES = frozenset(
+    {
+        "openai",
+        "azure",
+        "anthropic",
+        "bedrock",
+        "vertex_ai",
+        "gemini",
+        "groq",
+        "openrouter",
+        "ollama",
+        "deepseek",
+        "mistral",
+        "together_ai",
+        "fireworks_ai",
+        "github",
+    }
+)
 
 #: Capability flags the gateway reports. Normalised because the payload uses several spellings
 #: for the same idea (``thinking`` / ``supportsThinking``), and a UI keyed off the raw strings

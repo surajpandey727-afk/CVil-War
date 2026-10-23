@@ -18,7 +18,7 @@ import asyncio
 import os
 
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.sponsorship import register
 from app.core.sponsorship.classify import classify

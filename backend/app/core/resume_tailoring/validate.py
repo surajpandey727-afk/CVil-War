@@ -16,7 +16,6 @@ write.
 # suggested list literal puts sixty quoted words on a single line, which is how a
 # 563-character line got into this file in the first place.
 
-
 from __future__ import annotations
 
 import re
@@ -51,11 +50,35 @@ _ESCALATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: word was swapped for a listed synonym, no number moved, no technology appeared, and the
 #: candidate acquired a roadmap they never claimed.
 _OWNERSHIP_VERBS: tuple[str, ...] = (
-    "own", "owns", "owned", "owning", "ownership",
-    "led", "lead", "leads", "leading", "headed", "heading",
-    "drove", "driving", "directed", "directing", "managed", "managing",
-    "founded", "established", "launched", "architected", "pioneered", "created",
-    "defined", "defining", "authored", "oversaw", "overseeing", "accountable",
+    "own",
+    "owns",
+    "owned",
+    "owning",
+    "ownership",
+    "led",
+    "lead",
+    "leads",
+    "leading",
+    "headed",
+    "heading",
+    "drove",
+    "driving",
+    "directed",
+    "directing",
+    "managed",
+    "managing",
+    "founded",
+    "established",
+    "launched",
+    "architected",
+    "pioneered",
+    "created",
+    "defined",
+    "defining",
+    "authored",
+    "oversaw",
+    "overseeing",
+    "accountable",
     "responsible",
 )
 
@@ -86,8 +109,17 @@ _FUNCTION_WORDS = frozenset(
 
 #: Evidence strings that assert nothing.
 _VAGUE_EVIDENCE = (
-    "general experience", "the resume", "the résumé", "the cv", "overall", "various",
-    "throughout", "his experience", "their experience", "candidate experience", "n/a",
+    "general experience",
+    "the resume",
+    "the résumé",
+    "the cv",
+    "overall",
+    "various",
+    "throughout",
+    "his experience",
+    "their experience",
+    "candidate experience",
+    "n/a",
 )
 
 #: Capitalised vocabulary that describes *how work is discussed* rather than a capability the
@@ -95,10 +127,25 @@ _VAGUE_EVIDENCE = (
 #: the same thing about the same work, so re-stating it in the posting's words is the
 #: legitimate terminology alignment the rules allow — whereas "Tableau" or "Power BI" is a
 #: tool you either used or did not. Anything not on this list still has to be in the CV.
-_GENERIC_VOCABULARY = frozenset({
-    "kpi", "kpis", "okr", "okrs", "roi", "mvp", "poc", "sla", "slas",
-    "ux", "ui", "qa", "eu", "uk", "us",
-})
+_GENERIC_VOCABULARY = frozenset(
+    {
+        "kpi",
+        "kpis",
+        "okr",
+        "okrs",
+        "roi",
+        "mvp",
+        "poc",
+        "sla",
+        "slas",
+        "ux",
+        "ui",
+        "qa",
+        "eu",
+        "uk",
+        "us",
+    }
+)
 
 #: How far a bullet may grow or shrink before the edit is a rewrite rather than an edit.
 _MAX_LENGTH_RATIO = 1.45
@@ -171,9 +218,7 @@ def _tokens(text: str) -> set[str]:
     invention. Three of the first five real edits were rejected for exactly that.
     """
     return {
-        m.group(0).strip(".,;:").lower()
-        for m in _WORD.finditer(text)
-        if m.group(0).strip(".,;:")
+        m.group(0).strip(".,;:").lower() for m in _WORD.finditer(text) if m.group(0).strip(".,;:")
     }
 
 
@@ -209,9 +254,7 @@ def _insertions(before: str, after: str) -> tuple[list[int], int]:
     old_words, new_words = before.split(), after.split()
     runs: list[int] = []
     total = 0
-    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
-        None, old_words, new_words
-    ).get_opcodes():
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old_words, new_words).get_opcodes():
         if tag in ("insert", "replace"):
             added = j2 - j1
             if added > 0:
@@ -223,7 +266,8 @@ def _insertions(before: str, after: str) -> tuple[list[int], int]:
 def _content_words(text: str) -> list[str]:
     """Meaningful words in ``text``: no punctuation, no connectives."""
     return [
-        w for w in re.findall(r"[A-Za-z][A-Za-z0-9+#/-]*", text.lower())
+        w
+        for w in re.findall(r"[A-Za-z][A-Za-z0-9+#/-]*", text.lower())
         if w not in _FUNCTION_WORDS and len(w) > 2
     ]
 
@@ -302,7 +346,8 @@ def check_edit(
     finance = excluded_terms_added(before, after)
     if finance:
         return Rejection(
-            edit.line_id, "excluded_domain",
+            edit.line_id,
+            "excluded_domain",
             f"introduces {finance}; finance-related technology is not part of the candidate's work",
         )
 
@@ -313,7 +358,8 @@ def check_edit(
     }
     if new_numbers:
         return Rejection(
-            edit.line_id, "fabricated_metric",
+            edit.line_id,
+            "fabricated_metric",
             f"introduces {sorted(new_numbers)} which this bullet does not contain",
         )
 
@@ -328,7 +374,8 @@ def check_edit(
     }
     if invented:
         return Rejection(
-            edit.line_id, "unsupported_technology",
+            edit.line_id,
+            "unsupported_technology",
             f"introduces {sorted(invented)} which appears nowhere in the CV",
         )
 
@@ -354,7 +401,8 @@ def check_edit(
     )
     if unearned:
         return Rejection(
-            edit.line_id, "unsupported_claim",
+            edit.line_id,
+            "unsupported_claim",
             f"introduces {unearned}, which the CV does not evidence anywhere",
         )
 
@@ -368,12 +416,14 @@ def check_edit(
     # 5. No newly asserted ownership. Saying the candidate owned, led or defined something
     #    they only described participating in is a seniority claim, not a wording choice.
     new_ownership = [
-        verb for verb in _OWNERSHIP_VERBS
+        verb
+        for verb in _OWNERSHIP_VERBS
         if re.search(rf"\b{verb}\b", low_after) and not re.search(rf"\b{verb}\b", low_before)
     ]
     if new_ownership:
         return Rejection(
-            edit.line_id, "asserted_ownership",
+            edit.line_id,
+            "asserted_ownership",
             f"introduces {new_ownership}, claiming ownership the original line did not",
         )
 
@@ -383,7 +433,8 @@ def check_edit(
     dropped = sorted(_named_things(before) - _tokens(after))
     if dropped:
         return Rejection(
-            edit.line_id, "keyword_loss",
+            edit.line_id,
+            "keyword_loss",
             f"removes {dropped}, which the original line had earned",
         )
 
@@ -399,13 +450,15 @@ def check_edit(
     max_total = _TRUSTED_INSERT_TOTAL if trusted else _MAX_INSERT_TOTAL
     if longest > max_run:
         return Rejection(
-            edit.line_id, "appended_clause",
+            edit.line_id,
+            "appended_clause",
             f"inserts {longest} consecutive new words; an edit weaves terms in, it does not "
             "append a new clause",
         )
     if inserted_total > max_total:
         return Rejection(
-            edit.line_id, "excessive_insertion",
+            edit.line_id,
+            "excessive_insertion",
             f"inserts {inserted_total} new words across the line",
         )
 
@@ -415,7 +468,8 @@ def check_edit(
             arrived = [s for s in strongs if re.search(rf"\b{re.escape(s)}\b", low_after)]
             if arrived:
                 return Rejection(
-                    edit.line_id, "claim_escalation",
+                    edit.line_id,
+                    "claim_escalation",
                     f"replaces '{weak}' with {arrived}, overstating involvement",
                 )
 
@@ -470,7 +524,7 @@ def _skill_row_problem(before: str, after: str) -> str | None:
     kept = before.rstrip().rstrip(",;")
     if not after.startswith(kept):
         return "the row's label and existing items must stay exactly as they are, in order"
-    tail = after[len(kept):].strip()
+    tail = after[len(kept) :].strip()
     if not tail:
         return "no item was added"
     if not tail.startswith((",", ";")):
@@ -500,9 +554,7 @@ def validate_edits(
     for edit in edits:
         line = doc.bullet_by_id(edit.line_id)
         if line is None:
-            report.rejected.append(
-                Rejection(edit.line_id, "unknown_line", "no such editable line")
-            )
+            report.rejected.append(Rejection(edit.line_id, "unknown_line", "no such editable line"))
             continue
         if edit.line_id in seen:
             report.rejected.append(

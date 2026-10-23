@@ -57,6 +57,7 @@ def application_to_response(app: Application) -> ApplicationResponse:
     item.has_cover_letter = bool(app.cover_letter_path)
     return item
 
+
 # States that DON'T block a fresh application for the same (user, job) — mirrors the
 # partial-unique ``uq_app_active_job`` index.
 _TERMINAL_STATES = (
@@ -73,9 +74,7 @@ async def _assert_owned(db: AsyncSession, model: Any, record_id: str) -> None:
     INSERT — without this a client could create an Application referencing another
     tenant's job_id/resume_id. The scoped SELECT returns None for a foreign id.
     """
-    found = (
-        await db.execute(select(model.id).where(model.id == record_id))
-    ).scalar_one_or_none()
+    found = (await db.execute(select(model.id).where(model.id == record_id))).scalar_one_or_none()
     if found is None:
         raise RecordNotFoundError(f"{model.__name__} '{record_id}' not found")
 
@@ -169,9 +168,7 @@ async def create_batch(
     if data.resume_id:
         await _assert_owned(db, Resume, data.resume_id)
     requested = set(data.job_ids)
-    owned = set(
-        (await db.execute(select(Job.id).where(Job.id.in_(requested)))).scalars().all()
-    )
+    owned = set((await db.execute(select(Job.id).where(Job.id.in_(requested)))).scalars().all())
     missing = requested - owned
     if missing:
         raise RecordNotFoundError(f"Jobs not found: {sorted(missing)}")
@@ -185,7 +182,9 @@ async def create_batch(
                     Application.status.notin_(_TERMINAL_STATES),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
     applications: list[Application] = []
@@ -364,7 +363,8 @@ async def update_status(
 
             job = await db.get(Job, app.job_id)
             await notify_application_submitted(
-                db, app,
+                db,
+                app,
                 job_title=(job.title if job else "this role"),
                 company=(job.company if job else "the employer"),
                 platform=(job.platform if job else "manual"),

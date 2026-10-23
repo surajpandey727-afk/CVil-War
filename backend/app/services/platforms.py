@@ -99,42 +99,53 @@ def _actions(
     """Which controls to offer, and why one is unavailable when it is."""
     actions: list[PlatformAction] = []
 
-    actions.append(PlatformAction(
-        key="toggle",
-        label="Enable for discovery",
-        available=implemented,
-        reason="" if implemented else "No adapter can serve this source yet.",
-    ))
+    actions.append(
+        PlatformAction(
+            key="toggle",
+            label="Enable for discovery",
+            available=implemented,
+            reason="" if implemented else "No adapter can serve this source yet.",
+        )
+    )
 
     if needs_login:
-        actions.append(PlatformAction(
-            key="connect",
-            label="Reconnect" if connected else "Connect",
-            available=True,
-        ))
-        actions.append(PlatformAction(
-            key="disconnect",
-            label="Disconnect",
-            available=connected,
-            reason="" if connected else "Nothing is connected for this platform.",
-        ))
+        actions.append(
+            PlatformAction(
+                key="connect",
+                label="Reconnect" if connected else "Connect",
+                available=True,
+            )
+        )
+        actions.append(
+            PlatformAction(
+                key="disconnect",
+                label="Disconnect",
+                available=connected,
+                reason="" if connected else "Nothing is connected for this platform.",
+            )
+        )
     else:
         # Saying so beats hiding the control: an operator looking for a login on a keyless
         # public API should learn that none is needed.
-        actions.append(PlatformAction(
-            key="connect",
-            label="Connect",
-            available=False,
-            reason="This source is a public API and needs no login.",
-        ))
+        actions.append(
+            PlatformAction(
+                key="connect",
+                label="Connect",
+                available=False,
+                reason="This source is a public API and needs no login.",
+            )
+        )
 
-    actions.append(PlatformAction(
-        key="test",
-        label="Test",
-        available=implemented and health in _WORKING,
-        reason="" if implemented and health in _WORKING
-        else "Nothing to test until an adapter can reach this source.",
-    ))
+    actions.append(
+        PlatformAction(
+            key="test",
+            label="Test",
+            available=implemented and health in _WORKING,
+            reason=""
+            if implemented and health in _WORKING
+            else "Nothing to test until an adapter can reach this source.",
+        )
+    )
     return actions
 
 
@@ -143,10 +154,10 @@ async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
     sessions = {
         row.platform: row
         for row in (
-            await db.execute(
-                select(PlatformSession).where(PlatformSession.user_id == user_id)
-            )
-        ).scalars().all()
+            await db.execute(select(PlatformSession).where(PlatformSession.user_id == user_id))
+        )
+        .scalars()
+        .all()
     }
 
     settings = (
@@ -162,33 +173,35 @@ async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
         needs_login = _needs_credential(spec.key) or spec.api_key_field is not None
         connected = bool(session and session.state in _USABLE)
 
-        statuses.append(PlatformStatus(
-            key=spec.key,
-            label=spec.label,
-            tier=str(spec.tier),
-            health=str(health),
-            implemented=implemented,
-            needs_credential=needs_login,
-            capabilities=_capabilities(spec.key),
-            enabled=spec.key in enabled_keys,
-            connected=connected,
-            connection_state=str(session.state) if session else "not_connected",
-            # Masked on read as well as on write, so a row stored by an older build cannot
-            # leak a full address through this endpoint.
-            account=mask_account(session.account_label) if session else None,
-            last_used_at=session.last_used_at if session else None,
-            expires_at=session.expires_at if session else None,
-            detail=session.state_detail if session else None,
-            # Distinct from "no error": a source never exercised has nothing to report, and
-            # showing a reassuring blank would be a claim nobody checked.
-            last_error=spec.known_broken or spec.blocked_reason,
-            actions=_actions(
+        statuses.append(
+            PlatformStatus(
+                key=spec.key,
+                label=spec.label,
+                tier=str(spec.tier),
+                health=str(health),
                 implemented=implemented,
-                needs_login=needs_login,
+                needs_credential=needs_login,
+                capabilities=_capabilities(spec.key),
+                enabled=spec.key in enabled_keys,
                 connected=connected,
-                health=health,
-            ),
-        ))
+                connection_state=str(session.state) if session else "not_connected",
+                # Masked on read as well as on write, so a row stored by an older build cannot
+                # leak a full address through this endpoint.
+                account=mask_account(session.account_label) if session else None,
+                last_used_at=session.last_used_at if session else None,
+                expires_at=session.expires_at if session else None,
+                detail=session.state_detail if session else None,
+                # Distinct from "no error": a source never exercised has nothing to report, and
+                # showing a reassuring blank would be a claim nobody checked.
+                last_error=spec.known_broken or spec.blocked_reason,
+                actions=_actions(
+                    implemented=implemented,
+                    needs_login=needs_login,
+                    connected=connected,
+                    health=health,
+                ),
+            )
+        )
 
     return PlatformsResponse(
         platforms=statuses,
@@ -220,7 +233,8 @@ async def test_platforms(
     started = perf_counter()
     registry = platform_registry
     available = {
-        key: spec for key, spec in BY_KEY.items()
+        key: spec
+        for key, spec in BY_KEY.items()
         if registry.has(key) and (not keys or key in set(keys))
     }
     semaphore = asyncio.Semaphore(_TEST_CONCURRENCY)
@@ -256,7 +270,9 @@ async def test_platforms(
     results = await asyncio.gather(*(probe(k, s) for k, s in available.items()))
     ordered = sorted(results, key=lambda r: (r.ok is False, r.label.lower()))
     logger.info(
-        "platforms_tested", user_id=user_id, tested=len(ordered),
+        "platforms_tested",
+        user_id=user_id,
+        tested=len(ordered),
         passed=sum(1 for r in ordered if r.ok),
     )
     return PlatformTestResponse(

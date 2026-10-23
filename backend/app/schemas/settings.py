@@ -154,9 +154,19 @@ class RoleTargetSchema(BaseModel):
     model: str = ""
 
     @field_validator(
-        "alternative_titles", "seniority", "departments", "skills", "technologies",
-        "keywords", "excluded_keywords", "locations", "employment_types", "industries",
-        "target_companies", "excluded_companies", "job_boards",
+        "alternative_titles",
+        "seniority",
+        "departments",
+        "skills",
+        "technologies",
+        "keywords",
+        "excluded_keywords",
+        "locations",
+        "employment_types",
+        "industries",
+        "target_companies",
+        "excluded_companies",
+        "job_boards",
         mode="before",
     )
     @classmethod
@@ -205,7 +215,8 @@ class SettingsResponse(BaseModel):
     @field_validator("candidate_profile", mode="before")
     @classmethod
     def _coerce_candidate_profile(
-        cls, v: Any,
+        cls,
+        v: Any,
     ) -> CandidateProfileSchema | dict[str, Any]:
         if v is None:
             return CandidateProfileSchema()

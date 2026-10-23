@@ -25,6 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # fail on the first upload rather than at boot.
 os.environ.setdefault("STORAGE__LOCAL_ROOT", "/tmp/cvilwar-storage")
 
-from app.main import app  # noqa: E402  - path setup must precede the import
+from app.main import app
 
 __all__ = ["app"]

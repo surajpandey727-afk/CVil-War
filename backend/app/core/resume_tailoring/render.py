@@ -21,10 +21,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from app.core.resume_tailoring.model import Line, LineKind, ResumeDocument, Style
+
+if TYPE_CHECKING:
+    from docx.text.paragraph import Paragraph
+    from docx.text.run import Run
 
 logger = structlog.get_logger(__name__)
 
@@ -125,7 +130,7 @@ def _dominant_body_style(doc: ResumeDocument) -> Style:
     return Style(font=font, size=size)
 
 
-def _apply(run, style: Style, fallback: Style) -> None:
+def _apply(run: Run, style: Style, fallback: Style) -> None:
     """Put one line's typography onto a Word run."""
     from docx.shared import Pt, RGBColor
 
@@ -153,7 +158,7 @@ def _apply(run, style: Style, fallback: Style) -> None:
             rfonts.set(qn(slot), run.font.name)
 
 
-def _align(paragraph, style: Style) -> None:
+def _align(paragraph: Paragraph, style: Style) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     if style.align == "center":

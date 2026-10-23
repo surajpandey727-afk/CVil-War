@@ -63,7 +63,9 @@ Return ONLY valid JSON matching the required schema."""
 
 
 def render_resume_tailor_prompt(
-    resume_content_json: dict, job_title: str, job_description: str,
+    resume_content_json: dict,
+    job_title: str,
+    job_description: str,
 ) -> str:
     """Build the user prompt for one job-tailoring analysis.
 

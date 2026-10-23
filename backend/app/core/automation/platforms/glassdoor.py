@@ -103,7 +103,8 @@ class GlassdoorPlatform(JobPlatform):
         try:
             await agent.run()
             await self._session_manager.save_cookies(
-                "glassdoor", [{"logged_in": True}],
+                "glassdoor",
+                [{"logged_in": True}],
             )
             logger.info("glassdoor.login_success")
             return True
@@ -276,10 +277,7 @@ class GlassdoorPlatform(JobPlatform):
         if "salary" in filters:
             parts.append(f"Filter by salary range: {filters['salary']}. ")
         if "company_rating" in filters:
-            parts.append(
-                f"Filter by minimum company rating: "
-                f"{filters['company_rating']}. "
-            )
+            parts.append(f"Filter by minimum company rating: {filters['company_rating']}. ")
         if "job_type" in filters:
             parts.append(f"Filter by job type: {filters['job_type']}. ")
         if filters.get("remote"):

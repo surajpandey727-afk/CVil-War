@@ -80,14 +80,19 @@ async def _discover_for_user(db: AsyncSession, user_id: str) -> int:
     for query in queries:
         try:
             response = await search_jobs(
-                db, JobSearchRequest(query=query, platforms=platforms, limit=25), user_id,
+                db,
+                JobSearchRequest(query=query, platforms=platforms, limit=25),
+                user_id,
             )
             found += response.total
         except Exception as exc:
             # One bad query (a malformed title, a transient adapter error) must not stop the
             # rest of this user's targets, or the whole cycle for every other user.
             logger.warning(
-                "discovery.query_failed", user_id=user_id, query=query, error=str(exc),
+                "discovery.query_failed",
+                user_id=user_id,
+                query=query,
+                error=str(exc),
             )
     return found
 
@@ -102,19 +107,27 @@ async def run_discovery_for_all_users(ctx: dict[str, Any]) -> None:
     redis = ctx.get("redis")
     async with async_session_factory() as db:
         user_ids = (
-            await db.execute(
-                select(User.id).where(User.is_active.is_(True), User.deleted_at.is_(None))
+            (
+                await db.execute(
+                    select(User.id).where(User.is_active.is_(True), User.deleted_at.is_(None))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         total_found = 0
         for user_id in user_ids:
             token = current_user_id.set(user_id)
             try:
                 async with record_agent_run(
-                    db, user_id, AgentName.DISCOVERY,
+                    db,
+                    user_id,
+                    AgentName.DISCOVERY,
                     input_summary="Poll enabled sources against active role targets",
-                    linked_entity_type="user", linked_entity_id=user_id, redis=redis,
+                    linked_entity_type="user",
+                    linked_entity_id=user_id,
+                    redis=redis,
                 ) as run:
                     found = await _discover_for_user(db, user_id)
                     run.output_summary = f"{found} job(s) found"

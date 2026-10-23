@@ -25,7 +25,9 @@ class PlatformSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
-    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fingerprint_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 

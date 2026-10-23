@@ -133,9 +133,7 @@ async def search_jobs(
     # platform_job_id collapsed onto one row (silent data loss) — this also removes that N+1.
     existing_by_key: dict[tuple[str, str], Job] = {
         (j.platform, j.platform_job_id): j
-        for j in (
-            await db.execute(select(Job).where(Job.user_id == user_id))
-        ).scalars().all()
+        for j in (await db.execute(select(Job).where(Job.user_id == user_id))).scalars().all()
     }
     seen: set[tuple[str, str]] = set()
 
@@ -208,12 +206,16 @@ async def search_jobs(
             continue
         if error is not None:
             logger.error(
-                "job_search.platform_search_failed", platform=platform_name, error=str(error),
+                "job_search.platform_search_failed",
+                platform=platform_name,
+                error=str(error),
             )
             continue
 
         logger.info(
-            "job_search.platform_results", platform=platform_name, count=len(listings),
+            "job_search.platform_results",
+            platform=platform_name,
+            count=len(listings),
         )
         job_searches_total.labels(platform=platform_name).inc()
         jobs_found_total.labels(platform=platform_name).inc(len(listings))
@@ -259,7 +261,8 @@ async def search_jobs(
                     _register(_listing_to_job(listing, user_id))
                 except Exception as exc:
                     logger.warning(
-                        "job_search.exa_listing_conversion_failed", error=str(exc),
+                        "job_search.exa_listing_conversion_failed",
+                        error=str(exc),
                     )
                     continue
             logger.info("job_search.exa_results", count=len(exa_listings))
@@ -316,8 +319,7 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
     salary_range: str | None = None
     if listing.salary_min is not None and listing.salary_max is not None:
         salary_range = (
-            f"{listing.salary_currency} "
-            f"{listing.salary_min:,.0f} - {listing.salary_max:,.0f}"
+            f"{listing.salary_currency} {listing.salary_min:,.0f} - {listing.salary_max:,.0f}"
         )
     elif listing.salary_min is not None:
         salary_range = f"{listing.salary_currency} {listing.salary_min:,.0f}+"
@@ -333,9 +335,7 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
 
     # Stamped for every listing regardless of source, so the boost in list_jobs() (and any
     # future consumer) never has to ask which board a job came from.
-    sponsor_confidence, sponsor_evidence = classify_sponsor(
-        listing.company, listing.description
-    )
+    sponsor_confidence, sponsor_evidence = classify_sponsor(listing.company, listing.description)
 
     return Job(
         user_id=user_id,
@@ -456,13 +456,16 @@ async def list_jobs(
             count_stmt = count_stmt.where(Job.status == status)
         total = (await db.execute(count_stmt)).scalar() or 0
         rows = (
-            await db.execute(
-                stmt.order_by(Job.created_at.desc()).offset(offset).limit(page_size)
-            )
-        ).scalars().all()
+            (await db.execute(stmt.order_by(Job.created_at.desc()).offset(offset).limit(page_size)))
+            .scalars()
+            .all()
+        )
         items = [JobListingResponse.model_validate(j) for j in rows]
         return JobListResponse(
-            items=items, total=total, page=page, page_size=page_size,
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
             has_next=(page * page_size) < total,
         )
 
@@ -470,16 +473,19 @@ async def list_jobs(
     # filtered here. Bounded by MAX_STORED_SCAN so a large account cannot turn one list call
     # into an unbounded read.
     candidates = (
-        await db.execute(stmt.order_by(Job.created_at.desc()).limit(MAX_STORED_SCAN))
-    ).scalars().all()
+        (await db.execute(stmt.order_by(Job.created_at.desc()).limit(MAX_STORED_SCAN)))
+        .scalars()
+        .all()
+    )
 
     matched = [
         job
         for job in candidates
-        if (not wants_location
-            or location_matches(location or "", job.location or "", remote=bool(job.remote)))
-        and (not wants_query
-             or matches_query(query or "", job.title or "", _skills_text(job)))
+        if (
+            not wants_location
+            or location_matches(location or "", job.location or "", remote=bool(job.remote))
+        )
+        and (not wants_query or matches_query(query or "", job.title or "", _skills_text(job)))
         and _passes_hard_criteria(
             job, min_salary_k=min_salary_k, excluded_employment_types=excluded_employment_types
         )
@@ -491,9 +497,7 @@ async def list_jobs(
         matched.sort(key=lambda j: _SPONSOR_RANK.get(j.sponsor_confidence, 3))
 
     total = len(matched)
-    items = [
-        JobListingResponse.model_validate(j) for j in matched[offset : offset + page_size]
-    ]
+    items = [JobListingResponse.model_validate(j) for j in matched[offset : offset + page_size]]
     return JobListResponse(
         items=items,
         total=total,
@@ -660,10 +664,12 @@ async def analyze_job(
         job_metadata: dict[str, Any] = {}
         if job.skills_required and isinstance(job.skills_required, dict):
             job_metadata["required_skills"] = job.skills_required.get(
-                "required", job.skills_required.get("skills", []),
+                "required",
+                job.skills_required.get("skills", []),
             )
             job_metadata["preferred_skills"] = job.skills_required.get(
-                "preferred", [],
+                "preferred",
+                [],
             )
 
         # Extract skills from resume text for candidate profile
@@ -727,11 +733,9 @@ async def assign_canonical_ids(db: AsyncSession, user_id: str) -> int:
     from app.core.job_discovery.dedup import group as group_identities
 
     rows = list(
-        (
-            await db.execute(
-                select(Job).where(Job.user_id == user_id).order_by(Job.created_at)
-            )
-        ).scalars().all()
+        (await db.execute(select(Job).where(Job.user_id == user_id).order_by(Job.created_at)))
+        .scalars()
+        .all()
     )
     if not rows:
         return 0

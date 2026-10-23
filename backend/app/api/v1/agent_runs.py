@@ -61,9 +61,7 @@ async def list_agent_runs(
     latest_by_agent: dict[AgentName, AgentRun] = {}
     all_rows = (
         await db.execute(
-            select(AgentRun)
-            .where(AgentRun.user_id == user.id)
-            .order_by(AgentRun.started_at.desc())
+            select(AgentRun).where(AgentRun.user_id == user.id).order_by(AgentRun.started_at.desc())
         )
     ).scalars()
     for row in all_rows:
@@ -74,7 +72,8 @@ async def list_agent_runs(
             agent_name=name,
             status=latest_by_agent[name].status if name in latest_by_agent else None,
             last_run=(
-                AgentRunItem.model_validate(latest_by_agent[name]) if name in latest_by_agent
+                AgentRunItem.model_validate(latest_by_agent[name])
+                if name in latest_by_agent
                 else None
             ),
         )

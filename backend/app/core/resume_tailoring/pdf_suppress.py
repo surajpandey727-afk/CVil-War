@@ -16,7 +16,15 @@ Removed text is reported in the change log as ``removed`` with the line it was, 
 résumé silently.
 """
 
+# ruff: noqa: E501  -- long prose / LLM-prompt string literals in this module
+
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.resume_tailoring.pdf_check import PdfCheck
+    from app.core.resume_tailoring.pdf_edit import PdfEditResult
 
 import statistics
 from dataclasses import dataclass
@@ -185,7 +193,9 @@ def shrink_for(pagination: Pagination, doc: ResumeDocument, ids: list[str]) -> S
     return shrink
 
 
-def apply_cuts(src: Path, doc: ResumeDocument, cuts: list[Cut], out: Path):
+def apply_cuts(
+    src: Path, doc: ResumeDocument, cuts: list[Cut], out: Path
+) -> tuple[dict[str, str], PdfEditResult, PdfCheck]:
     from app.core.resume_tailoring.pdf_check import check_edited_pdf
     from app.core.resume_tailoring.pdf_edit import edit_pdf_in_place
 

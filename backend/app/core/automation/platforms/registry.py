@@ -78,9 +78,7 @@ class PlatformRegistry:
         platform_class = self._platforms.get(name)
         if platform_class is None:
             registered = ", ".join(self._platforms.keys()) or "(none)"
-            raise KeyError(
-                f"Platform '{name}' not registered. Available: {registered}"
-            )
+            raise KeyError(f"Platform '{name}' not registered. Available: {registered}")
         return platform_class(**kwargs)
 
 

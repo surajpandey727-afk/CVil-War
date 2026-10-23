@@ -1,6 +1,6 @@
 """The evaluator's findings in plain terms: strongest, weak, missing, problems, verdict.
 
-(Brief sections 17–27.)
+(Brief sections 17-27.)
 
 Nothing here is flattering by design. It names what holds a résumé back, says where the fix is
 and states plainly when a gap cannot be closed without evidence the candidate does not have.

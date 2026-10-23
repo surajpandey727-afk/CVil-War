@@ -148,9 +148,15 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # -- Follow-up / assessment / interview tracking -------------------------------------
-    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    assessment_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    follow_up_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    assessment_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     assessment_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     interview_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: Document version actually submitted. A version, never a document — see models/document.

@@ -231,7 +231,9 @@ async def enrich_job(db: AsyncSession, job: Job, *, force: bool = False) -> Job:
     await db.commit()
     await db.refresh(job)
     logger.info(
-        "job_enriched", job_id=job.id, platform=job.platform,
+        "job_enriched",
+        job_id=job.id,
+        platform=job.platform,
         description_chars=len(job.description or ""),
         requirements=len(sections["requirements"]),
     )

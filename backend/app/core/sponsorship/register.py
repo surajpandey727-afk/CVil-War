@@ -34,9 +34,7 @@ from app.core.job_discovery.dedup import (
 
 logger = structlog.get_logger(__name__)
 
-PUBLICATION_URL = (
-    "https://www.gov.uk/government/publications/register-of-licensed-sponsors-workers"
-)
+PUBLICATION_URL = "https://www.gov.uk/government/publications/register-of-licensed-sponsors-workers"
 _CSV_LINK_RE = re.compile(r'href="(https://assets\.publishing\.service\.gov\.uk/[^"]+\.csv)"')
 
 # Same reasoning as app.services.resume.UPLOAD_DIR: a project-relative path lives inside the
@@ -61,10 +59,21 @@ _ROUTE_SKILLED_WORKER = "skilled worker"
 #: one containment match over another (see `lookup`'s `_rank`), it never turns a match into
 #: a non-match, so a false negative here costs nothing beyond falling back to the
 #: fewest-extra-words tie-break that already existed.
-_GENERIC_DESCRIPTORS = frozenset({
-    "uk", "gb", "britain", "british", "international", "europe", "global",
-    "services", "service", "company", "co",
-})
+_GENERIC_DESCRIPTORS = frozenset(
+    {
+        "uk",
+        "gb",
+        "britain",
+        "british",
+        "international",
+        "europe",
+        "global",
+        "services",
+        "service",
+        "company",
+        "co",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,7 @@ class SponsorRegister:
         if not bucket:
             return SponsorMatch(matched=False)
         query_words = set(normalise_company(company).split())
+
         # Confirmed live against the real register: querying "Amazon" (which does have a
         # genuine, correctly-licensed "Amazon UK Services Ltd" entry) instead matched
         # "Amazon Charitable Trust" — containment (see companies_match) does not distinguish
@@ -124,9 +134,7 @@ class SponsorRegister:
             return (not extra <= _GENERIC_DESCRIPTORS, len(extra), not is_skilled)
 
         candidates = [
-            entry
-            for entry in self._by_bucket.get(bucket, [])
-            if companies_match(company, entry[0])
+            entry for entry in self._by_bucket.get(bucket, []) if companies_match(company, entry[0])
         ]
         if not candidates:
             return SponsorMatch(matched=False)
@@ -191,11 +199,13 @@ async def refresh(*, force: bool = False) -> int:
 
     _CSV_PATH.write_bytes(content)
     _META_PATH.write_text(
-        json.dumps({
-            "fetched_at": datetime.now(UTC).isoformat(),
-            "row_count": len(rows),
-            "source_url": csv_url,
-        }),
+        json.dumps(
+            {
+                "fetched_at": datetime.now(UTC).isoformat(),
+                "row_count": len(rows),
+                "source_url": csv_url,
+            }
+        ),
         encoding="utf-8",
     )
     global _register_cache

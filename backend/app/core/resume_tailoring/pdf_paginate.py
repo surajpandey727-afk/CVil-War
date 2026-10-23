@@ -193,8 +193,10 @@ def build_sections(rows: list[Row]) -> list[Section]:
                 current.rows
                 and current.rows[-1].kind == "rule"
                 and (
-                    (current.rows[-1].page == row.page
-                    and 0 <= row.top - current.rows[-1].bottom <= _RULE_REACH)
+                    (
+                        current.rows[-1].page == row.page
+                        and 0 <= row.top - current.rows[-1].bottom <= _RULE_REACH
+                    )
                     or current.rows[-1].page != row.page
                 )
             ):

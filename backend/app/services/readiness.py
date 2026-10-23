@@ -39,7 +39,7 @@ class Blocker:
 
     code: str
     message: str
-    action: str          # connect_platform | attach_resume | configure_llm | manual_only
+    action: str  # connect_platform | attach_resume | configure_llm | manual_only
     #: The platform the action applies to, when the action needs one.
     platform: str = ""
     #: True when the operator can still apply by hand — never leave them with nothing.
@@ -62,38 +62,46 @@ async def apply_readiness(
     if connectable(platform):
         state = await CredentialStore().load_session_cookies(db, user_id, platform)
         if state is None:
-            blockers.append(Blocker(
-                code="no_session",
-                message=(
-                    f"The agent has no {job.platform} session. Connect {job.platform} and sign "
-                    "in yourself — your password is never seen or stored."
-                ),
-                action="connect_platform",
-                platform=platform,
-            ))
+            blockers.append(
+                Blocker(
+                    code="no_session",
+                    message=(
+                        f"The agent has no {job.platform} session. Connect {job.platform} and sign "
+                        "in yourself — your password is never seen or stored."
+                    ),
+                    action="connect_platform",
+                    platform=platform,
+                )
+            )
     elif not job.application_url and not job.url:
         # Not a login platform and no link to hand over: there is nothing to drive.
-        blockers.append(Blocker(
-            code="no_route",
-            message="This listing has no application link, so there is nothing to open.",
-            action="manual_only",
-            manual_possible=False,
-        ))
+        blockers.append(
+            Blocker(
+                code="no_route",
+                message="This listing has no application link, so there is nothing to open.",
+                action="manual_only",
+                manual_possible=False,
+            )
+        )
 
     # 2. A résumé to send.
     resume = await db.get(Resume, resume_id) if resume_id else None
     if resume is None:
-        blockers.append(Blocker(
-            code="no_resume",
-            message="No CV is attached to this application yet.",
-            action="attach_resume",
-        ))
+        blockers.append(
+            Blocker(
+                code="no_resume",
+                message="No CV is attached to this application yet.",
+                action="attach_resume",
+            )
+        )
     elif not (resume.file_path_pdf or resume.file_path_docx):
-        blockers.append(Blocker(
-            code="resume_file_missing",
-            message=f"'{resume.name}' has no rendered file to upload.",
-            action="attach_resume",
-        ))
+        blockers.append(
+            Blocker(
+                code="resume_file_missing",
+                message=f"'{resume.name}' has no rendered file to upload.",
+                action="attach_resume",
+            )
+        )
 
     # 3. A model the agent can think with.
     cfg = (
@@ -109,13 +117,14 @@ async def apply_readiness(
     if llm_key_required(provider, model) and not await CredentialStore().get_llm_key(
         db, user_id, provider
     ):
-        blockers.append(Blocker(
-            code="no_llm_key",
-            message=(
-                f"No API key is configured for {provider}, and no gateway is set to supply "
-                "one."
-            ),
-            action="configure_llm",
-        ))
+        blockers.append(
+            Blocker(
+                code="no_llm_key",
+                message=(
+                    f"No API key is configured for {provider}, and no gateway is set to supply one."
+                ),
+                action="configure_llm",
+            )
+        )
 
     return blockers

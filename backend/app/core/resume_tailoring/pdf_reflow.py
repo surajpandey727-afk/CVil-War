@@ -464,8 +464,7 @@ def apply_layout(
         bands = [
             (row.top - 3.0, row.bottom + 3.0)
             for row in rows_by_page.get(i, [])
-            if (pl := placement_of.get(id(row))) is not None
-            and (abs(pl.dy) > 1e-6 or pl.page != i)
+            if (pl := placement_of.get(id(row))) is not None and (abs(pl.dy) > 1e-6 or pl.page != i)
         ]
         stuck = next(
             (a for a in loose if any(a.top < hi and a.bottom > lo for lo, hi in bands)), None
@@ -479,7 +478,9 @@ def apply_layout(
         for row in rows_by_page.get(i, []):
             pl = placement_of.get(id(row))
             if pl is not None and (abs(pl.dy) > 1e-6 or pl.page != i):
-                raise pa.Unsupported(f"page {i + 1} cannot be moved ({why}) and this layout moves it")
+                raise pa.Unsupported(
+                    f"page {i + 1} cannot be moved ({why}) and this layout moves it"
+                )
     for pl in placements:
         if pl.page in frozen and pl.row.page != pl.page:
             raise pa.Unsupported(f"page {pl.page + 1} cannot receive content ({frozen[pl.page]})")

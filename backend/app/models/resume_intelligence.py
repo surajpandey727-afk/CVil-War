@@ -56,7 +56,8 @@ class ResumeBranch(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     )
 
     versions: Mapped[list[ResumeVersion]] = relationship(
-        back_populates="branch", cascade="all, delete-orphan",
+        back_populates="branch",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
@@ -99,13 +100,15 @@ class ResumeVersion(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source: Mapped[ResumeVersionSource] = mapped_column(
         pg_enum(ResumeVersionSource, "resume_version_source"),
-        nullable=False, default=ResumeVersionSource.INITIAL,
+        nullable=False,
+        default=ResumeVersionSource.INITIAL,
     )
     commit_message: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
     branch: Mapped[ResumeBranch | None] = relationship(back_populates="versions")
     changes: Mapped[list[ResumeChange]] = relationship(
-        back_populates="version", cascade="all, delete-orphan",
+        back_populates="version",
+        cascade="all, delete-orphan",
         order_by="ResumeChange.created_at",
     )
 
@@ -152,7 +155,8 @@ class ResumeChange(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ResumeChangeStatus] = mapped_column(
         pg_enum(ResumeChangeStatus, "resume_change_status"),
-        nullable=False, default=ResumeChangeStatus.ACCEPTED,
+        nullable=False,
+        default=ResumeChangeStatus.ACCEPTED,
     )
 
     version: Mapped[ResumeVersion | None] = relationship(back_populates="changes")
@@ -193,7 +197,7 @@ class JobResumeAnalysis(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     ats_alignment_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     role_fit_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     positioning_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    #: {"current_title","target_title","relationship","shared_experience":[...],"positioning_opportunity"}
+    #: {"current_title","target_title","relationship","shared_experience":[...],"positioning_opportunity"}  # noqa: E501
     title_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     proposed_version_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("resume_versions.id", ondelete="SET NULL"), nullable=True

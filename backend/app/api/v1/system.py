@@ -56,35 +56,48 @@ def _email_state() -> ServiceState:
     if cfg.provider == "smtp":
         if cfg.smtp_host:
             return ServiceState(
-                key="email", label="Email delivery", status="connected",
+                key="email",
+                label="Email delivery",
+                status="connected",
                 detail=f"Transactional email sends via SMTP ({cfg.smtp_host}).",
             )
         return ServiceState(
-            key="email", label="Email delivery", status="not_configured",
+            key="email",
+            label="Email delivery",
+            status="not_configured",
             detail="SMTP is selected but no SMTP host is set — email cannot be delivered.",
-            action_path="/settings", action_label="Configure",
+            action_path="/settings",
+            action_label="Configure",
         )
     return ServiceState(
-        key="email", label="Email delivery", status="pending",
+        key="email",
+        label="Email delivery",
+        status="pending",
         detail="Emails are written to the server log, not delivered. Set EMAIL__PROVIDER=smtp "
         "with SMTP credentials to send real email (password reset, alerts).",
-        action_path="/settings", action_label="Enable sending",
+        action_path="/settings",
+        action_label="Enable sending",
     )
 
 
 async def _gmail_state(db: AsyncSession, user_id: str) -> ServiceState:
     if not gmail_auth.is_configured():
         return ServiceState(
-            key="gmail", label="Gmail notifications", status="not_configured",
+            key="gmail",
+            label="Gmail notifications",
+            status="not_configured",
             detail="No Google OAuth client is set up on this deployment.",
-            action_path="/communications", action_label="Set up",
+            action_path="/communications",
+            action_label="Set up",
         )
     connected = await gmail_auth.is_connected(db, user_id)
     return ServiceState(
-        key="gmail", label="Gmail notifications",
+        key="gmail",
+        label="Gmail notifications",
         status="connected" if connected else "pending",
         detail="Connected — you'll be emailed when applications go out."
-        if connected else "Configured but not connected. Connect to get notified.",
+        if connected
+        else "Configured but not connected. Connect to get notified.",
         action_path="" if connected else "/communications",
         action_label="" if connected else "Connect",
     )
@@ -99,10 +112,12 @@ async def _llm_state() -> ServiceState:
     except Exception as exc:  # timeout or discovery failure — report, never raise
         reachable, error = False, str(exc)
     return ServiceState(
-        key="llm", label="AI model gateway",
+        key="llm",
+        label="AI model gateway",
         status="connected" if reachable else "unavailable",
         detail="Reachable — résumé tailoring and AI features can run."
-        if reachable else f"Not reachable: {error or 'gateway down'}.",
+        if reachable
+        else f"Not reachable: {error or 'gateway down'}.",
     )
 
 
@@ -115,7 +130,8 @@ async def _platforms_state(db: AsyncSession, user_id: str) -> ServiceState:
     except Exception:
         connected = 0
     return ServiceState(
-        key="job_boards", label="Job boards (apply)",
+        key="job_boards",
+        label="Job boards (apply)",
         status="connected" if connected else "pending",
         detail=f"{connected} connected — the agent can submit on these."
         if connected
@@ -137,11 +153,14 @@ async def _agent_state(db: AsyncSession, user_id: str) -> ServiceState:
     mode = str(automation.get("mode") or automation.get("apply_mode") or "review")
     autonomous = mode == "autonomous"
     return ServiceState(
-        key="ai_agent", label="AI apply agent",
+        key="ai_agent",
+        label="AI apply agent",
         status="connected" if autonomous else "pending",
         detail="Autonomous — applies on its own within your rules."
-        if autonomous else f"Review mode — you approve each application ({mode}).",
-        action_path="/settings", action_label="Change",
+        if autonomous
+        else f"Review mode — you approve each application ({mode}).",
+        action_path="/settings",
+        action_label="Change",
     )
 
 
@@ -157,7 +176,9 @@ async def system_status(
     """Every dependency's connection state for the status widget. Never raises on a dead
     dependency — a down service is a reported ``unavailable``/``pending``, not a 500."""
     database = ServiceState(
-        key="database", label="Database", status="connected",
+        key="database",
+        label="Database",
+        status="connected",
         detail="Connected.",
     )
     # The LLM gateway check is a network call and the slow part; run it alongside the DB calls.

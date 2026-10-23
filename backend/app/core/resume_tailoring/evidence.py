@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.core.resume_tailoring.jobspec import (
     JobSpec,
@@ -29,6 +31,9 @@ from app.core.resume_tailoring.jobspec import (
     lexicon,
 )
 from app.core.resume_tailoring.model import ResumeDocument
+
+if TYPE_CHECKING:
+    from app.core.ats_engine import Evaluation
 
 
 class MatchKind(str):
@@ -160,7 +165,7 @@ class AtsScore:
 _KEYWORD_TYPES = ("TECHNOLOGY", "SKILL", "DOMAIN", "TOOL", "METHODOLOGY", "BEHAVIOUR", "INDUSTRY")
 
 
-def ats_score_from(evaluation) -> AtsScore:
+def ats_score_from(evaluation: Evaluation) -> AtsScore:
     """Adapt an :class:`~app.core.ats_engine.Evaluation` to the tailoring pass's score shape."""
     from app.core.ats_engine.taxonomy import ReqTier, Strength
 
@@ -198,7 +203,7 @@ def ats_score_from(evaluation) -> AtsScore:
 
 
 def score(
-    doc: ResumeDocument, spec: JobSpec, coverage: Coverage | None = None, *, pdf=None
+    doc: ResumeDocument, spec: JobSpec, coverage: Coverage | None = None, *, pdf: Path | None = None
 ) -> AtsScore:
     """Score ``doc`` against the posting with the ATS evaluation engine.
 

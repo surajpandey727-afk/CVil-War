@@ -33,10 +33,7 @@ logger = structlog.get_logger(__name__)
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-_SCOPE = (
-    "https://www.googleapis.com/auth/gmail.readonly "
-    "https://www.googleapis.com/auth/gmail.send"
-)
+_SCOPE = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"
 _TIMEOUT = 15.0
 #: Refresh this long before the token's own expiry — never let a sync fail mid-run on an
 #: access token that expires between the readiness check and the actual API call.
@@ -86,9 +83,7 @@ def authorize_url(user_id: str) -> str:
     return f"{_AUTH_URL}?{urlencode(params)}"
 
 
-async def exchange_code(
-    db: AsyncSession, user_id: str, code: str
-) -> None:
+async def exchange_code(db: AsyncSession, user_id: str, code: str) -> None:
     """Trade the callback's one-time code for a token pair, and store it encrypted."""
     client_id, client_secret, redirect_uri = _require_client()
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -113,12 +108,17 @@ async def _store_token(db: AsyncSession, user_id: str, body: dict[str, Any]) -> 
     expires_in = int(body.get("expires_in", 3600))
     expires_at = (datetime.now(UTC) + timedelta(seconds=expires_in)).isoformat()
     existing = await CredentialStore().get_oauth_token(db, user_id, PROVIDER)
-    await CredentialStore().put_oauth_token(db, user_id, PROVIDER, {
-        "access_token": body["access_token"],
-        # A refresh grant does not return a new refresh_token — keep the one already on file.
-        "refresh_token": body.get("refresh_token") or (existing or {}).get("refresh_token"),
-        "expires_at": expires_at,
-    })
+    await CredentialStore().put_oauth_token(
+        db,
+        user_id,
+        PROVIDER,
+        {
+            "access_token": body["access_token"],
+            # A refresh grant does not return a new refresh_token — keep the one already on file.
+            "refresh_token": body.get("refresh_token") or (existing or {}).get("refresh_token"),
+            "expires_at": expires_at,
+        },
+    )
 
 
 async def _refresh(db: AsyncSession, user_id: str, refresh_token: str) -> str:

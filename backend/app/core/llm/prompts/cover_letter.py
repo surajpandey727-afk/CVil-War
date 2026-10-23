@@ -200,26 +200,59 @@ def select_best_template(
     desc_lower = job_description.lower()
 
     executive_keywords = {
-        "vp", "vice president", "director", "chief", "head of",
-        "cto", "ceo", "cfo", "coo", "svp", "evp", "partner",
-        "president", "managing director",
+        "vp",
+        "vice president",
+        "director",
+        "chief",
+        "head of",
+        "cto",
+        "ceo",
+        "cfo",
+        "coo",
+        "svp",
+        "evp",
+        "partner",
+        "president",
+        "managing director",
     }
     if any(kw in title_lower for kw in executive_keywords):
         return CoverLetterTemplate.EXECUTIVE
 
     technical_keywords = {
-        "engineer", "developer", "architect", "devops", "sre",
-        "data scientist", "machine learning", "software", "backend",
-        "frontend", "fullstack", "full-stack", "platform", "infrastructure",
-        "security engineer", "cloud engineer", "mlops",
+        "engineer",
+        "developer",
+        "architect",
+        "devops",
+        "sre",
+        "data scientist",
+        "machine learning",
+        "software",
+        "backend",
+        "frontend",
+        "fullstack",
+        "full-stack",
+        "platform",
+        "infrastructure",
+        "security engineer",
+        "cloud engineer",
+        "mlops",
     }
     if any(kw in title_lower for kw in technical_keywords):
         return CoverLetterTemplate.TECHNICAL
 
     creative_keywords = {
-        "designer", "creative", "content", "copywriter", "brand",
-        "ux", "ui", "art director", "marketing", "social media",
-        "storytelling", "editorial",
+        "designer",
+        "creative",
+        "content",
+        "copywriter",
+        "brand",
+        "ux",
+        "ui",
+        "art director",
+        "marketing",
+        "social media",
+        "storytelling",
+        "editorial",
     }
     if any(kw in title_lower or kw in desc_lower for kw in creative_keywords):
         return CoverLetterTemplate.CREATIVE

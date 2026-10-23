@@ -44,15 +44,12 @@ class ExaJobSearch:
         """Lazy-load the Exa client."""
         if self._client is None:
             if not self._api_key:
-                raise RuntimeError(
-                    "Exa API key not configured. Set EXA_API_KEY in .env"
-                )
+                raise RuntimeError("Exa API key not configured. Set EXA_API_KEY in .env")
             try:
                 from exa_py import Exa
             except ImportError as exc:
                 raise RuntimeError(
-                    "exa-py package not installed. "
-                    "Install with: pip install exa-py"
+                    "exa-py package not installed. Install with: pip install exa-py"
                 ) from exc
             self._client = Exa(api_key=self._api_key)
         return self._client
@@ -64,6 +61,7 @@ class ExaJobSearch:
             return False
         try:
             from exa_py import Exa  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -142,6 +140,7 @@ class ExaJobSearch:
     def _date_filter(self, days_back: int) -> str:
         """Return ISO date string for N days ago."""
         from datetime import UTC, datetime, timedelta
+
         dt = datetime.now(UTC) - timedelta(days=days_back)
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -159,10 +158,7 @@ class ExaJobSearch:
 
             # Detect remote from text
             text_lower = text.lower()
-            remote = any(
-                kw in text_lower
-                for kw in ["remote", "work from home", "distributed"]
-            )
+            remote = any(kw in text_lower for kw in ["remote", "work from home", "distributed"])
 
             # Extract location hints
             location = self._extract_location(text)
@@ -192,6 +188,7 @@ class ExaJobSearch:
             return title.split(" - ")[-1].strip()
         # Fall back to domain
         from urllib.parse import urlparse
+
         domain = urlparse(url).netloc.replace("www.", "")
         return domain.split(".")[0].title() if domain else "Unknown"
 
@@ -199,6 +196,7 @@ class ExaJobSearch:
     def _extract_location(text: str) -> str:
         """Best-effort location extraction from job text."""
         import re
+
         # Match common location patterns
         patterns = [
             r"(?:location|based in|office in)[:\s]+([A-Z][a-zA-Z\s,]+)",

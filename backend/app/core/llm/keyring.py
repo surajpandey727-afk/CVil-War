@@ -53,7 +53,7 @@ def mask_key(key: str) -> str:
 class _KeyState:
     key: str
     available_at: float = 0.0  # monotonic deadline; 0 = usable now
-    reason: str = ""           # why it was parked, for the status view
+    reason: str = ""  # why it was parked, for the status view
     exhausted_count: int = 0
     rate_limited_count: int = 0
     success_count: int = 0
@@ -138,9 +138,7 @@ class KeyRing:
         state.available_at = now + RATE_LIMIT_COOLDOWN_S
         state.reason = "rate_limited"
         state.rate_limited_count += 1
-        logger.info(
-            "llm_key.rate_limited", provider=self.provider, key=mask_key(key)
-        )
+        logger.info("llm_key.rate_limited", provider=self.provider, key=mask_key(key))
 
     def mark_success(self, key: str) -> None:
         """Clear any cooldown on a key that just worked."""
@@ -162,9 +160,7 @@ class KeyRing:
                     "index": index,
                     "key": mask_key(state.key),
                     "status": state.reason if cooling else "available",
-                    "cooldown_remaining_s": (
-                        round(state.available_at - now) if cooling else 0
-                    ),
+                    "cooldown_remaining_s": (round(state.available_at - now) if cooling else 0),
                     "successes": state.success_count,
                     "times_exhausted": state.exhausted_count,
                     "times_rate_limited": state.rate_limited_count,
@@ -200,9 +196,10 @@ def get_keyring(provider: str, raw_keys: str) -> KeyRing:
     Rebuilds if the configured key set changes (settings reload in tests).
     """
     existing = _RINGS.get(provider)
-    if existing is not None and existing.all_keys() == KeyRing.from_csv(
-        provider, raw_keys
-    ).all_keys():
+    if (
+        existing is not None
+        and existing.all_keys() == KeyRing.from_csv(provider, raw_keys).all_keys()
+    ):
         return existing
     ring = KeyRing.from_csv(provider, raw_keys)
     _RINGS[provider] = ring

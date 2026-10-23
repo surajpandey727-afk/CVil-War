@@ -37,8 +37,5 @@ def wrap_untrusted(text: str, *, label: str) -> str:
     """
     body = text or ""
     return (
-        f"{_UNTRUSTED_NOTICE}\n"
-        f"<<<BEGIN UNTRUSTED {label}>>>\n"
-        f"{body}\n"
-        f"<<<END UNTRUSTED {label}>>>"
+        f"{_UNTRUSTED_NOTICE}\n<<<BEGIN UNTRUSTED {label}>>>\n{body}\n<<<END UNTRUSTED {label}>>>"
     )

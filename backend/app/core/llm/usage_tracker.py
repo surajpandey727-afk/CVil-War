@@ -78,9 +78,7 @@ async def persist_usage_for_user(
         from app.db.session import async_session_factory
 
         async with async_session_factory() as db:
-            await record_usage(
-                db, response, user_id=user_id, purpose=purpose, trace_id=trace_id
-            )
+            await record_usage(db, response, user_id=user_id, purpose=purpose, trace_id=trace_id)
     except Exception as exc:
         # Usage accounting must never break the LLM call — swallow and log.
         logger.warning("llm_usage_persist_failed", user_id=user_id, error=str(exc))

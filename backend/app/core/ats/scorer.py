@@ -20,8 +20,12 @@ from app.core.ats.skill_matcher import SkillMatcher
 logger = structlog.get_logger(__name__)
 
 _EDUCATION_LEVELS: dict[str, int] = {
-    "high school": 1, "associate": 2, "bachelor": 3,
-    "master": 4, "phd": 5, "doctorate": 5,
+    "high school": 1,
+    "associate": 2,
+    "bachelor": 3,
+    "master": 4,
+    "phd": 5,
+    "doctorate": 5,
 }
 
 _EDUCATION_PATTERNS: list[str] = [
@@ -128,27 +132,36 @@ class ResumeScorer:
             job_metadata.get("preferred_skills", []),
         )
         keyword_score, keyword_matches = self._keyword_analyzer.analyze_keywords(
-            resume_text, job_description,
+            resume_text,
+            job_description,
         )
         exp_score, exp_matches = self._experience_analyzer.analyze_experience(
             candidate_profile.get("experience", []),
-            job_description, job_metadata,
+            job_description,
+            job_metadata,
         )
         edu_score, edu_matches = self._score_education(
             candidate_profile.get("education", []),
-            job_description, job_metadata,
+            job_description,
+            job_metadata,
         )
 
         w = self._weights
         overall = (
-            w.skills * skill_score + w.experience * exp_score
-            + w.education * edu_score + w.keywords * keyword_score
+            w.skills * skill_score
+            + w.experience * exp_score
+            + w.education * edu_score
+            + w.keywords * keyword_score
         )
         overall = min(max(overall, 0.0), 1.0)
 
         suggestions = self._generate_suggestions(
-            skill_score, exp_score, edu_score, keyword_score,
-            missing_req, missing_pref,
+            skill_score,
+            exp_score,
+            edu_score,
+            keyword_score,
+            missing_req,
+            missing_pref,
         )
         # Free, always-on — no LLM call — see impact_matrix's own docstring for why this
         # doesn't just fold into _generate_suggestions above (it needs the raw bullet text,
@@ -169,9 +182,12 @@ class ResumeScorer:
             improvement_suggestions=suggestions,
         )
         logger.info(
-            "resume_scorer.scored", overall=details.overall_score,
-            skills=details.skill_score, experience=details.experience_score,
-            education=details.education_score, keywords=details.keyword_score,
+            "resume_scorer.scored",
+            overall=details.overall_score,
+            skills=details.skill_score,
+            experience=details.experience_score,
+            education=details.education_score,
+            keywords=details.keyword_score,
         )
         return details
 
@@ -198,12 +214,10 @@ class ResumeScorer:
             return 0.5, [], []
 
         missing_required = [
-            s for s in required_skills
-            if not self._skill_matcher.has_skill(candidate_skills, s)
+            s for s in required_skills if not self._skill_matcher.has_skill(candidate_skills, s)
         ]
         missing_preferred = [
-            s for s in preferred_skills
-            if not self._skill_matcher.has_skill(candidate_skills, s)
+            s for s in preferred_skills if not self._skill_matcher.has_skill(candidate_skills, s)
         ]
         req_matched = len(required_skills) - len(missing_required)
         pref_matched = len(preferred_skills) - len(missing_preferred)
@@ -242,12 +256,14 @@ class ResumeScorer:
                 continue
             degree = edu.get("degree", "")
             rank = self._education_rank(degree)
-            matches.append({
-                "degree": degree,
-                "institution": edu.get("institution", "Unknown"),
-                "rank": rank,
-                "meets_requirement": rank >= required_rank,
-            })
+            matches.append(
+                {
+                    "degree": degree,
+                    "institution": edu.get("institution", "Unknown"),
+                    "rank": rank,
+                    "meets_requirement": rank >= required_rank,
+                }
+            )
             best_rank = max(best_rank, rank)
 
         if best_rank >= required_rank:
@@ -284,16 +300,18 @@ class ResumeScorer:
         return 0
 
     def _generate_suggestions(
-        self, skill_score: float, exp_score: float,
-        edu_score: float, kw_score: float,
-        missing_req: list[str], missing_pref: list[str],
+        self,
+        skill_score: float,
+        exp_score: float,
+        edu_score: float,
+        kw_score: float,
+        missing_req: list[str],
+        missing_pref: list[str],
     ) -> list[str]:
         """Generate actionable improvement suggestions."""
         suggestions: list[str] = []
         if missing_req:
-            suggestions.append(
-                f"Add required skills to your resume: {', '.join(missing_req[:5])}"
-            )
+            suggestions.append(f"Add required skills to your resume: {', '.join(missing_req[:5])}")
         if len(missing_pref) > 2:
             suggestions.append(
                 f"Consider highlighting preferred skills: {', '.join(missing_pref[:3])}"

@@ -53,7 +53,9 @@ def profile_source(profile: dict | None) -> TrustedSource | None:
 
 def resume_source(name: str, text: str | None) -> TrustedSource | None:
     cleaned = (text or "").strip()
-    return TrustedSource(f"Previous résumé: {name}", cleaned[:_MAX_SOURCE_CHARS]) if cleaned else None
+    return (
+        TrustedSource(f"Previous résumé: {name}", cleaned[:_MAX_SOURCE_CHARS]) if cleaned else None
+    )
 
 
 def evidence_text(sources: Iterable[TrustedSource]) -> str:

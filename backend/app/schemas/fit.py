@@ -140,7 +140,8 @@ class FitAnalysis(BaseModel):
     @property
     def gaps(self) -> list[RequirementMatch]:
         return [
-            m for m in self.matches
+            m
+            for m in self.matches
             if m.level in (MatchLevel.MISSING, MatchLevel.WEAK, MatchLevel.PARTIAL)
         ]
 

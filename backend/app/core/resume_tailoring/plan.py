@@ -15,6 +15,8 @@ them, and an edit that fails enforcement is dropped while the rest of the plan p
 single bad suggestion costs one bullet, not the whole tailoring pass.
 """
 
+# ruff: noqa: E501  -- long prose / LLM-prompt string literals in this module
+
 from __future__ import annotations
 
 import json
@@ -91,14 +93,45 @@ DEFAULT_EDIT_BUDGET = 14
 #: Wording that marks a résumé as machine-written. Listed in the prompt and enforced by the
 #: validator, because stating a ban has never been sufficient on its own.
 BANNED_PHRASES: tuple[str, ...] = (
-    "spearheaded", "leveraged", "leveraging", "drove strategic initiatives",
-    "played a pivotal role", "dynamic professional", "results-driven", "results driven",
-    "proven track record", "passionate", "cutting-edge", "cutting edge", "robust",
-    "transformative", "synergised", "synergized", "synergy", "revolutionised",
-    "revolutionized", "orchestrated", "holistic", "seamless", "seamlessly",
-    "innovative solutions", "unlocking", "empowering", "harnessing", "utilising",
-    "utilizing", "utilise", "utilize", "best-in-class", "world-class", "game-changing",
-    "thought leader", "deep dive", "move the needle", "value-add", "spearhead",
+    "spearheaded",
+    "leveraged",
+    "leveraging",
+    "drove strategic initiatives",
+    "played a pivotal role",
+    "dynamic professional",
+    "results-driven",
+    "results driven",
+    "proven track record",
+    "passionate",
+    "cutting-edge",
+    "cutting edge",
+    "robust",
+    "transformative",
+    "synergised",
+    "synergized",
+    "synergy",
+    "revolutionised",
+    "revolutionized",
+    "orchestrated",
+    "holistic",
+    "seamless",
+    "seamlessly",
+    "innovative solutions",
+    "unlocking",
+    "empowering",
+    "harnessing",
+    "utilising",
+    "utilizing",
+    "utilise",
+    "utilize",
+    "best-in-class",
+    "world-class",
+    "game-changing",
+    "thought leader",
+    "deep dive",
+    "move the needle",
+    "value-add",
+    "spearhead",
 )
 
 
@@ -166,7 +199,9 @@ def _editable_inventory(doc: ResumeDocument, exclude: frozenset[str] = frozenset
             entry = {
                 "line_id": line.id,
                 "section": section.heading or "(summary)",
-                "kind": {LineKind.PROSE: "summary", LineKind.SKILL: "skills_row"}.get(line.kind, "bullet"),
+                "kind": {LineKind.PROSE: "summary", LineKind.SKILL: "skills_row"}.get(
+                    line.kind, "bullet"
+                ),
                 "text": line.text,
             }
             # On a PDF the edit is written back into the page, so a line has a hard capacity.
@@ -245,7 +280,7 @@ a capability to a line whose work it cannot belong to, and never write a finance
     # present elsewhere in the CV" (a legitimate surfacing) from "absent entirely" (a gap).
     return f"""\
 Propose up to {budget} edits to this CV for the role below: the changes that give the \
-strongest, most defensible match to this posting. Each edit must genuinely change its line. A line you keep must be \
+strongest, most defensible match to this posting. Each edit must genuinely change its line. A line you keep must be \\
 omitted from the list, not repeated back.
 
 TARGET ROLE: {spec.title or "(untitled)"}

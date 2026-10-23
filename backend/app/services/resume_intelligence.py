@@ -93,20 +93,24 @@ async def _bootstrap_master_content(db: AsyncSession, user_id: str) -> ResumeCon
         ]
         if desc.strip():
             achievements.insert(0, Achievement(id=_new_id(), text=desc))
-        experience.append(ExperienceEntry(
-            id=_new_id(),
-            title=str(entry.get("title") or ""),
-            company=str(entry.get("company") or ""),
-            start_date=str(entry.get("start_date") or ""),
-            end_date=str(entry.get("end_date") or ""),
-            achievements=achievements,
-        ))
+        experience.append(
+            ExperienceEntry(
+                id=_new_id(),
+                title=str(entry.get("title") or ""),
+                company=str(entry.get("company") or ""),
+                start_date=str(entry.get("start_date") or ""),
+                end_date=str(entry.get("end_date") or ""),
+                achievements=achievements,
+            )
+        )
     education = [
         EducationEntry(
-            degree=str(e.get("degree") or ""), institution=str(e.get("institution") or ""),
+            degree=str(e.get("degree") or ""),
+            institution=str(e.get("institution") or ""),
             graduation_year=str(e.get("graduation_year") or ""),
         )
-        for e in (profile.get("education") or []) if isinstance(e, dict)
+        for e in (profile.get("education") or [])
+        if isinstance(e, dict)
     ]
 
     return ResumeContent(
@@ -120,13 +124,15 @@ async def _bootstrap_master_content(db: AsyncSession, user_id: str) -> ResumeCon
 
 
 def _version_label(prefix: str, sequence: int) -> str:
-    """"MAIN v1.0", "AI Product Manager v1.3" — a flat minor counter, not real semver. See
+    """ "MAIN v1.0", "AI Product Manager v1.3" — a flat minor counter, not real semver. See
     the product brief: "do not create complicated semantic versioning unless necessary"."""
     return f"{prefix} v1.{sequence - 1}"
 
 
 async def latest_version(
-    db: AsyncSession, user_id: str, branch_id: str | None,
+    db: AsyncSession,
+    user_id: str,
+    branch_id: str | None,
 ) -> ResumeVersion | None:
     result = await db.execute(
         select(ResumeVersion)
@@ -138,16 +144,27 @@ async def latest_version(
 
 
 async def create_version(
-    db: AsyncSession, user_id: str, *, branch_id: str | None, content: ResumeContent,
-    source: ResumeVersionSource, commit_message: str, label_prefix: str,
+    db: AsyncSession,
+    user_id: str,
+    *,
+    branch_id: str | None,
+    content: ResumeContent,
+    source: ResumeVersionSource,
+    commit_message: str,
+    label_prefix: str,
     parent: ResumeVersion | None,
 ) -> ResumeVersion:
     sequence = (parent.sequence + 1) if parent else 1
     version = ResumeVersion(
-        user_id=user_id, branch_id=branch_id, parent_version_id=parent.id if parent else None,
-        version_label=_version_label(label_prefix, sequence), sequence=sequence,
-        content=content.model_dump(), content_hash=_content_hash(content.model_dump()),
-        source=source, commit_message=commit_message,
+        user_id=user_id,
+        branch_id=branch_id,
+        parent_version_id=parent.id if parent else None,
+        version_label=_version_label(label_prefix, sequence),
+        sequence=sequence,
+        content=content.model_dump(),
+        content_hash=_content_hash(content.model_dump()),
+        source=source,
+        commit_message=commit_message,
     )
     db.add(version)
     await db.flush()
@@ -156,17 +173,28 @@ async def create_version(
 
 def version_summary(v: ResumeVersion) -> ResumeVersionSummary:
     return ResumeVersionSummary(
-        id=v.id, branch_id=v.branch_id, version_label=v.version_label, sequence=v.sequence,
-        source=str(v.source), commit_message=v.commit_message, content_hash=v.content_hash,
+        id=v.id,
+        branch_id=v.branch_id,
+        version_label=v.version_label,
+        sequence=v.sequence,
+        source=str(v.source),
+        commit_message=v.commit_message,
+        content_hash=v.content_hash,
         created_at=v.created_at,
     )
 
 
 def _out_change(c: ResumeChange) -> ResumeChangeOut:
     return ResumeChangeOut(
-        id=c.id, change_type=str(c.change_type), section=c.section,
-        before_text=c.before_text, after_text=c.after_text, reason=c.reason,
-        source_job_id=c.source_job_id, evidence=c.evidence, status=str(c.status),
+        id=c.id,
+        change_type=str(c.change_type),
+        section=c.section,
+        before_text=c.before_text,
+        after_text=c.after_text,
+        reason=c.reason,
+        source_job_id=c.source_job_id,
+        evidence=c.evidence,
+        status=str(c.status),
         created_at=c.created_at,
     )
 
@@ -179,8 +207,14 @@ async def get_or_create_master(db: AsyncSession, user_id: str) -> ResumeVersion:
         return latest
     content = await _bootstrap_master_content(db, user_id)
     version = await create_version(
-        db, user_id, branch_id=None, content=content, source=ResumeVersionSource.INITIAL,
-        commit_message="Initial master résumé", label_prefix="MAIN", parent=None,
+        db,
+        user_id,
+        branch_id=None,
+        content=content,
+        source=ResumeVersionSource.INITIAL,
+        commit_message="Initial master résumé",
+        label_prefix="MAIN",
+        parent=None,
     )
     await db.commit()
     await db.refresh(version)
@@ -189,14 +223,23 @@ async def get_or_create_master(db: AsyncSession, user_id: str) -> ResumeVersion:
 
 
 async def update_master(
-    db: AsyncSession, user_id: str, content: ResumeContent, commit_message: str,
+    db: AsyncSession,
+    user_id: str,
+    content: ResumeContent,
+    commit_message: str,
 ) -> ResumeVersion:
     """A direct user edit to the master. Diffed against the prior version so the edit still
     lands in the change log — a user edit is a change like any other, just already accepted."""
     parent = await get_or_create_master(db, user_id)
     new_version = await create_version(
-        db, user_id, branch_id=None, content=content, source=ResumeVersionSource.USER_EDIT,
-        commit_message=commit_message, label_prefix="MAIN", parent=parent,
+        db,
+        user_id,
+        branch_id=None,
+        content=content,
+        source=ResumeVersionSource.USER_EDIT,
+        commit_message=commit_message,
+        label_prefix="MAIN",
+        parent=parent,
     )
     await _record_diff_as_changes(db, user_id, new_version.id, parent.content, content.model_dump())
     await db.commit()
@@ -206,23 +249,31 @@ async def update_master(
 
 async def list_branches(db: AsyncSession, user_id: str) -> list[ResumeBranchSummary]:
     result = await db.execute(
-        select(ResumeBranch).where(ResumeBranch.user_id == user_id).order_by(ResumeBranch.created_at)
+        select(ResumeBranch)
+        .where(ResumeBranch.user_id == user_id)
+        .order_by(ResumeBranch.created_at)
     )
     branches = result.scalars().all()
     out = []
     for b in branches:
         latest = await latest_version(db, user_id, branch_id=b.id)
-        out.append(ResumeBranchSummary(
-            id=b.id, role_name=b.role_name, role_family=str(b.role_family),
-            description=b.description,
-            current_version=version_summary(latest) if latest else None,
-            market_signals_computed_at=b.market_signals_computed_at,
-        ))
+        out.append(
+            ResumeBranchSummary(
+                id=b.id,
+                role_name=b.role_name,
+                role_family=str(b.role_family),
+                description=b.description,
+                current_version=version_summary(latest) if latest else None,
+                market_signals_computed_at=b.market_signals_computed_at,
+            )
+        )
     return out
 
 
 async def create_branch(
-    db: AsyncSession, user_id: str, data: CreateBranchRequest,
+    db: AsyncSession,
+    user_id: str,
+    data: CreateBranchRequest,
 ) -> ResumeBranchSummary:
     """Seeds the branch's first version from the master's CURRENT content — a role branch
     starts as a copy of the facts, never invented content (MASTER -> ROLE -> JOB per the
@@ -233,24 +284,32 @@ async def create_branch(
     except ValueError:
         family = RoleFamily.PRODUCT
     branch = ResumeBranch(
-        user_id=user_id, role_name=data.role_name, role_family=family,
+        user_id=user_id,
+        role_name=data.role_name,
+        role_family=family,
         description=data.description,
     )
     db.add(branch)
     await db.flush()
     version = await create_version(
-        db, user_id, branch_id=branch.id,
+        db,
+        user_id,
+        branch_id=branch.id,
         content=ResumeContent.model_validate(master.content),
         source=ResumeVersionSource.INITIAL,
-        commit_message=f"Branched from {master.version_label}", label_prefix=data.role_name,
+        commit_message=f"Branched from {master.version_label}",
+        label_prefix=data.role_name,
         parent=None,
     )
     await db.commit()
     await db.refresh(branch)
     logger.info("resume_intelligence.branch_created", user_id=user_id, branch_id=branch.id)
     return ResumeBranchSummary(
-        id=branch.id, role_name=branch.role_name, role_family=str(branch.role_family),
-        description=branch.description, current_version=version_summary(version),
+        id=branch.id,
+        role_name=branch.role_name,
+        role_family=str(branch.role_family),
+        description=branch.description,
+        current_version=version_summary(version),
         market_signals_computed_at=None,
     )
 
@@ -258,14 +317,18 @@ async def create_branch(
 async def get_branch(db: AsyncSession, user_id: str, branch_id: str) -> ResumeBranchDetail:
     branch = (
         await db.execute(
-            select(ResumeBranch).where(ResumeBranch.id == branch_id, ResumeBranch.user_id == user_id)
+            select(ResumeBranch).where(
+                ResumeBranch.id == branch_id, ResumeBranch.user_id == user_id
+            )
         )
     ).scalar_one_or_none()
     if branch is None:
         raise RecordNotFoundError("ResumeBranch", branch_id)
     latest = await latest_version(db, user_id, branch_id=branch.id)
     return ResumeBranchDetail(
-        id=branch.id, role_name=branch.role_name, role_family=str(branch.role_family),
+        id=branch.id,
+        role_name=branch.role_name,
+        role_family=str(branch.role_family),
         description=branch.description,
         current_version=version_summary(latest) if latest else None,
         market_signals_computed_at=branch.market_signals_computed_at,
@@ -277,7 +340,9 @@ async def get_branch(db: AsyncSession, user_id: str, branch_id: str) -> ResumeBr
 async def delete_branch(db: AsyncSession, user_id: str, branch_id: str) -> None:
     branch = (
         await db.execute(
-            select(ResumeBranch).where(ResumeBranch.id == branch_id, ResumeBranch.user_id == user_id)
+            select(ResumeBranch).where(
+                ResumeBranch.id == branch_id, ResumeBranch.user_id == user_id
+            )
         )
     ).scalar_one_or_none()
     if branch is None:
@@ -287,7 +352,9 @@ async def delete_branch(db: AsyncSession, user_id: str, branch_id: str) -> None:
 
 
 async def list_versions(
-    db: AsyncSession, user_id: str, branch_id: str | None,
+    db: AsyncSession,
+    user_id: str,
+    branch_id: str | None,
 ) -> list[ResumeVersionDetail]:
     result = await db.execute(
         select(ResumeVersion)
@@ -337,27 +404,42 @@ async def get_version_row(db: AsyncSession, user_id: str, version_id: str) -> Re
 
 
 async def restore_version(
-    db: AsyncSession, user_id: str, version_id: str, commit_message: str,
+    db: AsyncSession,
+    user_id: str,
+    version_id: str,
+    commit_message: str,
 ) -> ResumeVersionSummary:
     """Rollback creates a NEW version copying the restored content — history is never deleted
     or rewound in place (the product's explicit "never delete history" requirement)."""
     target = await get_version_row(db, user_id, version_id)
     current_head = await latest_version(db, user_id, branch_id=target.branch_id)
-    label_prefix = "MAIN" if target.branch_id is None else (
-        (await db.get(ResumeBranch, target.branch_id)).role_name
+    label_prefix = (
+        "MAIN"
+        if target.branch_id is None
+        else ((await db.get(ResumeBranch, target.branch_id)).role_name)
     )
     message = commit_message or f"Restored content from {target.version_label}"
     new_version = await create_version(
-        db, user_id, branch_id=target.branch_id,
+        db,
+        user_id,
+        branch_id=target.branch_id,
         content=ResumeContent.model_validate(target.content),
-        source=ResumeVersionSource.RESTORED, commit_message=message,
-        label_prefix=label_prefix, parent=current_head,
+        source=ResumeVersionSource.RESTORED,
+        commit_message=message,
+        label_prefix=label_prefix,
+        parent=current_head,
     )
-    db.add(ResumeChange(
-        user_id=user_id, version_id=new_version.id, change_type=ResumeChangeType.RESTORED,
-        section="all", reason=message, status=ResumeChangeStatus.ACCEPTED,
-        evidence=f"Restored from {target.version_label}",
-    ))
+    db.add(
+        ResumeChange(
+            user_id=user_id,
+            version_id=new_version.id,
+            change_type=ResumeChangeType.RESTORED,
+            section="all",
+            reason=message,
+            status=ResumeChangeStatus.ACCEPTED,
+            evidence=f"Restored from {target.version_label}",
+        )
+    )
     await db.commit()
     await db.refresh(new_version)
     return version_summary(new_version)
@@ -368,14 +450,17 @@ async def get_overview(db: AsyncSession, user_id: str) -> ResumeIntelligenceOver
     branches = await list_branches(db, user_id)
     cutoff = datetime.now(UTC).timestamp() - 30 * 86400
     recent_count_result = await db.execute(
-        select(ResumeChange.id).join(ResumeVersion).where(
+        select(ResumeChange.id)
+        .join(ResumeVersion)
+        .where(
             ResumeVersion.user_id == user_id,
             ResumeChange.created_at >= datetime.fromtimestamp(cutoff, tz=UTC),
         )
     )
     recent_count = len(recent_count_result.all())
     return ResumeIntelligenceOverview(
-        master_version=version_summary(master), branches=branches,
+        master_version=version_summary(master),
+        branches=branches,
         recent_changes_count=recent_count,
     )
 
@@ -391,10 +476,16 @@ def _diff_scalar(section: str, path: str, before: str, after: str) -> VersionDif
     return VersionDiffEntry(section=section, path=path, before=before or None, after=after or None)
 
 
-def _diff_list_of_strings(section: str, before: list[str], after: list[str]) -> tuple[list[VersionDiffEntry], list[VersionDiffEntry]]:
+def _diff_list_of_strings(
+    section: str, before: list[str], after: list[str]
+) -> tuple[list[VersionDiffEntry], list[VersionDiffEntry]]:
     before_set, after_set = set(before), set(after)
-    added = [VersionDiffEntry(section=section, path=s, after=s) for s in sorted(after_set - before_set)]
-    removed = [VersionDiffEntry(section=section, path=s, before=s) for s in sorted(before_set - after_set)]
+    added = [
+        VersionDiffEntry(section=section, path=s, after=s) for s in sorted(after_set - before_set)
+    ]
+    removed = [
+        VersionDiffEntry(section=section, path=s, before=s) for s in sorted(before_set - after_set)
+    ]
     return added, removed
 
 
@@ -410,7 +501,9 @@ def diff_content(before: dict, after: dict) -> VersionDiff:
     after_c = ResumeContent.model_validate(after)
 
     for field in ("full_name", "email", "phone", "location", "linkedin_url", "github_url"):
-        entry = _diff_scalar("header", field, getattr(before_c.header, field), getattr(after_c.header, field))
+        entry = _diff_scalar(
+            "header", field, getattr(before_c.header, field), getattr(after_c.header, field)
+        )
         if entry:
             modified.append(entry)
 
@@ -430,11 +523,13 @@ def diff_content(before: dict, after: dict) -> VersionDiff:
 
     before_ach = {
         (e.id or f"{ei}:{ai}"): a.text
-        for ei, e in enumerate(before_c.experience) for ai, a in enumerate(e.achievements)
+        for ei, e in enumerate(before_c.experience)
+        for ai, a in enumerate(e.achievements)
     }
     after_ach = {
         (e.id or f"{ei}:{ai}"): a.text
-        for ei, e in enumerate(after_c.experience) for ai, a in enumerate(e.achievements)
+        for ei, e in enumerate(after_c.experience)
+        for ai, a in enumerate(e.achievements)
     }
     for key in after_ach.keys() - before_ach.keys():
         added.append(VersionDiffEntry(section="experience", path=key, after=after_ach[key]))
@@ -442,15 +537,25 @@ def diff_content(before: dict, after: dict) -> VersionDiff:
         removed.append(VersionDiffEntry(section="experience", path=key, before=before_ach[key]))
     for key in before_ach.keys() & after_ach.keys():
         if before_ach[key] != after_ach[key]:
-            modified.append(VersionDiffEntry(
-                section="experience", path=key, before=before_ach[key], after=after_ach[key],
-            ))
+            modified.append(
+                VersionDiffEntry(
+                    section="experience",
+                    path=key,
+                    before=before_ach[key],
+                    after=after_ach[key],
+                )
+            )
 
-    return VersionDiff(from_version_id="", to_version_id="", added=added, removed=removed, modified=modified)
+    return VersionDiff(
+        from_version_id="", to_version_id="", added=added, removed=removed, modified=modified
+    )
 
 
 async def diff_versions(
-    db: AsyncSession, user_id: str, from_id: str, to_id: str,
+    db: AsyncSession,
+    user_id: str,
+    from_id: str,
+    to_id: str,
 ) -> VersionDiff:
     from_v = await get_version_row(db, user_id, from_id)
     to_v = await get_version_row(db, user_id, to_id)
@@ -461,26 +566,49 @@ async def diff_versions(
 
 
 async def _record_diff_as_changes(
-    db: AsyncSession, user_id: str, version_id: str, before: dict, after: dict,
+    db: AsyncSession,
+    user_id: str,
+    version_id: str,
+    before: dict,
+    after: dict,
 ) -> None:
     """Turns a content diff into individually-visible ResumeChange rows for a user-edit commit
     — a direct edit still gets full change-log traceability, not just a version bump."""
     diff = diff_content(before, after)
     for entry in diff.added:
-        db.add(ResumeChange(
-            user_id=user_id, version_id=version_id, change_type=ResumeChangeType.ADDED,
-            section=entry.section, after_text=entry.after, reason="User edit",
-            status=ResumeChangeStatus.ACCEPTED,
-        ))
+        db.add(
+            ResumeChange(
+                user_id=user_id,
+                version_id=version_id,
+                change_type=ResumeChangeType.ADDED,
+                section=entry.section,
+                after_text=entry.after,
+                reason="User edit",
+                status=ResumeChangeStatus.ACCEPTED,
+            )
+        )
     for entry in diff.removed:
-        db.add(ResumeChange(
-            user_id=user_id, version_id=version_id, change_type=ResumeChangeType.REMOVED,
-            section=entry.section, before_text=entry.before, reason="User edit",
-            status=ResumeChangeStatus.ACCEPTED,
-        ))
+        db.add(
+            ResumeChange(
+                user_id=user_id,
+                version_id=version_id,
+                change_type=ResumeChangeType.REMOVED,
+                section=entry.section,
+                before_text=entry.before,
+                reason="User edit",
+                status=ResumeChangeStatus.ACCEPTED,
+            )
+        )
     for entry in diff.modified:
-        db.add(ResumeChange(
-            user_id=user_id, version_id=version_id, change_type=ResumeChangeType.MODIFIED,
-            section=entry.section, before_text=entry.before, after_text=entry.after,
-            reason="User edit", status=ResumeChangeStatus.ACCEPTED,
-        ))
+        db.add(
+            ResumeChange(
+                user_id=user_id,
+                version_id=version_id,
+                change_type=ResumeChangeType.MODIFIED,
+                section=entry.section,
+                before_text=entry.before,
+                after_text=entry.after,
+                reason="User edit",
+                status=ResumeChangeStatus.ACCEPTED,
+            )
+        )

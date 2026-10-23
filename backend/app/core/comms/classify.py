@@ -10,19 +10,39 @@ negations first — the more specific, more consequential signal wins ties.
 from __future__ import annotations
 
 _REJECTION_PHRASES: tuple[str, ...] = (
-    "unfortunately", "not moving forward", "not been successful", "unsuccessful",
-    "decided not to proceed", "decided to move forward with other candidates",
-    "will not be progressing", "other candidates whose", "pursue other candidates",
-    "regret to inform", "not selected for this", "will not be moving your application",
-    "wish you the best in your future", "wish you all the best in your job search",
+    "unfortunately",
+    "not moving forward",
+    "not been successful",
+    "unsuccessful",
+    "decided not to proceed",
+    "decided to move forward with other candidates",
+    "will not be progressing",
+    "other candidates whose",
+    "pursue other candidates",
+    "regret to inform",
+    "not selected for this",
+    "will not be moving your application",
+    "wish you the best in your future",
+    "wish you all the best in your job search",
 )
 
 _INTERVIEW_PHRASES: tuple[str, ...] = (
-    "invite you to interview", "invited to interview", "schedule an interview",
-    "schedule a call", "schedule a chat", "book a time to speak", "would like to speak with you",
-    "next steps in the process", "move forward to the next stage", "phone screen",
-    "technical interview", "interview with", "book an interview", "arrange an interview",
-    "available for a call", "set up a call",
+    "invite you to interview",
+    "invited to interview",
+    "schedule an interview",
+    "schedule a call",
+    "schedule a chat",
+    "book a time to speak",
+    "would like to speak with you",
+    "next steps in the process",
+    "move forward to the next stage",
+    "phone screen",
+    "technical interview",
+    "interview with",
+    "book an interview",
+    "arrange an interview",
+    "available for a call",
+    "set up a call",
 )
 
 

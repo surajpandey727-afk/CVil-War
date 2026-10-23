@@ -39,9 +39,36 @@ _SUBMITTED = (
 #: Words dropped when deciding whether two titles describe the same role, for the §3.2
 #: cooldown. Without this, "Senior Product Manager" and "Product Manager" look unrelated.
 _TITLE_NOISE = frozenset(
-    {"senior", "junior", "staff", "principal", "lead", "head", "chief", "of", "the", "and",
-     "a", "an", "for", "to", "in", "at", "ii", "iii", "i", "sr", "jr", "uk", "london",
-     "remote", "hybrid", "contract", "permanent", "fte"}
+    {
+        "senior",
+        "junior",
+        "staff",
+        "principal",
+        "lead",
+        "head",
+        "chief",
+        "of",
+        "the",
+        "and",
+        "a",
+        "an",
+        "for",
+        "to",
+        "in",
+        "at",
+        "ii",
+        "iii",
+        "i",
+        "sr",
+        "jr",
+        "uk",
+        "london",
+        "remote",
+        "hybrid",
+        "contract",
+        "permanent",
+        "fte",
+    }
 )
 
 _SALARY_NUM = re.compile(r"(\d[\d,.]*)\s*(k)?", re.IGNORECASE)
@@ -191,9 +218,7 @@ async def build_context(
     )
 
 
-async def _count_since(
-    db: AsyncSession, cutoff: datetime, *, company: str | None = None
-) -> int:
+async def _count_since(db: AsyncSession, cutoff: datetime, *, company: str | None = None) -> int:
     """Submissions since ``cutoff``. Tenant-scoped by the ORM filter, so no user_id here."""
     stmt = (
         select(func.count())
@@ -207,16 +232,11 @@ async def _count_since(
     return int((await db.execute(stmt)).scalar_one() or 0)
 
 
-async def _last_submission_at(
-    db: AsyncSession, *, exclude_application_id: str
-) -> datetime | None:
-    stmt = (
-        select(func.max(Application.applied_at))
-        .where(
-            Application.status.in_(_SUBMITTED),
-            Application.applied_at.isnot(None),
-            Application.id != exclude_application_id,
-        )
+async def _last_submission_at(db: AsyncSession, *, exclude_application_id: str) -> datetime | None:
+    stmt = select(func.max(Application.applied_at)).where(
+        Application.status.in_(_SUBMITTED),
+        Application.applied_at.isnot(None),
+        Application.id != exclude_application_id,
     )
     return _aware((await db.execute(stmt)).scalar_one_or_none())
 
@@ -231,10 +251,10 @@ async def _duplicate_application_id(db: AsyncSession, app: Application) -> str |
     job = await db.get(Job, app.job_id)
     if job is not None and job.canonical_job_id:
         siblings = (
-            await db.execute(
-                select(Job.id).where(Job.canonical_job_id == job.canonical_job_id)
-            )
-        ).scalars().all()
+            (await db.execute(select(Job.id).where(Job.canonical_job_id == job.canonical_job_id)))
+            .scalars()
+            .all()
+        )
         job_ids = list({*job_ids, *siblings})
 
     stmt = (
@@ -345,9 +365,7 @@ async def gate(
     return decision
 
 
-async def _record_decision(
-    db: AsyncSession, app: Application, decision: PolicyDecision
-) -> None:
+async def _record_decision(db: AsyncSession, app: Application, decision: PolicyDecision) -> None:
     """Append the decision to the timeline. Refuses are the ones worth reading later.
 
     An ALLOW with nothing to say is not recorded — a timeline with one "policy allowed this"

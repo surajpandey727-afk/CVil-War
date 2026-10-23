@@ -204,9 +204,7 @@ async def upload_resume(
     )
 
 
-async def list_resumes(
-    db: AsyncSession, *, include_archived: bool = False
-) -> ResumeListResponse:
+async def list_resumes(db: AsyncSession, *, include_archived: bool = False) -> ResumeListResponse:
     """List résumés with how often each has been used.
 
     Archived résumés are held back by default but counted, so the UI can offer to show them
@@ -229,9 +227,9 @@ async def list_resumes(
             select(
                 Application.resume_id,
                 func.count().label("total"),
-                func.sum(
-                    case((Application.status.in_(_SENT_STATUSES), 1), else_=0)
-                ).label("submitted"),
+                func.sum(case((Application.status.in_(_SENT_STATUSES), 1), else_=0)).label(
+                    "submitted"
+                ),
             )
             .where(Application.resume_id.isnot(None))
             .group_by(Application.resume_id)
@@ -247,9 +245,7 @@ async def list_resumes(
         item = ResumeResponse.model_validate(resume)
         item.used_in_applications, item.submitted_applications = usage.get(resume.id, (0, 0))
         items.append(item)
-    return ResumeListResponse(
-        items=items, total=len(items), archived_count=archived_count
-    )
+    return ResumeListResponse(items=items, total=len(items), archived_count=archived_count)
 
 
 async def get_resume(db: AsyncSession, resume_id: str) -> Resume:
@@ -390,11 +386,13 @@ def _parse_education_section(text: str) -> list[dict]:
         stripped = line.strip()
         if not stripped or stripped.startswith(("•", "-", "*")):
             continue
-        entries.append({
-            "degree": stripped,
-            "institution": "",
-            "year": "",
-        })
+        entries.append(
+            {
+                "degree": stripped,
+                "institution": "",
+                "year": "",
+            }
+        )
     return entries
 
 
@@ -554,8 +552,13 @@ async def score_resume(
 
     if not ats.usable_posting(job):
         return ResumeScoreResponse(
-            resume_id=resume_id, job_id=request.job_id, overall_score=0.0, skill_score=0.0,
-            experience_score=0.0, education_score=0.0, keyword_score=0.0,
+            resume_id=resume_id,
+            job_id=request.job_id,
+            overall_score=0.0,
+            skill_score=0.0,
+            experience_score=0.0,
+            education_score=0.0,
+            keyword_score=0.0,
             missing_skills=["This job has no description to score against"],
             suggestions=["Open the posting and add its description, or re-run discovery for it."],
         )
@@ -566,15 +569,22 @@ async def score_resume(
         if loaded is None:
             logger.warning("score_resume_empty_text", resume_id=resume_id)
             return ResumeScoreResponse(
-                resume_id=resume_id, job_id=request.job_id, overall_score=0.0, skill_score=0.0,
-                experience_score=0.0, education_score=0.0, keyword_score=0.0,
+                resume_id=resume_id,
+                job_id=request.job_id,
+                overall_score=0.0,
+                skill_score=0.0,
+                experience_score=0.0,
+                education_score=0.0,
+                keyword_score=0.0,
                 missing_skills=["Resume has no parsed text content"],
                 suggestions=["Re-upload your resume to enable parsing"],
             )
         ev = await ats.evaluate_pair(loaded, job)
     except Exception as exc:
         logger.warning("ats_engine_failed_using_fallback", error=str(exc))
-        return _score_with_text_fallback(resume_id, request.job_id, resume.content_text or "", job.description or "")
+        return _score_with_text_fallback(
+            resume_id, request.job_id, resume.content_text or "", job.description or ""
+        )
     finally:
         loader.close()
 
@@ -586,8 +596,11 @@ async def score_resume(
         experience_score=round(ev.components["experience_responsibility"] / 100, 4),
         education_score=round(ev.components["education_certification"] / 100, 4),
         keyword_score=round(ev.components["requirement_coverage"] / 100, 4),
-        missing_skills=[f.requirement for f in ev.missing if f.tier in ("critical", "important")][:10],
-        suggestions=[p.what for p in ev.problems] + ([ev.verdict.tailoring_limit] if ev.verdict.tailoring_limit else []),
+        missing_skills=[f.requirement for f in ev.missing if f.tier in ("critical", "important")][
+            :10
+        ],
+        suggestions=[p.what for p in ev.problems]
+        + ([ev.verdict.tailoring_limit] if ev.verdict.tailoring_limit else []),
         parsing_score=round(ev.parsing / 100, 4),
         shortlist_score=round(ev.shortlist / 100, 4),
         band=ev.band,
@@ -596,7 +609,10 @@ async def score_resume(
 
 
 async def review_resume_with_llm(
-    db: AsyncSession, resume_id: str, job_id: str, user_id: str,
+    db: AsyncSession,
+    resume_id: str,
+    job_id: str,
+    user_id: str,
 ) -> ResumeAtsReviewResponse:
     """On-demand deep ATS review: semantic skill matching, recency, and bullet rewrites.
 
@@ -612,7 +628,9 @@ async def review_resume_with_llm(
     resume_text = resume.content_text or ""
     if not resume_text.strip():
         return ResumeAtsReviewResponse(
-            resume_id=resume_id, job_id=job_id, available=False,
+            resume_id=resume_id,
+            job_id=job_id,
+            available=False,
             detail="This résumé has no parsed text to review.",
         )
 
@@ -634,12 +652,17 @@ async def review_resume_with_llm(
     except LLMError as exc:
         logger.warning("ats_review.llm_unavailable", resume_id=resume_id, error=str(exc))
         return ResumeAtsReviewResponse(
-            resume_id=resume_id, job_id=job_id, available=False,
+            resume_id=resume_id,
+            job_id=job_id,
+            available=False,
             detail="The AI reviewer isn't reachable right now — try again shortly.",
         )
 
     return ResumeAtsReviewResponse(
-        resume_id=resume_id, job_id=job_id, available=True, review=review,
+        resume_id=resume_id,
+        job_id=job_id,
+        available=True,
+        review=review,
     )
 
 
@@ -667,16 +690,20 @@ def _experience_entries_for_scoring(raw: list[dict]) -> list[dict[str, object]]:
         if start_year is None:
             continue  # no usable start date — cannot derive a duration for this entry
         end_text = str(item.get("end_date", "")).strip().lower()
-        end_year = current_year if end_text in ("", "present", "current", "ongoing") else (
-            _parse_year(end_text) or current_year
+        end_year = (
+            current_year
+            if end_text in ("", "present", "current", "ongoing")
+            else (_parse_year(end_text) or current_year)
         )
-        entries.append({
-            "title": item.get("title", ""),
-            "company": item.get("company", ""),
-            "description": item.get("description", ""),
-            "responsibilities": item.get("responsibilities") or [],
-            "duration_years": max(0.0, end_year - start_year),
-        })
+        entries.append(
+            {
+                "title": item.get("title", ""),
+                "company": item.get("company", ""),
+                "description": item.get("description", ""),
+                "responsibilities": item.get("responsibilities") or [],
+                "duration_years": max(0.0, end_year - start_year),
+            }
+        )
     return entries
 
 
@@ -690,7 +717,9 @@ def _education_entries_for_scoring(raw: list[dict]) -> list[dict[str, object]]:
 
 
 async def extract_candidate_profile_from_resume(
-    db: AsyncSession, resume_id: str, user_id: str,
+    db: AsyncSession,
+    resume_id: str,
+    user_id: str,
 ) -> ExtractProfileResponse:
     """Read one résumé's text with an LLM and fill in the account's work history/education.
 
@@ -709,8 +738,11 @@ async def extract_candidate_profile_from_resume(
     resume_text = resume.content_text or ""
     if not resume_text.strip():
         return ExtractProfileResponse(
-            resume_id=resume_id, experience_found=0, education_found=0,
-            profile_updated=False, detail="Résumé has no parsed text content.",
+            resume_id=resume_id,
+            experience_found=0,
+            education_found=0,
+            profile_updated=False,
+            detail="Résumé has no parsed text content.",
         )
 
     settings_row = (
@@ -751,8 +783,11 @@ async def extract_candidate_profile_from_resume(
     }
     await db.commit()
     logger.info(
-        "profile_extracted_from_resume", resume_id=resume_id, user_id=user_id,
-        experience_found=len(extracted.experience), education_found=len(extracted.education),
+        "profile_extracted_from_resume",
+        resume_id=resume_id,
+        user_id=user_id,
+        experience_found=len(extracted.experience),
+        education_found=len(extracted.education),
     )
     return ExtractProfileResponse(
         resume_id=resume_id,
@@ -784,8 +819,27 @@ def _score_with_text_fallback(
     # Simple keyword overlap
     resume_words = set(resume_text.lower().split())
     job_words = set(job_description.lower().split()) - {
-        "the", "a", "an", "is", "are", "and", "or", "to", "in", "of", "for",
-        "with", "on", "at", "by", "from", "as", "we", "you", "your", "our",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "and",
+        "or",
+        "to",
+        "in",
+        "of",
+        "for",
+        "with",
+        "on",
+        "at",
+        "by",
+        "from",
+        "as",
+        "we",
+        "you",
+        "your",
+        "our",
     }
     keyword_score = len(resume_words & job_words) / len(job_words) if job_words else 0.0
 
@@ -793,13 +847,9 @@ def _score_with_text_fallback(
 
     suggestions: list[str] = []
     if missing:
-        suggestions.append(
-            f"Add these skills to your resume: {', '.join(missing[:5])}"
-        )
+        suggestions.append(f"Add these skills to your resume: {', '.join(missing[:5])}")
     if keyword_score < 0.4:
-        suggestions.append(
-            "Mirror more terminology from the job description in your resume."
-        )
+        suggestions.append("Mirror more terminology from the job description in your resume.")
     # Pure regex, no spaCy — this is the path production actually runs (spaCy is deliberately
     # excluded from the serverless bundle, see requirements.txt), so this is the only place a
     # deployed instance ever gets the bullet-quality check without an explicit AI review call.
@@ -851,7 +901,9 @@ async def optimize_resume(
 
     # Score the resume to get detailed breakdown
     score_result = await score_resume(
-        db, resume_id, ResumeScoreRequest(job_id=target_job_id),
+        db,
+        resume_id,
+        ResumeScoreRequest(job_id=target_job_id),
     )
 
     # Get optimizer suggestions
@@ -871,6 +923,7 @@ async def optimize_resume(
 
         optimizer = ATSOptimizer(skill_matcher=SkillMatcher(get_nlp()))
         from app.core.ats.scorer import ScoreDetails
+
         # Build a minimal ScoreDetails for the optimizer
         details = ScoreDetails(
             overall_score=score_result.overall_score,
@@ -882,7 +935,9 @@ async def optimize_resume(
             improvement_suggestions=score_result.suggestions,
         )
         suggestions = optimizer.suggest_improvements(
-            details, resume_text, job_description,
+            details,
+            resume_text,
+            job_description,
         )
     except Exception:
         logger.warning("ats_optimizer_unavailable", exc_info=True)
@@ -902,7 +957,10 @@ async def optimize_resume(
 
     llm = await build_llm_client_for_user(db, user_id)
     prompt = render_ats_optimize_prompt(
-        resume_text, job_description, score_breakdown, suggestions,
+        resume_text,
+        job_description,
+        score_breakdown,
+        suggestions,
     )
     optimized_data = await llm.complete_with_structured_output(
         prompt=prompt,
@@ -943,7 +1001,9 @@ async def optimize_resume(
     # Re-score the optimized resume
     try:
         new_score = await score_resume(
-            db, optimized.id, ResumeScoreRequest(job_id=target_job_id),
+            db,
+            optimized.id,
+            ResumeScoreRequest(job_id=target_job_id),
         )
         optimized.ats_score = new_score.overall_score
         await db.commit()

@@ -150,9 +150,7 @@ def extract_run_signals(history: Any) -> dict[str, Any]:
     # per-step structure is available.
     steps = _build_steps(history)
     step_keys = (
-        [f"{s.get('url')}|{s.get('action')}|{s.get('next_goal')}" for s in steps]
-        if steps
-        else urls
+        [f"{s.get('url')}|{s.get('action')}|{s.get('next_goal')}" for s in steps] if steps else urls
     )
 
     joined = " ".join(errors).lower()
@@ -192,9 +190,7 @@ def extract_trajectory(history: Any) -> dict[str, Any]:
 StepHook = Callable[[Any], Awaitable[None]]
 
 
-def make_step_observer(
-    redis: Any, user_id: str, application_id: str, platform: str
-) -> StepHook:
+def make_step_observer(redis: Any, user_id: str, application_id: str, platform: str) -> StepHook:
     """Return an async ``on_step_end(agent)`` hook: emit a browser-action metric + WS progress."""
 
     async def on_step_end(agent: Any) -> None:

@@ -232,7 +232,10 @@ class ExtractedProfileData(BaseModel):
     experience: list[WorkExperienceSchema] = Field(
         default_factory=list,
         validation_alias=AliasChoices(
-            "experience", "work_experience", "employment", "work_history",
+            "experience",
+            "work_experience",
+            "employment",
+            "work_history",
         ),
     )
     education: list[EducationSchema] = Field(

@@ -124,11 +124,7 @@ async def build_usage(db: AsyncSession, period: str = "7d") -> AIUsageReport:
     prompt_tokens, completion_tokens, total_tokens, cost, requests = totals
 
     errors = (
-        await db.execute(
-            scoped(
-                select(func.count(LLMUsage.id)).where(LLMUsage.error.isnot(None))
-            )
-        )
+        await db.execute(scoped(select(func.count(LLMUsage.id)).where(LLMUsage.error.isnot(None))))
     ).scalar() or 0
 
     async def group_by(column):  # noqa: ANN001, ANN202

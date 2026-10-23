@@ -34,7 +34,9 @@ v1_router.include_router(
 )
 v1_router.include_router(resumes_router, prefix="/resumes", tags=["Resumes"], dependencies=_auth)
 v1_router.include_router(
-    resume_intelligence_router, prefix="/resume-intelligence", tags=["Resume Intelligence"],
+    resume_intelligence_router,
+    prefix="/resume-intelligence",
+    tags=["Resume Intelligence"],
     dependencies=_auth,
 )
 v1_router.include_router(

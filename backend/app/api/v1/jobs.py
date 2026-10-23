@@ -69,7 +69,9 @@ async def score_jobs(
     name), with the ATS evaluation engine: no model call, no per-row rate limit. Jobs with no
     description are reported as unscorable instead of getting a made-up number.
     """
-    items = await ats_evaluation.score_jobs(db, user.id, data.job_ids, resume_id=data.resume_id, force=data.force)
+    items = await ats_evaluation.score_jobs(
+        db, user.id, data.job_ids, resume_id=data.resume_id, force=data.force
+    )
     scored = sum(1 for i in items if i.scored)
     return JobScoreResponse(items=items, scored=scored, skipped=len(items) - scored)
 
@@ -188,9 +190,7 @@ async def analyse_fit(
     resume = await resume_service.get_resume(db, request.resume_id)
 
     if not request.refresh:
-        stored = await fit_service.load_stored(
-            db, job_id=job_id, resume_id=request.resume_id
-        )
+        stored = await fit_service.load_stored(db, job_id=job_id, resume_id=request.resume_id)
         if stored is not None:
             return stored
 

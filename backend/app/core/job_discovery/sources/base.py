@@ -84,8 +84,13 @@ def strip_html(raw: str) -> str:
     text = raw.replace("</p>", "\n").replace("<br>", "\n").replace("<br/>", "\n")
     text = _TAG_RE.sub(" ", text)
     for entity, char in (
-        ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'),
-        ("&#039;", "'"), ("&apos;", "'"), ("&nbsp;", " "),
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", '"'),
+        ("&#039;", "'"),
+        ("&apos;", "'"),
+        ("&nbsp;", " "),
     ):
         text = text.replace(entity, char)
     text = _WS_RE.sub(" ", text)
@@ -95,8 +100,31 @@ def strip_html(raw: str) -> str:
 #: Words that carry no discriminating signal in a job title. Requiring them would reject
 #: obvious matches ("Senior Product Manager" for the query "AI Product Manager").
 _STOPWORDS = frozenset(
-    {"a", "an", "and", "the", "of", "for", "to", "in", "at", "or", "with", "senior", "junior",
-     "staff", "principal", "lead", "head", "chief", "assistant", "associate", "i", "ii", "iii"}
+    {
+        "a",
+        "an",
+        "and",
+        "the",
+        "of",
+        "for",
+        "to",
+        "in",
+        "at",
+        "or",
+        "with",
+        "senior",
+        "junior",
+        "staff",
+        "principal",
+        "lead",
+        "head",
+        "chief",
+        "assistant",
+        "associate",
+        "i",
+        "ii",
+        "iii",
+    }
 )
 
 #: Minimum share of meaningful query terms a title must carry.
@@ -155,14 +183,51 @@ def matches_query(query: str, *fields: str) -> bool:
 #: discard a UK-wide or Europe-remote role — those are all commutable or workable, and
 #: excluding them is what made a London search return almost nothing.
 _REGION_ALIASES: dict[str, frozenset[str]] = {
-    "london": frozenset({"london", "uk", "united kingdom", "gb", "england", "britain",
-                         "europe", "emea", "greater london"}),
-    "uk": frozenset({"uk", "united kingdom", "gb", "england", "scotland", "wales", "london",
-                     "britain", "europe", "emea"}),
-    "united kingdom": frozenset({"uk", "united kingdom", "gb", "england", "london", "europe",
-                                 "emea"}),
-    "europe": frozenset({"europe", "emea", "uk", "united kingdom", "london", "germany",
-                         "netherlands", "france", "spain", "ireland", "poland"}),
+    "london": frozenset(
+        {
+            "london",
+            "uk",
+            "united kingdom",
+            "gb",
+            "england",
+            "britain",
+            "europe",
+            "emea",
+            "greater london",
+        }
+    ),
+    "uk": frozenset(
+        {
+            "uk",
+            "united kingdom",
+            "gb",
+            "england",
+            "scotland",
+            "wales",
+            "london",
+            "britain",
+            "europe",
+            "emea",
+        }
+    ),
+    "united kingdom": frozenset(
+        {"uk", "united kingdom", "gb", "england", "london", "europe", "emea"}
+    ),
+    "europe": frozenset(
+        {
+            "europe",
+            "emea",
+            "uk",
+            "united kingdom",
+            "london",
+            "germany",
+            "netherlands",
+            "france",
+            "spain",
+            "ireland",
+            "poland",
+        }
+    ),
 }
 
 #: A listing whose location says one of these is open to anyone.
@@ -377,7 +442,9 @@ class ApiJobSource(JobPlatform):
             # that caused the failure.
             delay = min(8.0, 0.5 * (2**attempt)) * random.uniform(0.5, 1.5)
             logger.info(
-                "job_source.retrying", source=self.source_name, attempt=attempt,
+                "job_source.retrying",
+                source=self.source_name,
+                attempt=attempt,
                 delay_s=round(delay, 2),
             )
             await asyncio.sleep(delay)

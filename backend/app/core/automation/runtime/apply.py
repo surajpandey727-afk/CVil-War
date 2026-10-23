@@ -283,7 +283,8 @@ async def run_apply(
         # agent's narration of where it stopped.
         final_url = extract_run_signals(history).get("final_url") or job.url
         raise HumanVerificationRequiredError(
-            result.blocked_reason or "Verification required", url=final_url,
+            result.blocked_reason or "Verification required",
+            url=final_url,
         )
     logger.info("apply.run_complete", application_id=app.id, submitted=result.submitted)
     return result
@@ -325,8 +326,12 @@ async def _record_and_review(
             )
         async with async_session_factory() as obs_db:
             traj = await record_trajectory(
-                obs_db, user_id=app.user_id, application_id=app.id,
-                platform=platform, skills_used=skills_used, **traj_kwargs,
+                obs_db,
+                user_id=app.user_id,
+                application_id=app.id,
+                platform=platform,
+                skills_used=skills_used,
+                **traj_kwargs,
             )
             traj_id = traj.id
             # `Application.browser_screenshots` was a column nobody ever wrote to — real
@@ -344,8 +349,6 @@ async def _record_and_review(
                 )
                 await obs_db.commit()
         if redis is not None:
-            await redis.enqueue_job(
-                REVIEW_TASK, traj_id, signals, _job_id=f"review:{traj_id}"
-            )
+            await redis.enqueue_job(REVIEW_TASK, traj_id, signals, _job_id=f"review:{traj_id}")
     except Exception as exc:  # observability is best-effort, not load-bearing
         logger.warning("apply.record_and_review_failed", application_id=app.id, error=str(exc))

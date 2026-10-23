@@ -37,7 +37,7 @@ Hard rules, each checked by code, and a bullet that breaks one is discarded:
 remove an accomplishment or its measured result.
 
 Return ONLY valid JSON matching the schema; put the shortened sentence in after_text and a short \
-reason (which words you removed). Leave a bullet out if it cannot be shortened without \nlosing a fact."""
+reason (which words you removed). Leave a bullet out if it cannot be shortened without \nlosing a fact."""  # noqa: E501
 
 
 @dataclass

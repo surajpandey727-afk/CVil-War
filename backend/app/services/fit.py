@@ -122,12 +122,16 @@ async def analyse(
         "seniority": detect_seniority(f"{job.title} {job.description or ''}"),
         "cv_seniority": detect_seniority(cv_text),
         "industry": (job.skills_required or {}).get("industry")
-        if isinstance(job.skills_required, dict) else None,
+        if isinstance(job.skills_required, dict)
+        else None,
         "cv_industry": None,
     }
     if job.location:
-        matched = location_matches(target_location, job.location, remote=bool(job.remote)) \
-            if target_location else None
+        matched = (
+            location_matches(target_location, job.location, remote=bool(job.remote))
+            if target_location
+            else None
+        )
         if matched is not None:
             job_facts["location_fit"] = 1.0 if matched else 0.0
             job_facts["location_reason"] = (
@@ -180,14 +184,16 @@ async def _store(db: AsyncSession, user_id: str, analysis: FitAnalysis) -> None:
     ).scalar_one_or_none()
     payload = json.loads(analysis.model_dump_json())
     if existing is None:
-        db.add(FitAnalysisRecord(
-            user_id=user_id,
-            job_id=analysis.job_id,
-            resume_id=analysis.resume_id,
-            overall=analysis.overall,
-            method=analysis.method,
-            payload=payload,
-        ))
+        db.add(
+            FitAnalysisRecord(
+                user_id=user_id,
+                job_id=analysis.job_id,
+                resume_id=analysis.resume_id,
+                overall=analysis.overall,
+                method=analysis.method,
+                payload=payload,
+            )
+        )
     else:
         existing.overall = analysis.overall
         existing.method = analysis.method

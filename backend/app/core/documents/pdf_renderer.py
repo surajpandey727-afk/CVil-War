@@ -140,7 +140,8 @@ class PDFRenderer:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             HTML(string=html_content).write_pdf(
-                str(output_path), stylesheets=stylesheets,
+                str(output_path),
+                stylesheets=stylesheets,
             )
         except Exception as exc:
             raise GenerationError(
@@ -171,7 +172,8 @@ class PDFRenderer:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             HTML(string=html_content).write_pdf(
-                str(output_path), stylesheets=stylesheets,
+                str(output_path),
+                stylesheets=stylesheets,
             )
         except Exception as exc:
             raise GenerationError(

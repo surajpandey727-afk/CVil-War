@@ -29,7 +29,7 @@ def render_profile_extract_prompt(resume_text: str) -> str:
     return (
         "Extract this candidate's work experience and education from the résumé text "
         "below. For each role, include the job title, employer, start date, end date "
-        "(or \"Present\"), and a short description. For each qualification, include the "
+        '(or "Present"), and a short description. For each qualification, include the '
         "degree, institution, and graduation year.\n\n"
         f"RÉSUMÉ TEXT:\n{resume_text[:12000]}"
     )

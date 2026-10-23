@@ -60,19 +60,13 @@ def handle_db_errors(func: Callable[..., T]) -> Callable[..., T]:
         try:
             return await func(*args, **kwargs)
         except SAIntegrityError as exc:
-            logger.error(
-                "db_integrity_error", func=func.__name__, error=str(exc)
-            )
+            logger.error("db_integrity_error", func=func.__name__, error=str(exc))
             raise IntegrityError(str(exc)) from exc
         except OperationalError as exc:
-            logger.error(
-                "db_connection_error", func=func.__name__, error=str(exc)
-            )
+            logger.error("db_connection_error", func=func.__name__, error=str(exc))
             raise DBConnectionError(str(exc)) from exc
         except SQLAlchemyError as exc:
-            logger.error(
-                "db_query_error", func=func.__name__, error=str(exc)
-            )
+            logger.error("db_query_error", func=func.__name__, error=str(exc))
             raise QueryError(str(exc)) from exc
 
     return wrapper  # type: ignore[return-value]

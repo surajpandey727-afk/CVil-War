@@ -161,9 +161,9 @@ async def summary(
         by_health=by_health,
         upcoming_interviews=_upcoming("interview_at"),
         pending_assessments=_upcoming("assessment_due_at"),
-        top_actions=[_to_item(a) for a in sorted(
-            actionable, key=lambda a: -a.next_action_score
-        )[:5]],
+        top_actions=[
+            _to_item(a) for a in sorted(actionable, key=lambda a: -a.next_action_score)[:5]
+        ],
     )
 
 

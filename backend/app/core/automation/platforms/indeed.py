@@ -269,9 +269,7 @@ class IndeedPlatform(JobPlatform):
         if "job_type" in filters:
             parts.append(f"Filter by job type: {filters['job_type']}. ")
         if "experience_level" in filters:
-            parts.append(
-                f"Filter by experience level: {filters['experience_level']}. "
-            )
+            parts.append(f"Filter by experience level: {filters['experience_level']}. ")
         if filters.get("remote"):
             parts.append("Filter for remote positions only. ")
         return "".join(parts)

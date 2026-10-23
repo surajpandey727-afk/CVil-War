@@ -59,20 +59,18 @@ _MAX_DETAILS = 12
 
 _ENTITY = re.compile(r'data-entity-urn="urn:li:jobPosting:(\d+)"')
 _CARD = re.compile(r"<li>(.*?)</li>", re.S)
-_TITLE = re.compile(r'base-search-card__title[^>]*>\s*(.*?)\s*<', re.S)
-_COMPANY = re.compile(r'base-search-card__subtitle.*?<a[^>]*>\s*(.*?)\s*</a>', re.S)
-_LOCATION = re.compile(r'job-search-card__location[^>]*>\s*(.*?)\s*<', re.S)
+_TITLE = re.compile(r"base-search-card__title[^>]*>\s*(.*?)\s*<", re.S)
+_COMPANY = re.compile(r"base-search-card__subtitle.*?<a[^>]*>\s*(.*?)\s*</a>", re.S)
+_LOCATION = re.compile(r"job-search-card__location[^>]*>\s*(.*?)\s*<", re.S)
 _POSTED = re.compile(r'datetime="([\d-]+)"')
-_SALARY = re.compile(r'job-search-card__salary-info[^>]*>\s*(.*?)\s*</div>', re.S)
+_SALARY = re.compile(r"job-search-card__salary-info[^>]*>\s*(.*?)\s*</div>", re.S)
 # The body lives in the markup div, not the wrapper: matching on ``description__text``
 # alone stopped at the class attribute itself and yielded 25 characters of markup.
-_DESCRIPTION = re.compile(
-    r'show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>', re.S
-)
+_DESCRIPTION = re.compile(r'show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>', re.S)
 #: Seniority level / Employment type / Job function / Industries, as LinkedIn labels them.
 _CRITERION = re.compile(
     r'job-criteria-subheader">\s*(.*?)\s*</h3>\s*'
-    r'<span[^>]*job-criteria-text[^>]*>\s*(.*?)\s*</span>',
+    r"<span[^>]*job-criteria-text[^>]*>\s*(.*?)\s*</span>",
     re.S,
 )
 _LINK = re.compile(r'base-card__full-link"[^>]*href="([^"?]+)')
@@ -164,9 +162,7 @@ class LinkedInSource(ApiJobSource):
         await self._add_descriptions(client, records[:_MAX_DETAILS])
         return records[:limit]
 
-    async def _page(
-        self, client: httpx.AsyncClient, query: str, location: str, start: int
-    ) -> str:
+    async def _page(self, client: httpx.AsyncClient, query: str, location: str, start: int) -> str:
         """One page of results, translating a rate limit into the health the registry knows."""
         try:
             response = await client.get(
@@ -205,16 +201,18 @@ class LinkedInSource(ApiJobSource):
             posted = _POSTED.search(chunk)
             salary = _SALARY.search(chunk)
             link = _LINK.search(chunk)
-            records.append({
-                "job_id": entity.group(1),
-                "title": _flat(title.group(1)),
-                "company": _flat(company.group(1)) if company else "",
-                "location": _flat(location.group(1)) if location else "",
-                "posted_at": posted.group(1) if posted else "",
-                "salary": _flat(salary.group(1)) if salary else "",
-                "url": link.group(1) if link else "",
-                "description": "",
-            })
+            records.append(
+                {
+                    "job_id": entity.group(1),
+                    "title": _flat(title.group(1)),
+                    "company": _flat(company.group(1)) if company else "",
+                    "location": _flat(location.group(1)) if location else "",
+                    "posted_at": posted.group(1) if posted else "",
+                    "salary": _flat(salary.group(1)) if salary else "",
+                    "url": link.group(1) if link else "",
+                    "description": "",
+                }
+            )
         return records
 
     async def fetch_detail(self, job_id: str) -> dict[str, Any]:
@@ -241,8 +239,7 @@ class LinkedInSource(ApiJobSource):
 
         body = _DESCRIPTION.search(response.text)
         criteria = {
-            _flat(label): _flat(value)
-            for label, value in _CRITERION.findall(response.text)
+            _flat(label): _flat(value) for label, value in _CRITERION.findall(response.text)
         }
         return {
             "description": _clean(body.group(1)) if body else "",

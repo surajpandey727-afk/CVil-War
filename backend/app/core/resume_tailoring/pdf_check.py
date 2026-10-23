@@ -25,7 +25,6 @@ from pathlib import Path
 # numpy is imported lazily inside check_edited_pdf — it is only reached after render_gray (which
 # needs numpy + pypdfium2) succeeds, so the serverless API can import this module and run the
 # non-visual checks without the heavy dependency present.
-
 from app.core.resume_tailoring import pdf_read
 from app.core.resume_tailoring.model import ResumeDocument
 from app.core.resume_tailoring.pdf_edit import PdfEditResult

@@ -81,8 +81,12 @@ def _build_raw_message(*, to: str, subject: str, body: str) -> str:
 
 
 def _compose(
-    *, job_title: str, company: str, platform: str,
-    confirmation_state: ConfirmationState, reference: str = "",
+    *,
+    job_title: str,
+    company: str,
+    platform: str,
+    confirmation_state: ConfirmationState,
+    reference: str = "",
 ) -> tuple[str, str]:
     """Subject and body for an applied notification, worded for the confirmation state.
 
@@ -113,7 +117,12 @@ def _compose(
 
 
 async def send_application_confirmation(
-    db: AsyncSession, user_id: str, *, job_title: str, company: str, platform: str,
+    db: AsyncSession,
+    user_id: str,
+    *,
+    job_title: str,
+    company: str,
+    platform: str,
     confirmation_state: ConfirmationState = ConfirmationState.CONFIRMED,
 ) -> NotifyOutcome:
     """Send the operator a confirmation that an application went out, worded for its state.
@@ -121,8 +130,11 @@ async def send_application_confirmation(
     Returns a :class:`NotifyOutcome` describing exactly what happened — the caller (or
     :func:`notify_application_submitted`) records it. Never raises.
     """
-    if confirmation_state in (ConfirmationState.SIMULATED, ConfirmationState.PENDING,
-                              ConfirmationState.FAILED):
+    if confirmation_state in (
+        ConfirmationState.SIMULATED,
+        ConfirmationState.PENDING,
+        ConfirmationState.FAILED,
+    ):
         # Nothing actually reached an employer; a "you applied" email would be a false claim.
         return NotifyOutcome.SKIPPED_SIMULATED
     if not gmail_auth.is_configured():
@@ -140,7 +152,9 @@ async def send_application_confirmation(
         return NotifyOutcome.NOT_CONNECTED
 
     subject, body = _compose(
-        job_title=job_title, company=company, platform=platform,
+        job_title=job_title,
+        company=company,
+        platform=platform,
         confirmation_state=confirmation_state,
     )
     raw = _build_raw_message(to=user.email, subject=subject, body=body)
@@ -154,7 +168,8 @@ async def send_application_confirmation(
             )
         if response.status_code == 403:
             logger.info(
-                "gmail_send.insufficient_scope", user_id=user_id,
+                "gmail_send.insufficient_scope",
+                user_id=user_id,
                 detail="Reconnect Gmail to grant the send scope.",
             )
             return NotifyOutcome.INSUFFICIENT_SCOPE
@@ -234,7 +249,12 @@ _TIMELINE_NOTE: dict[NotifyOutcome, str] = {
 
 
 async def notify_application_submitted(
-    db: AsyncSession, app: Application, *, job_title: str, company: str, platform: str,
+    db: AsyncSession,
+    app: Application,
+    *,
+    job_title: str,
+    company: str,
+    platform: str,
 ) -> NotifyOutcome:
     """Send the confirmation email for ``app`` and record the outcome on its timeline.
 
@@ -247,7 +267,11 @@ async def notify_application_submitted(
     outcome = NotifyOutcome.FAILED
     try:
         outcome = await send_application_confirmation(
-            db, app.user_id, job_title=job_title, company=company, platform=platform,
+            db,
+            app.user_id,
+            job_title=job_title,
+            company=company,
+            platform=platform,
             confirmation_state=app.confirmation_state,
         )
     except Exception as exc:  # defensive: send already swallows, this is belt-and-braces
@@ -256,7 +280,9 @@ async def notify_application_submitted(
         from app.services.timeline import record_event
 
         await record_event(
-            db, app, ApplicationEventType.NOTE_ADDED,
+            db,
+            app,
+            ApplicationEventType.NOTE_ADDED,
             _TIMELINE_NOTE.get(outcome, "Confirmation email outcome unknown."),
             payload={"notification": outcome.value},
             actor="system",

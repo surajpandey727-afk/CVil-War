@@ -68,9 +68,14 @@ async def aggregate_skills(db: AsyncSession, titles: list[str]) -> SkillAggregat
         corpus_used=bool(counts),
         skills=[
             AggregatedSkillOut(
-                key=a.skill.key, label=a.skill.label, category=a.skill.category,
-                demand=a.demand, roles_wanting=a.roles_wanting, must_have=a.must_have,
-                ats=a.skill.ats, corpus_count=a.corpus_count,
+                key=a.skill.key,
+                label=a.skill.label,
+                category=a.skill.category,
+                demand=a.demand,
+                roles_wanting=a.roles_wanting,
+                must_have=a.must_have,
+                ats=a.skill.ats,
+                corpus_count=a.corpus_count,
             )
             for a in agg
         ],
@@ -87,9 +92,15 @@ async def score_resume_against_roles(
 
     def out(h: SkillHit) -> SkillHitOut:
         return SkillHitOut(
-            key=h.skill.key, label=h.skill.label, category=h.skill.category,
-            demand=h.demand, roles_wanting=h.roles_wanting, must_have=h.must_have,
-            ats=h.skill.ats, present=h.present, matched_form=h.matched_form,
+            key=h.skill.key,
+            label=h.skill.label,
+            category=h.skill.category,
+            demand=h.demand,
+            roles_wanting=h.roles_wanting,
+            must_have=h.must_have,
+            ats=h.skill.ats,
+            present=h.present,
+            matched_form=h.matched_form,
         )
 
     return SkillScoreResponse(

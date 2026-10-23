@@ -98,7 +98,7 @@ def _urgency_from_deadline(hours: float | None, *, default: float = IDLE_URGENCY
     if hours is None:
         return default
     if hours <= 0:
-        return 16.0      # overdue — nothing outranks this
+        return 16.0  # overdue — nothing outranks this
     if hours <= 6:
         return 12.0
     if hours <= 24:

@@ -106,9 +106,11 @@ def _no_auto_eligibility(_p: AutomationPolicy, ctx: PolicyContext) -> Fired | No
     if not ctx.eligibility_questions:
         return None
     listed = ", ".join(ctx.eligibility_questions[:3])
-    more = f" (+{len(ctx.eligibility_questions) - 3} more)" if (
-        len(ctx.eligibility_questions) > 3
-    ) else ""
+    more = (
+        f" (+{len(ctx.eligibility_questions) - 3} more)"
+        if (len(ctx.eligibility_questions) > 3)
+        else ""
+    )
     return Fired(
         f"The form asks questions only you may answer: {listed}{more}. "
         "Answer them and the application will continue."
@@ -287,9 +289,7 @@ def _salary_floor(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
         return None
     if ctx.salary_max_k >= p.min_salary_k:
         return None
-    return Fired(
-        f"Pays up to £{ctx.salary_max_k}k, below your £{p.min_salary_k}k floor."
-    )
+    return Fired(f"Pays up to £{ctx.salary_max_k}k, below your £{p.min_salary_k}k floor.")
 
 
 def _seniority(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
@@ -297,9 +297,7 @@ def _seniority(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
         return None
     if ctx.seniority in p.seniority:
         return None
-    return Fired(
-        f"Reads as a {ctx.seniority} role; you are targeting {', '.join(p.seniority)}."
-    )
+    return Fired(f"Reads as a {ctx.seniority} role; you are targeting {', '.join(p.seniority)}.")
 
 
 def _no_sponsorship_excluded(p: AutomationPolicy, ctx: PolicyContext) -> Fired | None:
@@ -507,9 +505,7 @@ RULES: tuple[Rule, ...] = (
         id="volume.min_spacing",
         clause="§2.3",
         title="Minimum gap between submissions",
-        rationale=(
-            "Uniform sub-second timing is the clearest bot signature in a portal's logs."
-        ),
+        rationale=("Uniform sub-second timing is the clearest bot signature in a portal's logs."),
         enforcement=Enforcement.GATE,
         control=ControlSpec(
             kind=ControlKind.SECONDS, min=0, max=3600, step=15, unit="seconds", off_value=0

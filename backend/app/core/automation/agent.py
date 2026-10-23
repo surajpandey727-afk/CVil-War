@@ -139,8 +139,7 @@ class BrowserAgent:
             from langchain_openai import ChatOpenAI
         except ImportError as exc:
             raise BrowserError(
-                "langchain-openai package not installed. "
-                "Install with: pip install langchain-openai"
+                "langchain-openai package not installed. Install with: pip install langchain-openai"
             ) from exc
 
         settings = get_settings()

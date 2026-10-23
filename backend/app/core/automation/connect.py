@@ -61,10 +61,10 @@ POLL_INTERVAL = 2.0
 class ConnectState(StrEnum):
     """Where an in-flight capture has got to."""
 
-    OPENING = "opening"              # launching the browser
+    OPENING = "opening"  # launching the browser
     AWAITING_LOGIN = "awaiting_login"  # window is up, operator is signing in
-    CAPTURING = "capturing"          # signed in, persisting the session
-    CONNECTED = "connected"          # done
+    CAPTURING = "capturing"  # signed in, persisting the session
+    CONNECTED = "connected"  # done
     FAILED = "failed"
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
@@ -138,7 +138,7 @@ LOGIN_TARGETS: dict[str, LoginTarget] = {
         login_url="https://www.civilservicejobs.service.gov.uk/csr/index.cgi",
         extra_domains=("www.civilservicejobs.service.gov.uk",),
         instructions=(
-            "This site shows a \"Quick check needed\" verification page before anything "
+            'This site shows a "Quick check needed" verification page before anything '
             "else — complete it yourself here, the same as any real visitor would, then "
             "sign in (or just browse) normally. Once you're through, this window closes."
         ),
@@ -155,7 +155,7 @@ LOGIN_TARGETS: dict[str, LoginTarget] = {
         login_url="https://www.gov.uk/find-a-job",
         extra_domains=("jobs.service.gov.uk", "www.gov.uk"),
         instructions=(
-            "This is DWP's new \"Work Hub\" service. Sign in (or create an account) as you "
+            'This is DWP\'s new "Work Hub" service. Sign in (or create an account) as you '
             "normally would — it may ask you to verify or accept cookies first, same as any "
             "real visitor. Once you're signed in, this window closes on its own."
         ),
@@ -164,11 +164,31 @@ LOGIN_TARGETS: dict[str, LoginTarget] = {
 
 #: Cookies that are present whether or not anyone is signed in. Used only by the fallback
 #: check, so that "the page set a consent cookie" is never mistaken for "the operator is in".
-_NON_AUTH_COOKIES = frozenset({
-    "lang", "bcookie", "bscookie", "lidc", "jsessionid", "li_gc", "li_alerts",
-    "guest_id", "consent", "cookieconsent", "gdpr", "optanonconsent", "onetrustconsent",
-    "_ga", "_gid", "_gcl_au", "_fbp", "datadome", "cf_clearance", "csrftoken", "xsrf-token",
-})
+_NON_AUTH_COOKIES = frozenset(
+    {
+        "lang",
+        "bcookie",
+        "bscookie",
+        "lidc",
+        "jsessionid",
+        "li_gc",
+        "li_alerts",
+        "guest_id",
+        "consent",
+        "cookieconsent",
+        "gdpr",
+        "optanonconsent",
+        "onetrustconsent",
+        "_ga",
+        "_gid",
+        "_gcl_au",
+        "_fbp",
+        "datadome",
+        "cf_clearance",
+        "csrftoken",
+        "xsrf-token",
+    }
+)
 
 
 def connectable(platform: str) -> bool:
@@ -226,9 +246,7 @@ def _cookie_domain_matches(cookie_domain: str, domains: frozenset[str]) -> bool:
     return any(host == d or host.endswith(f".{d}") for d in domains)
 
 
-def filter_storage_state(
-    storage_state: dict[str, Any], domains: frozenset[str]
-) -> dict[str, Any]:
+def filter_storage_state(storage_state: dict[str, Any], domains: frozenset[str]) -> dict[str, Any]:
     """Strip everything that is not the target platform's own session.
 
     The operator connecting LinkedIn has consented to CVil-War holding their LinkedIn session,
@@ -236,11 +254,13 @@ def filter_storage_state(
     cookies outside the platform are discarded here rather than encrypted and kept.
     """
     cookies = [
-        c for c in storage_state.get("cookies", [])
+        c
+        for c in storage_state.get("cookies", [])
         if _cookie_domain_matches(str(c.get("domain", "")), domains)
     ]
     origins = [
-        o for o in storage_state.get("origins", [])
+        o
+        for o in storage_state.get("origins", [])
         if _cookie_domain_matches(
             str(o.get("origin", "")).removeprefix("https://").removeprefix("http://"), domains
         )
@@ -259,7 +279,8 @@ def signed_in(storage_state: dict[str, Any], platform: str) -> bool:
     """
     domains = domains_for(platform)
     cookies = [
-        c for c in storage_state.get("cookies", [])
+        c
+        for c in storage_state.get("cookies", [])
         if _cookie_domain_matches(str(c.get("domain", "")), domains)
     ]
     if not cookies:
@@ -271,8 +292,7 @@ def signed_in(storage_state: dict[str, Any], platform: str) -> bool:
         return any(str(c.get("name", "")).lower() in wanted and c.get("value") for c in cookies)
 
     return any(
-        str(c.get("name", "")).lower() not in _NON_AUTH_COOKIES and c.get("value")
-        for c in cookies
+        str(c.get("name", "")).lower() not in _NON_AUTH_COOKIES and c.get("value") for c in cookies
     )
 
 
@@ -287,9 +307,7 @@ class ConnectAttempt:
     detail: str = ""
     instructions: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    expires_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC) + LOGIN_TIMEOUT
-    )
+    expires_at: datetime = field(default_factory=lambda: datetime.now(UTC) + LOGIN_TIMEOUT)
     #: Set when the operator cancels; the watcher checks it between polls.
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -306,7 +324,8 @@ def _earliest_expiry(storage_state: dict[str, Any]) -> datetime | None:
     reconnect one that is still perfectly good.
     """
     stamps = [
-        float(c["expires"]) for c in storage_state.get("cookies", [])
+        float(c["expires"])
+        for c in storage_state.get("cookies", [])
         if isinstance(c.get("expires"), (int, float)) and float(c["expires"]) > 0
     ]
     if not stamps:
@@ -336,7 +355,8 @@ class ConnectManager:
         """A capture already running for this platform, if any."""
         return next(
             (
-                a for a in self._attempts.values()
+                a
+                for a in self._attempts.values()
                 if a.user_id == user_id and a.platform == platform and not a.state.terminal
             ),
             None,
@@ -371,9 +391,7 @@ class ConnectManager:
 
         target = target_for(platform)
         if target is None:
-            raise ValueError(
-                f"'{platform}' is not a portal a browser session can be connected for"
-            )
+            raise ValueError(f"'{platform}' is not a portal a browser session can be connected for")
 
         attempt = ConnectAttempt(
             id=str(uuid.uuid4()),
@@ -462,7 +480,10 @@ class ConnectManager:
         session_factory = get_session_factory()
         async with session_factory() as db:
             await service.import_session(
-                db, attempt.user_id, attempt.platform, storage_state,
+                db,
+                attempt.user_id,
+                attempt.platform,
+                storage_state,
                 expires_at=_earliest_expiry(storage_state),
             )
 

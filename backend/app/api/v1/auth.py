@@ -44,9 +44,7 @@ _REFRESH_PATH = "/api/v1/auth"
 _AUTH_RATE = Depends(rate_limit(5, 60))  # 5 attempts / minute on auth endpoints
 
 
-def _set_refresh_cookie(
-    response: Response, raw_refresh: str, *, remember_me: bool = True
-) -> None:
+def _set_refresh_cookie(response: Response, raw_refresh: str, *, remember_me: bool = True) -> None:
     auth = get_settings().auth
     response.set_cookie(
         _REFRESH_COOKIE,
@@ -219,9 +217,7 @@ async def refresh(
     )
     if claim.rowcount == 0:
         await db.execute(
-            update(RefreshToken)
-            .where(RefreshToken.family_id == row.family_id)
-            .values(revoked=True)
+            update(RefreshToken).where(RefreshToken.family_id == row.family_id).values(revoked=True)
         )
         await db.commit()
         _clear_refresh_cookie(response)

@@ -65,9 +65,7 @@ async def delete_user_data(db: AsyncSession, user_id: str) -> dict[str, int]:
     rows_deleted = 0
     for model in _OWNED_MODELS_IN_DELETE_ORDER:
         result = await db.execute(
-            delete(model)
-            .where(model.user_id == user_id)
-            .execution_options(skip_tenant_filter=True)
+            delete(model).where(model.user_id == user_id).execution_options(skip_tenant_filter=True)
         )
         rows_deleted += result.rowcount or 0
     await db.execute(delete(User).where(User.id == user_id))

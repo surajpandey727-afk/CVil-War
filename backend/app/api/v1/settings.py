@@ -229,9 +229,7 @@ async def list_platforms(
     summary="Providers and models the configured gateway can actually route to",
 )
 async def get_ai_catalogue(
-    refresh: bool = Query(
-        False, description="Bypass the cache and re-query the gateway now."
-    ),
+    refresh: bool = Query(False, description="Bypass the cache and re-query the gateway now."),
 ) -> AICatalogue:
     """Discover providers, models, capabilities and context limits from the LLM gateway.
 
@@ -350,12 +348,17 @@ async def list_llm_keys(
         await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == user.id))
     ).scalar_one_or_none()
     rows = (
-        await db.execute(
-            select(UserCredential.provider).where(
-                UserCredential.user_id == user.id, UserCredential.kind == "llm_key",
+        (
+            await db.execute(
+                select(UserCredential.provider).where(
+                    UserCredential.user_id == user.id,
+                    UserCredential.kind == "llm_key",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     results = []
     for provider in rows:
         is_active = bool(config and config.preferred_provider == provider)
@@ -439,7 +442,9 @@ async def bulk_update_platforms(
     await db.commit()
     logger.info(
         "platforms_bulk_updated",
-        user_id=user.id, count=len(requested), enabled=update.enabled,
+        user_id=user.id,
+        count=len(requested),
+        enabled=update.enabled,
     )
     return await platform_service.list_platforms(db, user.id)
 

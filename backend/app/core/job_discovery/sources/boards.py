@@ -30,11 +30,23 @@ from app.core.job_discovery.sources.base import ApiJobSource, strip_html
 # Verified against the live API: it accepts the short code "uk" and 400s on
 # "united-kingdom", so these must be the codes, not the display names.
 _JOBICY_GEO = {
-    "uk": "uk", "united kingdom": "uk", "gb": "uk", "britain": "uk",
-    "england": "uk", "london": "uk", "scotland": "uk", "wales": "uk",
-    "usa": "usa", "us": "usa", "united states": "usa",
-    "canada": "canada", "europe": "europe", "emea": "emea",
-    "germany": "germany", "india": "india", "australia": "australia",
+    "uk": "uk",
+    "united kingdom": "uk",
+    "gb": "uk",
+    "britain": "uk",
+    "england": "uk",
+    "london": "uk",
+    "scotland": "uk",
+    "wales": "uk",
+    "usa": "usa",
+    "us": "usa",
+    "united states": "usa",
+    "canada": "canada",
+    "europe": "europe",
+    "emea": "emea",
+    "germany": "germany",
+    "india": "india",
+    "australia": "australia",
 }
 
 
@@ -114,15 +126,11 @@ class JobicySource(ApiJobSource):
             company=(record.get("companyName") or "").strip(),
             location=record.get("jobGeo") or "Remote",
             url=record.get("url") or "",
-            description=strip_html(
-                record.get("jobDescription") or record.get("jobExcerpt") or ""
-            ),
+            description=strip_html(record.get("jobDescription") or record.get("jobExcerpt") or ""),
             job_type=str(job_type or ""),
             remote=True,
             posted_at=_iso(record.get("pubDate")),
-            raw_data={
-                "level": record.get("jobLevel"), "industry": record.get("jobIndustry")
-            },
+            raw_data={"level": record.get("jobLevel"), "industry": record.get("jobIndustry")},
         )
 
 

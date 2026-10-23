@@ -449,7 +449,9 @@ def _edit_page(
                 )
             )
             continue
-        runs = [] if item.delete else run_ops(item.runs, interp.ctm_after[end], height, index, fonts)
+        runs = (
+            [] if item.delete else run_ops(item.runs, interp.ctm_after[end], height, index, fonts)
+        )
         if not runs and not item.delete:
             outcomes.append(
                 EditOutcome(

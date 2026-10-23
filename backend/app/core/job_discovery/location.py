@@ -28,27 +28,99 @@ from dataclasses import dataclass, field
 #: job adverts instead of a borough name. A posting saying "Canary Wharf" is a London job;
 #: refusing it because the advert never wrote the word "London" is the same false negative
 #: this module exists to avoid — just one level further down.
-_LONDON_AREAS = frozenset({
-    "london", "greater london", "central london", "city of london", "east london",
-    "west london", "north london", "south london", "barking", "dagenham", "barnet",
-    "bexley", "brent", "bromley", "camden", "croydon", "ealing", "enfield", "greenwich",
-    "hackney", "hammersmith", "fulham", "haringey", "harrow", "havering", "hillingdon",
-    "hounslow", "islington", "kensington", "chelsea", "kingston upon thames", "lambeth",
-    "lewisham", "merton", "newham", "redbridge", "richmond upon thames", "southwark",
-    "sutton", "tower hamlets", "waltham forest", "wandsworth", "westminster",
-    "canary wharf", "shoreditch", "soho", "holborn", "paddington", "stratford",
-    "clerkenwell", "mayfair", "shepherds bush", "white city", "kings cross",
-})
+_LONDON_AREAS = frozenset(
+    {
+        "london",
+        "greater london",
+        "central london",
+        "city of london",
+        "east london",
+        "west london",
+        "north london",
+        "south london",
+        "barking",
+        "dagenham",
+        "barnet",
+        "bexley",
+        "brent",
+        "bromley",
+        "camden",
+        "croydon",
+        "ealing",
+        "enfield",
+        "greenwich",
+        "hackney",
+        "hammersmith",
+        "fulham",
+        "haringey",
+        "harrow",
+        "havering",
+        "hillingdon",
+        "hounslow",
+        "islington",
+        "kensington",
+        "chelsea",
+        "kingston upon thames",
+        "lambeth",
+        "lewisham",
+        "merton",
+        "newham",
+        "redbridge",
+        "richmond upon thames",
+        "southwark",
+        "sutton",
+        "tower hamlets",
+        "waltham forest",
+        "wandsworth",
+        "westminster",
+        "canary wharf",
+        "shoreditch",
+        "soho",
+        "holborn",
+        "paddington",
+        "stratford",
+        "clerkenwell",
+        "mayfair",
+        "shepherds bush",
+        "white city",
+        "kings cross",
+    }
+)
 
 #: Terms that describe a country or a region, never a city. A job whose whole location is one
 #: of these is *not* established as a London job, and treating it as one is exactly how "UK"
 #: postings flooded a London search.
-_COUNTRY_WIDE = frozenset({
-    "uk", "u.k.", "united kingdom", "gb", "great britain", "britain", "england", "scotland",
-    "wales", "northern ireland", "europe", "emea", "eu", "worldwide", "global", "anywhere",
-    "remote", "remote uk", "uk remote", "uk wide", "nationwide", "multiple locations",
-    "various", "various locations", "home based", "work from home", "hybrid",
-})
+_COUNTRY_WIDE = frozenset(
+    {
+        "uk",
+        "u.k.",
+        "united kingdom",
+        "gb",
+        "great britain",
+        "britain",
+        "england",
+        "scotland",
+        "wales",
+        "northern ireland",
+        "europe",
+        "emea",
+        "eu",
+        "worldwide",
+        "global",
+        "anywhere",
+        "remote",
+        "remote uk",
+        "uk remote",
+        "uk wide",
+        "nationwide",
+        "multiple locations",
+        "various",
+        "various locations",
+        "home based",
+        "work from home",
+        "hybrid",
+    }
+)
 
 #: Postcode districts. London's outward codes are distinctive enough to identify a job whose
 #: advert gives only a postcode — Reed does this constantly ("EC4N6EU").

@@ -33,6 +33,7 @@ def _attempt_response(attempt: ConnectAttempt) -> ConnectAttemptResponse:
         seconds_remaining=attempt.seconds_remaining,
     )
 
+
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 

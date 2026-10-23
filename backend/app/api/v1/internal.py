@@ -54,8 +54,6 @@ async def trigger_inbox_sync(
     _check_token(authorization)
     if pool is None:
         raise HTTPException(status_code=503, detail="Job queue unavailable")
-    job = await pool.enqueue_job(
-        "run_inbox_sync_for_all_users", _job_id="internal:inbox-sync:run"
-    )
+    job = await pool.enqueue_job("run_inbox_sync_for_all_users", _job_id="internal:inbox-sync:run")
     logger.info("internal.inbox_sync_triggered", job_id=job.job_id if job else None)
     return {"queued": job is not None}
