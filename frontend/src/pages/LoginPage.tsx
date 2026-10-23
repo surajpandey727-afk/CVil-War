@@ -25,7 +25,17 @@ export default function LoginPage() {
       useAuthStore.getState().setAuth(access_token, user);
       navigate('/dashboard', { replace: true });
     } catch (err) {
-      setError((err as ApiError).detail ?? 'Login failed');
+      // Distinguish an outage from a bad password. A 5xx (or a dead database behind the API)
+      // used to surface as a vague "Login failed", making an infrastructure outage look like
+      // the user mistyped their credentials — the exact confusion the audit flagged.
+      const status = (err as ApiError).status_code ?? 0;
+      if (status === 0) {
+        setError('Can’t reach the server. Check your connection and try again.');
+      } else if (status >= 500) {
+        setError('The service is temporarily unavailable — the server or database may be down. Please try again shortly.');
+      } else {
+        setError((err as ApiError).detail || 'Incorrect email or password.');
+      }
     } finally {
       setSubmitting(false);
     }

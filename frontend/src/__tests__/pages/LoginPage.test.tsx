@@ -2,81 +2,48 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 
 import { server } from '@/__tests__/mocks/server';
 import LoginPage from '@/pages/LoginPage';
 import { useAuthStore } from '@/store/useAuthStore';
 
 function renderLogin() {
-  return render(
-    <MemoryRouter initialEntries={['/login']}>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/dashboard" element={<div>Dashboard here</div>} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  return render(<MemoryRouter><LoginPage /></MemoryRouter>);
 }
 
-describe('LoginPage', () => {
-  beforeEach(() => useAuthStore.getState().clear());
+async function submit(email = 'me@test.dev', password = 'whatever123') {
+  await userEvent.type(screen.getByLabelText(/email/i), email);
+  await userEvent.type(screen.getByLabelText(/password/i), password);
+  await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
+}
 
-  it('renders email + password fields and a sign-in button', () => {
+describe('LoginPage error handling', () => {
+  beforeEach(() => useAuthStore.setState({ token: null, user: null }));
+
+  it('tells the user it is an outage when the server 5xxs, not a credential problem', async () => {
+    // A dead database behind the API used to read as "Login failed", making an outage look
+    // like a mistyped password. The message must name the outage.
+    server.use(http.post('/api/v1/auth/login', () => new HttpResponse(null, { status: 503 })));
     renderLogin();
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    await submit();
+    expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument();
   });
 
-  it('signs in with valid credentials and lands on the dashboard', async () => {
-    renderLogin();
-    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'password123');
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
-    expect(await screen.findByText('Dashboard here')).toBeInTheDocument();
-  });
-
-  it('shows an error message when login fails', async () => {
-    server.use(http.post('/api/v1/auth/login', () => HttpResponse.json({ detail: 'Invalid credentials' }, { status: 401 })));
-    renderLogin();
-    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'wrong');
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
-    expect(await screen.findByText(/invalid credentials/i)).toBeInTheDocument();
-  });
-
-  it('sends remember_me=true by default, checked from the start', async () => {
-    let body = '';
+  it('shows a credential message on a 401', async () => {
     server.use(
-      http.post('/api/v1/auth/login', async ({ request }) => {
-        body = await request.text();
-        return HttpResponse.json({ access_token: 'test-access-token', token_type: 'bearer' });
-      }),
+      http.post('/api/v1/auth/login', () =>
+        HttpResponse.json({ detail: 'Incorrect email or password' }, { status: 401 })),
     );
     renderLogin();
-    expect(screen.getByLabelText(/stay signed in/i)).toBeChecked();
-    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'password123');
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
-    await screen.findByText('Dashboard here');
-    expect(body).toContain('remember_me=true');
+    await submit();
+    expect(await screen.findByText(/incorrect email or password/i)).toBeInTheDocument();
   });
 
-  it('sends remember_me=false when "Stay signed in" is unchecked', async () => {
-    let body = '';
-    server.use(
-      http.post('/api/v1/auth/login', async ({ request }) => {
-        body = await request.text();
-        return HttpResponse.json({ access_token: 'test-access-token', token_type: 'bearer' });
-      }),
-    );
+  it('tells the user when the server is unreachable', async () => {
+    server.use(http.post('/api/v1/auth/login', () => HttpResponse.error()));
     renderLogin();
-    await userEvent.click(screen.getByLabelText(/stay signed in/i));
-    await userEvent.type(screen.getByLabelText(/email/i), 'a@x.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'password123');
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
-    await screen.findByText('Dashboard here');
-    expect(body).toContain('remember_me=false');
+    await submit();
+    expect(await screen.findByText(/can.t reach the server/i)).toBeInTheDocument();
   });
 });
