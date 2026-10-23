@@ -94,7 +94,9 @@ function SkillRow({
           )}
         </div>
         <div style={{ height: 5, borderRadius: 3, background: 'var(--surface-3)', overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 3, transition: 'width .3s var(--ease)' }} />
+          {/* Scale on the transform, not width, so the bar animates on the GPU without
+              triggering layout on every selection change. */}
+          <div style={{ width: '100%', height: '100%', background: barColor, borderRadius: 3, transformOrigin: 'left', transform: `scaleX(${pct / 100})`, transition: 'transform .3s var(--ease)' }} />
         </div>
       </div>
       <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)', whiteSpace: 'nowrap' }}>
