@@ -26,9 +26,9 @@ return. Commits are local only (not pushed) until the DB is back — see the not
 6. Keep both suites green; finish with a summary.
 
 ## Progress
-- [ ] 1. Skill Radar frontend
-- [ ] 2. Notifications + status panel
-- [ ] 3. UX funnel overhaul
+- [x] 1. Skill Radar (backend + frontend + live preview proof)
+- [x] 2. Notifications visibility (email-delivery state in the status surface)
+- [~] 3. UX: login shows outage vs wrong-password honestly (more queued)
 - [ ] 4. Production hardening
 - [ ] 5. Dynamic sources
 - [ ] 6. Suites green + summary
@@ -60,3 +60,43 @@ return. Commits are local only (not pushed) until the DB is back — see the not
 - REMAINING for full prod: the live API's `DATABASE_URL` env on Vercel still points at the dead
   project. Must be set to the new 6543 pooler URL and redeployed. Attempting via Chrome next;
   if the Vercel session isn't live I leave it for the owner (I won't log in).
+
+---
+### ✅ SKILL RADAR — shipped and proven live
+- Backend: curated role→skills knowledge base + corpus enrichment + résumé scoring on the 0-1
+  scale, three endpoints (/skills/roles,/aggregate,/score). 16 unit + 5 integration tests.
+- Frontend: /skills route + "Skill Radar" nav. RolePicker, DemandGrid, ScorePanel. 4 MSW tests.
+- **Verified live in the app** against a scratch SQLite seeded with 2 realistic résumés + a
+  60-job corpus: logged in, selected the product cluster, saw demand grouped by category with
+  MUST/ATS badges and live "N× live" counts, ran a match → AIPM résumé scored **71% "Strong
+  match"** across 4 roles, with the ranked gap list and green coverage checks. Screenshot sent.
+- The scratch preview (backend on :8000 SQLite, frontend on :5174) is isolated from prod.
+
+---
+### ✅ Notifications visibility + login UX
+- `/system/status` now carries an "Email delivery" state: with the default `log` provider it
+  says plainly that nothing is delivered and names the switch to flip (EMAIL__PROVIDER=smtp).
+  Renders automatically in the existing SystemStatus widget. +1 test.
+- Login distinguishes a 5xx/outage ("service temporarily unavailable") from a 401 ("incorrect
+  email or password") and a network failure. The DB outage used to look like a wrong password.
+  +3 tests.
+
+### Handoff — the one thing only the owner can do (needs the correct Vercel account)
+The DB is restored and verified. Production will work the moment the live API points at it:
+1. On the **cvil-war-api** Vercel project (logged into the account that owns it — the Chrome
+   session was on khiljiboii@gmail.com, which cannot see it), set env var `DATABASE_URL` to the
+   transaction-pooler URL (port 6543) for the new project, then Redeploy.
+   Host: `aws-1-eu-west-3.pooler.supabase.com`, user `postgres.dcpuwibweqsgtfknazhy`, db
+   `postgres`, the password you gave me (URL-encode it: @ -> %40, ! -> %21).
+2. Redeploy the **cvil-war** (frontend) project too, so /skills and the other new UI ship.
+3. Push the local commits (keep-warm then starts and stays green instead of alerting).
+
+### Suites after this session
+- Frontend: 51 files / 434 passed (includes Skill Radar + Login tests).
+- Backend: running at wrap-up; result recorded in the final summary.
+
+### Not done (deliberately, to avoid risk without you)
+- Making the historical migrations fresh-Postgres-safe (quoted enum/text defaults, explicit
+  enum creation). Logged; schema is currently built from the models, which is correct for the
+  running app. Worth doing so `alembic upgrade head` works from zero.
+- Deeper UX overhaul and dynamic-source expansion — open-ended; better with your steer.
