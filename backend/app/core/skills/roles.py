@@ -11,8 +11,6 @@ title not listed explicitly (the family is inferred the same way the frontend's
 market - domain knowledge, not claims about any individual.
 """
 
-
-
 from __future__ import annotations
 
 import re

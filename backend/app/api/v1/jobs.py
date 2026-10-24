@@ -1,5 +1,7 @@
 """Job listing API routes."""
 
+from typing import Literal
+
 import structlog
 from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
@@ -21,9 +23,10 @@ from app.schemas.job import (
     JobListResponse,
     JobSearchRequest,
     JobStatusUpdate,
+    LocationSummary,
 )
 from app.schemas.resume_recommendation import ResumeRecommendation
-from app.services import ats_evaluation
+from app.services import ats_evaluation, job_location
 from app.services import company as company_service
 from app.services import fit as fit_service
 from app.services import job_search as job_service
@@ -90,6 +93,16 @@ async def list_jobs(
         ),
     ),
     q: str | None = Query(default=None, description="Filter by job title relevance."),
+    workplace: Literal["onsite", "hybrid", "remote"] | None = Query(
+        default=None, description="Work arrangement, as stated by the posting."
+    ),
+    include_quarantined: bool = Query(
+        default=False,
+        description=(
+            "Also return jobs that are not verified UK-eligible (outside the UK, or an "
+            "ambiguous/unknown location). Off by default: only UK-relevant roles are listed."
+        ),
+    ),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> JobListResponse:
     """List the current user's stored job listings.
@@ -100,8 +113,27 @@ async def list_jobs(
     excluded employment types, sponsor-confidence ranking) are applied the same way.
     """
     return await job_service.list_jobs(
-        db, page, page_size, status, location=location, query=q, user_id=user.id
+        db,
+        page,
+        page_size,
+        status,
+        location=location,
+        query=q,
+        user_id=user.id,
+        workplace=workplace,
+        include_quarantined=include_quarantined,
     )
+
+
+@router.get(
+    "/location-summary",
+    response_model=LocationSummary,
+    summary="How stored jobs split under the UK-only location policy",
+)
+async def location_summary(db: AsyncSession = Depends(get_tenant_db)) -> LocationSummary:
+    """Counts behind "N UK roles": how many stored jobs are shown, hidden as outside the UK,
+    or quarantined for an ambiguous/unknown location — so nothing is silently dropped."""
+    return await job_location.summary(db)
 
 
 @router.get("/{job_id}", response_model=JobListingResponse, summary="Get a single job")

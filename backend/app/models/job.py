@@ -2,7 +2,17 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin, pg_enum
@@ -17,6 +27,8 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
         UniqueConstraint("user_id", "platform", "platform_job_id", name="uq_job_platform_id"),
         Index("ix_job_status", "status"),
         Index("ix_job_match_score", "match_score"),
+        Index("ix_job_uk_eligible", "user_id", "uk_eligible"),
+        Index("ix_job_location_status", "location_verification_status"),
     )
 
     # Platform identification
@@ -63,6 +75,29 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin, Base):
     #: When the full posting was last fetched. ``None`` means never — which is different from
     #: "fetched and found nothing", and the UI says so.
     enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # -- Normalised location (see app.core.geo.classify) --------------------------------
+    #
+    # ``location`` stays exactly as the source wrote it (the raw evidence); these are derived
+    # from it deterministically and re-derivable at any time. ``uk_eligible`` is the gate the
+    # jobs list applies: true only for a VERIFIED UK location or a remote role that explicitly
+    # hires in the UK. Ambiguous and unknown locations are quarantined, never assumed UK.
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    country_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    #: onsite | hybrid | remote | unspecified — "unspecified" when the posting does not say.
+    workplace_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    remote_eligible_countries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    #: verified | ambiguous | unknown. NULL means "not classified yet".
+    location_verification_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    location_evidence_source: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    location_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    uk_eligible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     status: Mapped[JobStatus] = mapped_column(
         pg_enum(JobStatus, "job_status"), nullable=False, default=JobStatus.NEW

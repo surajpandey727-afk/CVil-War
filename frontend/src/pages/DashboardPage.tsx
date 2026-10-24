@@ -6,7 +6,7 @@ import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useApplications } from '@/hooks/useApplications';
 import { useAuthStore } from '@/store/useAuthStore';
 import { atsColor, atsPercent } from '@/lib/status';
-import type { Application } from '@/types/application';
+import type { DashboardStats } from '@/types/analytics';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -180,7 +180,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 0, borderTop: '1px solid var(--border)' }}>
-            {pipelineBreakdown(items).map((b) => (
+            {pipelineBreakdown(stats).map((b) => (
               <button
                 key={b.status}
                 onClick={() => navigate(pipelineStatusLink(b.status))}
@@ -213,16 +213,20 @@ function pipelineStatusLink(status: string): string {
 }
 
 /** One glanceable count per status band — click-through to the real (interactive) view at
- *  /applications rather than duplicating its row rendering and approve actions here. */
-function pipelineBreakdown(items: Application[]): { status: string; label: string; count: number; color: string }[] {
-  const by = (status: string) => items.filter((a) => a.status === status).length;
+ *  /applications rather than duplicating its row rendering and approve actions here.
+ *
+ *  Read from the server's per-status counts, the same numbers as the tiles above. It used to
+ *  count statuses across the 20 most recent applications only, so the tile said "3 Applied"
+ *  while this row said "0 Applied" — the applied ones were simply older than that page. */
+function pipelineBreakdown(stats: DashboardStats | undefined): { status: string; label: string; count: number; color: string }[] {
+  const n = (v: number | undefined) => v ?? 0;
   return [
-    { status: 'queued', label: 'Queued', count: by('queued'), color: 'var(--text-2)' },
-    { status: 'pending_review', label: 'Needs review', count: by('pending_review'), color: 'var(--review)' },
-    { status: 'applying', label: 'In flight', count: by('applying'), color: 'var(--accent)' },
-    { status: 'applied', label: 'Applied', count: by('applied'), color: 'var(--applied)' },
-    { status: 'interview', label: 'Interview', count: by('interview'), color: 'var(--interview)' },
-    { status: 'offer', label: 'Offer', count: by('offer'), color: 'var(--offer)' },
+    { status: 'queued', label: 'Queued', count: n(stats?.applications_queued), color: 'var(--text-2)' },
+    { status: 'pending_review', label: 'Needs review', count: n(stats?.applications_pending), color: 'var(--review)' },
+    { status: 'applying', label: 'In flight', count: n(stats?.applications_applying), color: 'var(--accent)' },
+    { status: 'applied', label: 'Applied', count: n(stats?.applications_applied), color: 'var(--applied)' },
+    { status: 'interview', label: 'Interview', count: n(stats?.applications_interview), color: 'var(--interview)' },
+    { status: 'offer', label: 'Offer', count: n(stats?.applications_offer), color: 'var(--offer)' },
   ];
 }
 

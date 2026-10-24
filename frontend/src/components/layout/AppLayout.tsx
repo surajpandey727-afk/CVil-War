@@ -18,6 +18,7 @@ export default function AppLayout() {
   const { connected, lastMessage } = useWebSocket('/ws');
   const setWsConnected = useAppStore((s) => s.setWsConnected);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const setSidebar = useUiStore((s) => s.setSidebar);
   const location = useLocation();
 
   useApplicationEvents(lastMessage);
@@ -25,6 +26,17 @@ export default function AppLayout() {
   useEffect(() => {
     setWsConnected(connected);
   }, [connected, setWsConnected]);
+
+  // On a narrow screen the expanded sidebar took the whole width: at 320px the page content
+  // was left 18px wide. Collapse it to the icon rail whenever the viewport enters that range;
+  // the header toggle still expands it on demand.
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 900px)');
+    const apply = () => { if (narrow.matches) setSidebar(true); };
+    apply();
+    narrow.addEventListener('change', apply);
+    return () => narrow.removeEventListener('change', apply);
+  }, [setSidebar]);
 
   // ⌘K / Ctrl-K opens the command palette from anywhere in the app.
   useEffect(() => {
@@ -54,7 +66,7 @@ export default function AppLayout() {
       <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', height: '100vh' }}>
         <Header />
         <main style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
-          <div style={{ maxWidth: 1460, margin: '0 auto', padding: '26px 24px 60px' }}>
+          <div className="app-content" style={{ maxWidth: 1460, margin: '0 auto' }}>
             {/* Scoped to the routed page, not the whole app (main.tsx has that one) — a bug on
                 one screen used to blank out the sidebar and every other page along with it,
                 leaving no way to navigate away from the crash. Keyed on the path so leaving a

@@ -157,3 +157,22 @@ describe('DashboardPage KPI and pipeline navigation', () => {
     );
   });
 });
+
+describe('DashboardPage pipeline agrees with the KPI tiles (D-015)', () => {
+  it('counts every application, not just the 20 most recent', async () => {
+    // 86 applied across the account, but the recent page holds only queued ones — the old
+    // breakdown counted that page and said "Applied 0" beneath a tile saying 86.
+    server.use(http.get('/api/v1/analytics/dashboard', () => HttpResponse.json(dashStats({
+      applications_applied: 86, applications_queued: 4,
+    }))));
+    server.use(http.get('/api/v1/applications/', () => HttpResponse.json(listOf(
+      app({ id: 'q1', status: 'queued' }), app({ id: 'q2', status: 'queued' }),
+    ))));
+    renderDash();
+
+    // The KPI tile and the pipeline cell are both "Applied 86" — they agree.
+    expect(await screen.findAllByRole('button', { name: /^Applied\s+86$/ })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /^Applied\s+0$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Queued\s+4$/ })).toBeInTheDocument();
+  });
+});

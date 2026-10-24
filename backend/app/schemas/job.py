@@ -117,8 +117,42 @@ class JobListingResponse(BaseModel):
     #: is the common case and must never be collapsed into either of the others.
     sponsorship_status: SponsorshipStatus = "not_specified"
 
+    # -- Normalised location (UK-only policy; see app.core.geo.classify) --------------------
+    #: The raw text exactly as the source published it — the evidence the fields below were
+    #: derived from. Same value as ``location``; named so the two are not confused.
+    raw_location: str = ""
+    country_code: str | None = None
+    country_name: str | None = None
+    city: str | None = None
+    region: str | None = None
+    #: onsite | hybrid | remote | unspecified ("unspecified" when the posting does not say).
+    workplace_type: str | None = None
+    remote_eligible_countries: list[str] | None = None
+    #: verified | ambiguous | unknown. Only verified UK-eligible jobs are listed by default.
+    location_verification_status: str | None = None
+    location_evidence_source: str | None = None
+    location_verified_at: datetime | None = None
+    uk_eligible: bool = False
+
+    # -- The four dates, kept distinct -----------------------------------------------------
+    #: When the employer posted it, as the source stated. ``None`` = the source gave no date;
+    #: the UI says "Posting date unavailable" and never substitutes another date.
+    posted_at: datetime | None = None
+    #: When this system first found it (``first_seen_at``, else the row's creation).
+    discovered_at: datetime | None = None
+    #: When a source last confirmed the listing was still up.
+    last_verified_at: datetime | None = None
+    first_seen_at: datetime | None = Field(default=None, exclude=True)
+    last_seen_at: datetime | None = Field(default=None, exclude=True)
+    last_checked_at: datetime | None = Field(default=None, exclude=True)
+    application_url: str | None = None
+
     @model_validator(mode="after")
     def _derive_canonical_fields(self) -> "JobListingResponse":
+        self.raw_location = self.location
+        self.posted_at = self.posted_date
+        self.discovered_at = self.first_seen_at or self.created_at
+        self.last_verified_at = self.last_checked_at or self.last_seen_at
         band = parse_salary(self.salary_range)
         self.salary_min = band.minimum
         self.salary_max = band.maximum
@@ -137,6 +171,18 @@ class JobListResponse(BaseModel):
     page: int
     page_size: int
     has_next: bool
+
+
+class LocationSummary(BaseModel):
+    """How the account's stored jobs split under the UK-only policy."""
+
+    total: int = 0
+    #: Listed: a verified UK location, or a remote role that explicitly hires in the UK.
+    uk_eligible: int = 0
+    #: Hidden: the posting's own location places it outside the UK.
+    outside_uk: int = 0
+    #: Hidden pending review: the location is ambiguous ("Cambridge", "EMEA") or absent.
+    quarantined: int = 0
 
 
 class JobAnalysisResponse(BaseModel):

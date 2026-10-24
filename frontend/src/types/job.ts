@@ -65,6 +65,42 @@ export interface Job {
   salary_annualised?: boolean;
   /** The three states a visa-dependent candidate needs to tell apart. */
   sponsorship_status?: SponsorshipStatus;
+
+  /* -- Normalised location: the UK-only policy (backend `app.core.geo.classify`) -------
+   *
+   * Derived on the server from the raw `location` text. The list endpoint only returns jobs
+   * whose `uk_eligible` is true, so these are what the card's "City, Country" line reads.
+   * Optional because a response cached before the policy shipped will not carry them. */
+  raw_location?: string;
+  country_code?: string | null;
+  country_name?: string | null;
+  city?: string | null;
+  region?: string | null;
+  workplace_type?: WorkplaceType | null;
+  remote_eligible_countries?: string[] | null;
+  location_verification_status?: 'verified' | 'ambiguous' | 'unknown' | null;
+  location_evidence_source?: string | null;
+  location_verified_at?: string | null;
+  uk_eligible?: boolean;
+
+  /* -- The four dates, kept distinct --------------------------------------------------- */
+  /** When the employer posted it, as the source stated. Null = the source gave no date. */
+  posted_at?: string | null;
+  /** When CVil-War first found it. Never shown as a posting date. */
+  discovered_at?: string | null;
+  /** When a source last confirmed the listing was still up. */
+  last_verified_at?: string | null;
+}
+
+/** As the posting states it; `unspecified` when it does not say. */
+export type WorkplaceType = 'onsite' | 'hybrid' | 'remote' | 'unspecified';
+
+/** `GET /jobs/location-summary` — how stored jobs split under the UK-only policy. */
+export interface LocationSummary {
+  total: number;
+  uk_eligible: number;
+  outside_uk: number;
+  quarantined: number;
 }
 
 /** Mirrors the backend `SponsorshipStatus` literal in `app/schemas/job.py`.

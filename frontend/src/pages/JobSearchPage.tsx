@@ -4,7 +4,10 @@ import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
+import Chip from '@/components/jobs/Chip';
 import JobDrawer from '@/components/jobs/JobDrawer';
+import JobFacts from '@/components/jobs/JobFacts';
+import LocationRail from '@/components/jobs/LocationRail';
 import { useAutoScoreJobs, useJobs, useSearchJobs, useUpdateJobStatus } from '@/hooks/useJobs';
 import { useCreateApplicationBatch } from '@/hooks/useApplications';
 import { useDashboardStats } from '@/hooks/useAnalytics';
@@ -30,6 +33,8 @@ const card: React.CSSProperties = {
 };
 
 const SENIORITY = ['Junior', 'Mid', 'Senior', 'Lead', 'Principal'];
+
+const PAGE_SIZE = 100;
 
 const SPONSORSHIP_ORDER: SponsorshipStatus[] = ['available', 'not_specified', 'none'];
 
@@ -126,9 +131,20 @@ export default function JobSearchPage() {
   // job location rather than the rendered text. Doing this in the browser is what made a
   // London search return a Cleveland accounts-payable role: the filter was never applied at
   // all, and `total` counted every job the account had ever cached.
-  const { data, isLoading, isError } = useJobs(1, 100, undefined, {
+  // Paged on the server: 100 a page, and the filters below run over the page on screen.
+  // The page resets whenever what is being fetched changes, so "page 3" never outlives the
+  // search it belonged to.
+  const [page, setPage] = useState(1);
+  const fetchKey = `${appliedLocation}|${appliedQuery}|${filters.workplace}`;
+  const [pageKey, setPageKey] = useState(fetchKey);
+  if (pageKey !== fetchKey) {
+    setPageKey(fetchKey);
+    setPage(1);
+  }
+  const { data, isLoading, isError, isFetching } = useJobs(page, PAGE_SIZE, undefined, {
     location: appliedLocation,
     query: appliedQuery,
+    workplace: filters.workplace === 'any' ? undefined : filters.workplace,
   });
   // Every listed role gets a match score: unscored ones are scored in one batch request and saved.
   const { scoring: scoringJobs, unscorable: unscorableJobs } = useAutoScoreJobs(data?.items);
@@ -403,9 +419,15 @@ export default function JobSearchPage() {
         ))}
       </div>
 
-      <div className="jc-layout" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-      {/* ---- Left rail: targets, filters, sources ------------------------------------ */}
-      <div className="jc-rail" style={{ flex: '0 0 268px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Grid, not flex: a flex item cannot shrink below its content's min-content width, so
+          one long source label in the rail ("careers:databricks ...") stretched the rail and
+          squeezed the results into a sliver. A grid track capped at 268px cannot be widened
+          by what is inside it. */}
+      <div className="jc-layout-wrap">
+      <div className="jc-layout">
+      {/* ---- Left rail: location, targets, filters, sources --------------------------- */}
+      <aside className="jc-rail" aria-label="Search filters">
+        <LocationRail cardStyle={card} />
         <div style={{ ...card, padding: 14 }}>
           <RailHead label="Role targets" action="Edit" onAction={() => navigate('/targets')} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -557,14 +579,14 @@ export default function JobSearchPage() {
                       aria-pressed={on}
                       title={src.note || `${src.label} — ${meta.label}. Click to ${on ? 'exclude from' : 'include in'} searches.`}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 30,
+                        display: 'flex', alignItems: 'center', gap: 9, width: '100%', minWidth: 0, height: 30,
                         padding: '0 8px', borderRadius: 'var(--r-sm)', border: 0, cursor: 'pointer',
                         background: 'transparent', font: '600 11.5px/1 var(--font)',
                         color: on ? 'var(--text-2)' : 'var(--text-4)',
                       }}
                     >
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? meta.color : 'var(--text-4)', flex: '0 0 auto' }} />
-                      <span style={{ flex: '1 1 auto', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ flex: '1 1 auto', minWidth: 0, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {src.label}
                       </span>
                     </button>
@@ -585,10 +607,10 @@ export default function JobSearchPage() {
         </div>
 
         <RecentSearches onRun={runRecentSearch} />
-      </div>
+      </aside>
 
       {/* ---- Results ------------------------------------------------------------------ */}
-      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+      <section className="jc-results" aria-label="Job results">
         <form
           onSubmit={(e) => { e.preventDefault(); runSearch(); }}
           style={{ ...card, display: 'flex', gap: 10, padding: 12, marginBottom: 12, flexWrap: 'wrap' }}
@@ -621,9 +643,9 @@ export default function JobSearchPage() {
           {stored > allJobs.length && (
             <span
               className="jc-meta"
-              title={`Filters run over the ${allJobs.length} most recent stored roles. ${stored - allJobs.length} older ones are not on this page.`}
+              title={`Filters run over the ${allJobs.length} UK roles on this page. Use the page controls at the bottom for the other ${stored - allJobs.length}.`}
             >
-              of {stored} stored
+              page {page} of {Math.ceil(stored / PAGE_SIZE)} · {stored} UK roles
             </span>
           )}
           {scoringJobs && (
@@ -701,8 +723,17 @@ export default function JobSearchPage() {
                 onSave={() => toggleSaveJob(j)} saving={updateJobStatus.isPending}
               />
             ))}
+            <Pager
+              page={page} pageSize={PAGE_SIZE} total={stored} busy={isFetching}
+              onPage={(n) => {
+                setPage(n);
+                // The app scrolls inside <main>, not the window, so scroll the results into view.
+                document.querySelector('.jc-results')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+              }}
+            />
           </div>
         )}
+      </section>
       </div>
       </div>
 
@@ -956,30 +987,6 @@ function CheckRow({ label, on, onClick }: { label: string; on: boolean; onClick:
   );
 }
 
-function Chip({ on, small, title, onClick, children }: {
-  on: boolean; small?: boolean; title?: string; onClick: () => void; children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick} aria-pressed={on} title={title}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, height: small ? 26 : 28,
-        padding: `0 ${small ? 9 : 11}px`, borderRadius: 999, cursor: 'pointer',
-        font: `600 ${small ? 11 : 11.5}px/1 var(--font)`,
-        border: `1px solid ${on ? 'var(--accent-line)' : 'var(--border)'}`,
-        background: on ? 'var(--accent-soft)' : 'var(--surface-2)',
-        // Not var(--accent) — on this page's dark ground that resolves to a muted, low-
-        // luminosity green whose own text-on-background contrast measured under the
-        // craft floor's 4.5:1 minimum. jc-accent-2 is the same accent family at a
-        // luminosity actually legible as text.
-        color: on ? 'var(--jc-accent-2)' : 'var(--text-3)',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 function SearchField({ icon, label, placeholder, value, onChange, grow }: {
   icon: 'search' | 'mappin'; label: string; placeholder: string; value: string; onChange: (v: string) => void; grow: number;
 }) {
@@ -1105,8 +1112,10 @@ function JobRow({ job, selected, sourceMeta, onToggle, onOpen, onApply, onSave, 
             <span className="jc-status-dot" style={{ background: statusMetaJob.color }} /> {statusMetaJob.label}
           </span>
         </div>
-        <div className="jc-body" style={{ marginTop: 4 }}>
-          {job.company} · {job.location || (job.remote ? 'Remote' : '—')}
+        {/* Title | Employer | City, Country | Date posted | Work arrangement - the facts a
+            candidate screens on, in the order they screen on them. */}
+        <div style={{ marginTop: 4 }}>
+          <JobFacts job={job} />
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
           {/* The same band the salary filter and the salary sort read, so a card can never
@@ -1150,9 +1159,6 @@ function JobRow({ job, selected, sourceMeta, onToggle, onOpen, onApply, onSave, 
               hint="Seniority as the posting labels it"
             />
           )}
-          {job.remote && (
-            <MetaPill label="" value="Remote" tone="remote" hint="This role is remote or hybrid" />
-          )}
           {/* Shown on every card, including "not specified", and read from the same field
               the sponsorship filter matches on. Hiding the common case was defensible as
               noise reduction right up until sponsorship became a filter: a candidate who
@@ -1168,15 +1174,6 @@ function JobRow({ job, selected, sourceMeta, onToggle, onOpen, onApply, onSave, 
                 : SPONSORSHIP_META[sponsorship].hint
             }
           />
-          {job.posted_date && (
-            <span
-              className="jc-meta"
-              title={`Posted ${new Date(job.posted_date).toLocaleDateString()}`}
-              style={{ height: 22, display: 'inline-flex', alignItems: 'center' }}
-            >
-              {relativeTime(job.posted_date)}
-            </span>
-          )}
           <span
             className="jc-meta"
             title={
@@ -1226,5 +1223,26 @@ function JobRow({ job, selected, sourceMeta, onToggle, onOpen, onApply, onSave, 
         </div>
       </div>
     </div>
+  );
+}
+
+/** Server-side page controls. Shown only when there is more than one page. */
+function Pager({ page, pageSize, total, busy, onPage }: {
+  page: number; pageSize: number; total: number; busy: boolean; onPage: (n: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (pages <= 1) return null;
+  return (
+    <nav aria-label="Result pages" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '10px 0 4px' }}>
+      <button type="button" className="jc-btn jc-btn-secondary" style={{ height: 32 }} disabled={page <= 1 || busy} onClick={() => onPage(page - 1)}>
+        Previous
+      </button>
+      <span className="jc-meta" aria-live="polite">
+        {busy ? 'Loading...' : `Page ${page} of ${pages}`}
+      </span>
+      <button type="button" className="jc-btn jc-btn-secondary" style={{ height: 32 }} disabled={page >= pages || busy} onClick={() => onPage(page + 1)}>
+        Next
+      </button>
+    </nav>
   );
 }

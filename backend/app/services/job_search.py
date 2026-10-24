@@ -6,16 +6,20 @@ scrapers, and ATS-based job analysis.
 
 import asyncio
 import hashlib
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.config.settings import get_settings
 from app.core.automation.platforms import platform_registry
 from app.core.automation.platforms.base import JobListing
+from app.core.dates import parse_posted_at
 from app.core.exceptions import RecordNotFoundError
 from app.core.job_discovery.exa_search import ExaJobSearch
 from app.core.job_discovery.location import location_matches
@@ -32,6 +36,7 @@ from app.schemas.job import (
     JobListResponse,
     JobSearchRequest,
 )
+from app.services.job_location import classify_pending, stamp
 from app.services.policy import load_policy, parse_salary_k
 
 logger = structlog.get_logger(__name__)
@@ -53,7 +58,7 @@ _MAX_CONCURRENT_SOURCE_FETCHES = 10
 #: a long time; bounding the total keeps an interactive search answerable even when several
 #: of ~65 default sources are currently struggling, at the cost of dropping whichever
 #: haven't answered yet — same trade-off already made per-source, just at the search level.
-_SEARCH_FETCH_DEADLINE_S = 20.0
+_SEARCH_FETCH_DEADLINE_S = 15.0
 
 
 class _UnregisteredPlatformError(Exception):
@@ -136,9 +141,19 @@ async def search_jobs(
         for j in (await db.execute(select(Job).where(Job.user_id == user_id))).scalars().all()
     }
     seen: set[tuple[str, str]] = set()
+    rejected_non_uk = 0
 
     def _register(job: Job) -> None:
-        """Add a new job or fold it onto an already-known one; never append a duplicate."""
+        """Add a new job or fold it onto an already-known one; never append a duplicate.
+
+        UK-only policy at ingestion: a listing whose location is *verified* to be outside the
+        UK is not stored at all. Ambiguous and unknown locations are stored but quarantined
+        (``uk_eligible`` false) so they can be reviewed, and are never listed by default.
+        """
+        nonlocal rejected_non_uk
+        if job.location_verification_status == "verified" and not job.uk_eligible:
+            rejected_non_uk += 1
+            return
         ident = _job_identity(job)
         if not ident:  # no id and no url — can't key it; keep as-is (degenerate data)
             db.add(job)
@@ -152,6 +167,11 @@ async def search_jobs(
         seen.add(key)
         existing = existing_by_key.get(key)
         if existing is not None:
+            # Seen again: refresh the freshness signal, and fill a posting date the earlier
+            # import dropped — but never overwrite a date the source already gave us.
+            existing.last_seen_at = job.last_seen_at
+            if existing.posted_date is None and job.posted_date is not None:
+                existing.posted_date = job.posted_date
             all_jobs.append(existing)
         else:
             db.add(job)
@@ -272,18 +292,31 @@ async def search_jobs(
             # Configured but failed: a real, unexpected problem — loud, not a debug crumb.
             logger.warning("job_search.exa_failed", error=str(exc)[:300])
 
+    if rejected_non_uk:
+        logger.info("job_search.rejected_non_uk", count=rejected_non_uk)
+
+    # Pre-existing rows folded in above may predate the location policy.
+    all_jobs = [j for j in all_jobs if j.location_verification_status or stamp(j)]
     if all_jobs:
         try:
             await db.commit()
-            for job in all_jobs:
-                await db.refresh(job)
+            # One SELECT for every row instead of one refresh per job: against a remote
+            # Postgres pooler the per-row round trips alone pushed a 300-result search past the
+            # client's timeout, which is how the button sat on "Searching..." indefinitely.
+            ids = [j.id for j in all_jobs]
+            fresh = {
+                j.id: j
+                for j in (await db.execute(select(Job).where(Job.id.in_(ids)))).scalars().all()
+            }
+            all_jobs = [fresh[i] for i in ids if i in fresh]
         except Exception as exc:
             logger.error("job_search.commit_failed", error=str(exc))
             await db.rollback()
             all_jobs = []
 
-    # Apply limit
-    limited = all_jobs[: request.limit]
+    # Only UK-eligible jobs are returned; quarantined ones were stored for review, not display.
+    visible = [j for j in all_jobs if j.uk_eligible]
+    limited = visible[: request.limit]
     # Serialised before the dedup pass on purpose: that pass commits, which expires every
     # ORM instance, and validating an expired Job then triggers a lazy load with no greenlet
     # to run it in. Pydantic models hold plain values and are unaffected.
@@ -300,10 +333,10 @@ async def search_jobs(
 
     return JobListResponse(
         items=items,
-        total=len(all_jobs),
+        total=len(visible),
         page=1,
         page_size=request.limit,
-        has_next=len(all_jobs) > request.limit,
+        has_next=len(visible) > request.limit,
     )
 
 
@@ -336,8 +369,9 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
     # Stamped for every listing regardless of source, so the boost in list_jobs() (and any
     # future consumer) never has to ask which board a job came from.
     sponsor_confidence, sponsor_evidence = classify_sponsor(listing.company, listing.description)
+    now = datetime.now(UTC)
 
-    return Job(
+    job = Job(
         user_id=user_id,
         platform=listing.platform,
         platform_job_id=listing.platform_job_id,
@@ -353,7 +387,13 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
         status="new",
         sponsor_confidence=sponsor_confidence,
         sponsor_evidence=sponsor_evidence,
+        # Every adapter parses a posting date into ``posted_at``; it used to be dropped right
+        # here, which is why no stored job had one. Unparseable text stays None, never guessed.
+        posted_date=parse_posted_at(listing.posted_at, now=now),
+        first_seen_at=now,
+        last_seen_at=now,
     )
+    return stamp(job, now=now)
 
 
 #: Sponsor-confirmed roles rank above equal-fit non-sponsor roles — never a hard filter, and
@@ -393,6 +433,8 @@ async def list_jobs(
     location: str | None = None,
     query: str | None = None,
     user_id: str | None = None,
+    workplace: str | None = None,
+    include_quarantined: bool = False,
 ) -> JobListResponse:
     """List stored jobs, optionally filtered by location, title, and the operator's criteria.
 
@@ -426,6 +468,9 @@ async def list_jobs(
         location: Optional place filter, e.g. ``"London"`` or ``"London, UK"``.
         query: Optional title filter, scored the same way discovery scores titles.
         user_id: Whose salary floor, employment-type exclusions, and sponsor ranking to apply.
+        workplace: Optional ``onsite`` / ``hybrid`` / ``remote`` filter.
+        include_quarantined: Also return jobs that are not UK-eligible (non-UK, ambiguous or
+            unknown location). Off by default: the product shows UK-relevant roles only.
 
     Returns:
         Paginated job list response whose ``total`` counts matches, not stored rows.
@@ -433,9 +478,17 @@ async def list_jobs(
     page_size = min(page_size, MAX_PAGE_SIZE)
     offset = (page - 1) * page_size
 
+    # Rows stored before the UK policy (or by a path that skipped it) are classified before
+    # anything is read, so the gate below never hides an unchecked UK job or shows a foreign one.
+    await classify_pending(db)
+
     stmt = select(Job)
+    if not include_quarantined:
+        stmt = stmt.where(Job.uk_eligible.is_(True), _not_a_listed_duplicate())
     if status:
         stmt = stmt.where(Job.status == status)
+    if workplace:
+        stmt = stmt.where(Job.workplace_type == workplace)
 
     wants_location = bool((location or "").strip())
     wants_query = bool((query or "").strip())
@@ -452,8 +505,12 @@ async def list_jobs(
     if not (wants_location or wants_query or user_id is not None):
         # Unfiltered and no operator context: count in SQL and page in SQL, as before.
         count_stmt = select(func.count(Job.id))
+        if not include_quarantined:
+            count_stmt = count_stmt.where(Job.uk_eligible.is_(True), _not_a_listed_duplicate())
         if status:
             count_stmt = count_stmt.where(Job.status == status)
+        if workplace:
+            count_stmt = count_stmt.where(Job.workplace_type == workplace)
         total = (await db.execute(count_stmt)).scalar() or 0
         rows = (
             (await db.execute(stmt.order_by(Job.created_at.desc()).offset(offset).limit(page_size)))
@@ -504,6 +561,19 @@ async def list_jobs(
         page=page,
         page_size=page_size,
         has_next=(page * page_size) < total,
+    )
+
+
+def _not_a_listed_duplicate() -> ColumnElement[bool]:
+    """Hide a row that dedup linked to another vacancy — but only when that canonical row is
+    itself listable. The same role on Reed, LinkedIn and the employer's board was three list
+    entries; it is now one. If the canonical copy is quarantined (say, a bare "Cambridge" on a
+    global board) the UK-verified duplicate stays visible, so a vacancy is never lost."""
+    canonical = aliased(Job)
+    return ~exists().where(
+        canonical.id == Job.canonical_job_id,
+        canonical.id != Job.id,
+        canonical.uk_eligible.is_(True),
     )
 
 

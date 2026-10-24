@@ -154,3 +154,7 @@ button { font-family: inherit; }
 @keyframes aaSpin{to{transform:rotate(360deg)}}
 @keyframes aaDrawer{0%{transform:translateX(100%)}100%{transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+
+/* App content gutter: 24px on desktop, 12px on phones so 320px leaves room to read. */
+.app-content{padding:26px 24px 60px}
+@media (max-width:640px){.app-content{padding:16px 12px 40px}}

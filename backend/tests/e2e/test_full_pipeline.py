@@ -23,7 +23,8 @@ async def _create_job_in_db(db: AsyncSession, idx: int = 1) -> Job:
         platform_job_id=f"e2e-job-{idx}",
         title=f"Python Developer {idx}",
         company=f"TestCorp {idx}",
-        location="Remote",
+        # UK: dashboard job counts only include UK-eligible jobs (a bare "Remote" names no country).
+        location="Remote (UK)",
         url=f"https://example.com/jobs/{idx}",
         description=f"Job description for position {idx}.",
         status="new",

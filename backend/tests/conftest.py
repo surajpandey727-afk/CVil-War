@@ -166,7 +166,9 @@ def sample_job_data() -> dict:
         "platform_job_id": "job-12345",
         "title": "Senior Python Developer",
         "company": "TechCorp Inc.",
-        "location": "Remote",
+        # A UK-remote role: the product lists UK-eligible jobs only, so a bare "Remote" (which
+        # names no country) would be quarantined — see tests/unit/test_uk_location_policy.py.
+        "location": "Remote (UK)",
         "url": "https://linkedin.com/jobs/view/12345",
         "description": "We are looking for a Senior Python Developer...",
         "job_type": "full-time",

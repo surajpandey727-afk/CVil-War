@@ -19,7 +19,7 @@ import os
 
 #: The current head revision — what the schema produced here corresponds to. Kept in sync with
 #: `alembic heads`; asserted against it at run time so this can't silently drift.
-HEAD_REVISION = "a3d9c51e7b20"
+HEAD_REVISION = "e5b2c8d41f07"
 
 
 async def main() -> None:

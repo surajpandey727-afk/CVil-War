@@ -50,9 +50,10 @@ class TestSearchJobs:
             platform_job_id="ext-999",
             title="Python Dev",
             company="TestCo",
-            location="Remote",
+            location="London, England, United Kingdom",
             url="https://example.com/job/999",
             description="A Python role",
+            posted_at="2026-10-01T09:00:00Z",
         )
         mock_platform = AsyncMock()
         mock_platform.search = AsyncMock(return_value=[mock_listing])
@@ -76,6 +77,47 @@ class TestSearchJobs:
         assert result.total == 1
         assert result.items[0].title == "Python Dev"
         assert result.items[0].platform == "linkedin"
+        # The adapter's posting date reaches the stored job (it used to be dropped here).
+        assert result.items[0].posted_at is not None
+        assert result.items[0].posted_at.date().isoformat() == "2026-10-01"
+        assert result.items[0].city == "London"
+        assert result.items[0].country_code == "GB"
+
+    async def test_ingestion_enforces_the_uk_only_policy(self, db_session):
+        """A verified non-UK listing is never stored; an ambiguous one is stored quarantined
+        (kept for review, not shown); a UK one is stored and returned."""
+        from sqlalchemy import select
+
+        from app.core.automation.platforms.base import JobListing
+        from app.models.job import Job
+
+        def listing(pid: str, location: str) -> JobListing:
+            return JobListing(
+                platform="careers:acme", platform_job_id=pid, title="PM", company="Acme",
+                location=location, url=f"https://example.com/{pid}", description="x",
+            )
+
+        mock_platform = AsyncMock()
+        mock_platform.search = AsyncMock(
+            return_value=[
+                listing("uk", "London, UK"),
+                listing("us", "San Francisco, CA"),
+                listing("amb", "Cambridge"),
+            ]
+        )
+        request = JobSearchRequest(query="pm", platforms=["careers:acme"])
+        with (
+            patch.object(job_search.platform_registry, "has", return_value=True),
+            patch.object(job_search.platform_registry, "create", return_value=mock_platform),
+        ):
+            result = await job_search.search_jobs(db_session, request, TEST_USER_ID)
+
+        assert [i.platform_job_id for i in result.items] == ["uk"]
+        stored = {j.platform_job_id: j for j in (await db_session.execute(select(Job))).scalars()}
+        assert set(stored) == {"uk", "amb"}  # the US role was never persisted
+        assert stored["amb"].uk_eligible is False
+        assert stored["amb"].location_verification_status == "ambiguous"
+        assert stored["uk"].posted_date is None  # the source gave none; none is invented
 
     async def test_search_jobs_handles_platform_failure(self, db_session):
         """Search should return empty results when platform raises."""

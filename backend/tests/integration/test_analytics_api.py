@@ -179,3 +179,24 @@ class TestDashboardCountsAreReal:
         assert body["applications_queued"] == 0
         assert body["submitted_today"] == 0
         assert body["applications_failed"] == 0
+
+
+
+async def test_dashboard_job_counts_are_uk_eligible_only(client, db_session):
+    """"2,179 opportunities" sat above a list that could only show ~1,000: the header counted
+    every stored row, including the San Francisco and Berlin ones the list hides."""
+    from app.models.job import Job
+    from tests.conftest import TEST_USER_ID
+
+    for i, loc in enumerate(["London, UK", "Manchester", "San Francisco, CA", "Berlin", "Remote"]):
+        db_session.add(
+            Job(user_id=TEST_USER_ID, platform="reed" if i < 2 else "careers:x",
+                platform_job_id=f"d{i}", title="PM", company=f"C{i}", url=f"https://x/{i}",
+                location=loc, status="new")
+        )
+    await db_session.commit()
+
+    stats = (await client.get("/api/v1/analytics/dashboard")).json()
+    assert stats["total_jobs_found"] == 2
+    assert stats["unique_jobs"] == 2
+    assert sum(stats["jobs_by_source"].values()) == 2

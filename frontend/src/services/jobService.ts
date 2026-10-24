@@ -2,12 +2,17 @@ import api from './api';
 import type { JobScoreResponse } from '@/types/ats';
 import type { CompanyProfile } from '@/types/company';
 import type { FitAnalysis } from '@/types/fit';
-import type { Job, JobSearchRequest, JobListResponse, JobAnalysisResponse } from '@/types/job';
+import type { Job, JobSearchRequest, JobListResponse, JobAnalysisResponse, LocationSummary, WorkplaceType } from '@/types/job';
 import type { ResumeRecommendation } from '@/types/resumeRecommendation';
 
 /** Search for jobs across multiple platforms. */
+/** A live fan-out across every enabled source: the server bounds the fetch phase at ~15s and
+ *  the serverless function at 60s, so the client waits for the function rather than giving up
+ *  at the 30s default — which left the button reading "Searching..." with no result or error. */
+export const SEARCH_TIMEOUT_MS = 58_000;
+
 export async function searchJobs(request: JobSearchRequest): Promise<JobListResponse> {
-  const { data } = await api.post<JobListResponse>('/jobs/search', request);
+  const { data } = await api.post<JobListResponse>('/jobs/search', request, { timeout: SEARCH_TIMEOUT_MS });
   return data;
 }
 
@@ -16,9 +21,11 @@ export async function listJobs(
   page = 1,
   pageSize = 20,
   status?: string,
-  filters: { location?: string; query?: string } = {},
+  filters: { location?: string; query?: string; workplace?: WorkplaceType } = {},
 ): Promise<JobListResponse> {
   const params: Record<string, string | number> = { page, page_size: pageSize };
+  // "unspecified" is not a filter value: it is what a posting that says nothing gets.
+  if (filters.workplace && filters.workplace !== 'unspecified') params['workplace'] = filters.workplace;
   if (status) params['status'] = status;
   // Location and title go to the server. Filtering them in the browser meant `total`
   // counted every stored job and page 2 of a London search was not London — the filter
@@ -26,6 +33,12 @@ export async function listJobs(
   if (filters.location?.trim()) params['location'] = filters.location.trim();
   if (filters.query?.trim()) params['q'] = filters.query.trim();
   const { data } = await api.get<JobListResponse>('/jobs/', { params });
+  return data;
+}
+
+/** How stored jobs split under the UK-only location policy (shown / outside UK / quarantined). */
+export async function getLocationSummary(): Promise<LocationSummary> {
+  const { data } = await api.get<LocationSummary>('/jobs/location-summary');
   return data;
 }
 

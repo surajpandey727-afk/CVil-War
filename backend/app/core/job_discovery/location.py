@@ -165,8 +165,21 @@ CITIES: tuple[City, ...] = (
     City(key="leeds", label="Leeds", areas=frozenset({"leeds"})),
     City(key="cambridge", label="Cambridge", areas=frozenset({"cambridge"})),
     City(key="oxford", label="Oxford", areas=frozenset({"oxford"})),
-    City(key="dublin", label="Dublin", areas=frozenset({"dublin"})),
+    City(key="liverpool", label="Liverpool", areas=frozenset({"liverpool"})),
+    City(key="sheffield", label="Sheffield", areas=frozenset({"sheffield"})),
+    City(key="newcastle", label="Newcastle", areas=frozenset({"newcastle", "newcastle upon tyne"})),
+    City(key="nottingham", label="Nottingham", areas=frozenset({"nottingham"})),
+    City(key="cardiff", label="Cardiff", areas=frozenset({"cardiff"})),
+    City(key="belfast", label="Belfast", areas=frozenset({"belfast"})),
+    City(key="reading", label="Reading", areas=frozenset({"reading"})),
+    City(key="milton_keynes", label="Milton Keynes", areas=frozenset({"milton keynes"})),
+    # Dublin was listed here until the UK-only policy: it is in Ireland, not the UK, and a
+    # filter for it could only ever match jobs the list no longer shows.
 )
+
+#: Filter text meaning "anywhere in the UK". Every listed job is already UK-eligible, so this
+#: is a no-op filter rather than a substring test that "London" fails ("uk" not in "london").
+UK_WIDE = frozenset({"uk", "u k", "united kingdom", "gb", "great britain", "uk nationwide"})
 
 _BY_KEY = {c.key: c for c in CITIES}
 
@@ -267,7 +280,7 @@ def location_matches(requested: str, job_location: str, *, remote: bool = False)
     3. **Anything else** — substring match, so an unusual place name still filters something
        rather than returning nothing at all.
     """
-    if not (requested or "").strip():
+    if not (requested or "").strip() or _normalise(requested) in UK_WIDE:
         return True
 
     city = resolve_city(requested)

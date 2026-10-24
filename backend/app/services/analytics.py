@@ -24,6 +24,7 @@ from app.schemas.analytics import (
     LLMUsageStats,
     TimelineEntry,
 )
+from app.services.job_location import classify_pending
 
 logger = structlog.get_logger(__name__)
 
@@ -49,7 +50,12 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
     Returns:
         Aggregated dashboard stats.
     """
-    total_jobs_result = await db.execute(select(func.count(Job.id)))
+    # Every job count on the dashboard is of UK-eligible jobs — the only ones the product lists.
+    # Counting the stored table instead made "2,179 opportunities" sit above a jobs list that
+    # could only ever show ~1,000 of them. Unclassified rows are classified first.
+    await classify_pending(db)
+    uk = Job.uk_eligible.is_(True)
+    total_jobs_result = await db.execute(select(func.count(Job.id)).where(uk))
     total_jobs = total_jobs_result.scalar() or 0
 
     total_apps_result = await db.execute(select(func.count(Application.id)))
@@ -110,25 +116,26 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
         tzinfo=None,
     )
     jobs_found_today = (
-        await db.execute(select(func.count(Job.id)).where(Job.created_at >= today_start))
+        await db.execute(select(func.count(Job.id)).where(uk, Job.created_at >= today_start))
     ).scalar() or 0
 
     # A job with no canonical_job_id is its own canonical representative — one row is
     # one distinct vacancy — so COALESCE onto its own id before counting DISTINCT.
     unique_jobs = (
         await db.execute(
-            select(func.count(func.distinct(func.coalesce(Job.canonical_job_id, Job.id))))
+            select(func.count(func.distinct(func.coalesce(Job.canonical_job_id, Job.id)))).where(uk)
         )
     ).scalar() or 0
 
     jobs_by_source_rows = (
-        await db.execute(select(Job.platform, func.count(Job.id)).group_by(Job.platform))
+        await db.execute(select(Job.platform, func.count(Job.id)).where(uk).group_by(Job.platform))
     ).all()
     jobs_by_source = {platform: count for platform, count in jobs_by_source_rows}
 
     sponsor_confirmed = (
         await db.execute(
             select(func.count(Job.id)).where(
+                uk,
                 Job.sponsor_confidence == SponsorConfidence.CONFIRMED_REGISTER,
             )
         )

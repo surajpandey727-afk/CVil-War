@@ -26,7 +26,7 @@ async def _seed(db, uid: str, n: int) -> None:
     for i in range(n):
         job = Job(
             user_id=uid, platform="linkedin", platform_job_id=f"{uid[:4]}-{i}",
-            title="t", company="c", url="u",
+            title="t", company="c", url="u", location="London, UK",
         )
         db.add(job)
         await db.flush()

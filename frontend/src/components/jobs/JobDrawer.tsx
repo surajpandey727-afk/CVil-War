@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
+import JobFacts from '@/components/jobs/JobFacts';
 import CompanyPanel from '@/components/jobs/CompanyPanel';
 import PostingPanel from '@/components/jobs/PostingPanel';
 import FitPanel from '@/components/jobs/FitPanel';
@@ -186,17 +187,13 @@ export default function JobDrawer({
           <CompanyLogo name={job.company} />
           <div style={{ flex: '1 1 auto', minWidth: 0 }}>
             <div className="jc-display" style={{ fontSize: 19 }}>{job.title}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 7 }} className="jc-body">
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--jc-text-2)', fontWeight: 700 }}>
-                {job.company}
-              </span>
-              <span style={{ color: 'var(--jc-text-4)' }}>·</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Icon name="mappin" size={12} /> {job.location || (job.remote ? 'Remote' : '—')}
-              </span>
+            {/* Employer · City, Country · Posted <date> · Arrangement — same line as the card. */}
+            <div style={{ marginTop: 7 }}>
+              <JobFacts job={job} size="drawer" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }} className="jc-body">
               {job.salary_range && (
                 <>
-                  <span style={{ color: 'var(--jc-text-4)' }}>·</span>
                   {/* The posting's own words, with the figure the list sorted and filtered on
                       beside them when the two differ. The card shows "£110k" for a posting
                       that reads "£500 per day"; without this the drawer contradicted it with

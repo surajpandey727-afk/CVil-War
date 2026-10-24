@@ -14,8 +14,6 @@ Everything is domain knowledge about how these roles are actually hired and scre
 well-established territory, not invented facts about any person.
 """
 
-
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

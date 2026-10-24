@@ -315,11 +315,104 @@ class TestLocationFilteringEndToEnd:
         body = (await client.get("/api/v1/jobs/?location=London&page_size=100")).json()
         assert "Late Import PM" in {i["title"] for i in body["items"]}
 
-    async def test_no_filter_still_returns_everything(self, client, db_session):
+    async def test_no_filter_returns_every_uk_eligible_job_and_nothing_else(
+        self, client, db_session
+    ):
+        """UK-only policy: with no filter the list is every UK job — and only those. USA,
+        Worldwide and Europe used to appear here; that was the defect, not the contract."""
         await self._seed(db_session)
 
         body = (await client.get("/api/v1/jobs/?page_size=100")).json()
+        assert body["total"] == 5
+        assert {i["location"] for i in body["items"]} == {
+            "London, UK", "Canary Wharf", "EC4N6EU", "United Kingdom", "Manchester",
+        }
+        assert all(i["uk_eligible"] and i["country_code"] == "GB" for i in body["items"])
+
+    async def test_quarantined_jobs_are_kept_and_reviewable_not_deleted(self, client, db_session):
+        await self._seed(db_session)
+
+        body = (await client.get("/api/v1/jobs/?page_size=100&include_quarantined=true")).json()
         assert body["total"] == 8
+        by_loc = {i["location"]: i for i in body["items"]}
+        assert by_loc["USA"]["location_verification_status"] == "verified"
+        assert by_loc["USA"]["uk_eligible"] is False
+        assert by_loc["Worldwide"]["location_verification_status"] == "ambiguous"
+        assert by_loc["Europe"]["uk_eligible"] is False
+
+    async def test_location_summary_accounts_for_every_stored_job(self, client, db_session):
+        await self._seed(db_session)
+
+        summary = (await client.get("/api/v1/jobs/location-summary")).json()
+        assert summary == {"total": 8, "uk_eligible": 5, "outside_uk": 1, "quarantined": 2}
+
+    async def test_uk_nationwide_filter_is_every_uk_job(self, client, db_session):
+        await self._seed(db_session)
+
+        body = (await client.get("/api/v1/jobs/?location=United%20Kingdom&page_size=100")).json()
+        assert body["total"] == 5
+
+    async def test_workplace_filter(self, client, db_session):
+        from tests.conftest import TEST_USER_ID
+
+        await self._seed(db_session)
+        db_session.add(self._job(TEST_USER_ID, title="Hybrid PM", location="London (Hybrid)"))
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/jobs/?workplace=hybrid&page_size=100")).json()
+        assert [i["title"] for i in body["items"]] == ["Hybrid PM"]
+        assert body["items"][0]["workplace_type"] == "hybrid"
+
+    async def test_an_unknown_workplace_value_is_rejected(self, client):
+        response = await client.get("/api/v1/jobs/?workplace=bogus")
+        assert response.status_code == 422
+
+    async def test_job_response_carries_location_and_dates_for_the_card(self, client, db_session):
+        await self._seed(db_session)
+
+        item = (await client.get("/api/v1/jobs/?location=London&page_size=100")).json()["items"][0]
+        for key in ("city", "country_name", "workplace_type", "posted_at", "discovered_at",
+                    "raw_location", "location_verification_status"):
+            assert key in item
+        # The seed rows carry no posting date: it must be reported absent, never substituted.
+        assert item["posted_at"] is None
+        assert item["discovered_at"] is not None
+
+
+class TestDuplicatesCollapse:
+    """One vacancy found on several boards is listed once."""
+
+    async def test_a_linked_duplicate_is_listed_once(self, client, db_session):
+        from tests.conftest import TEST_USER_ID
+
+        make = TestLocationFilteringEndToEnd._job
+        first = make(TEST_USER_ID, title="Senior PM", location="London, UK")
+        dupe = make(TEST_USER_ID, title="Senior PM", location="London", platform="linkedin")
+        db_session.add_all([first, dupe])
+        await db_session.commit()
+        first.canonical_job_id = first.id
+        dupe.canonical_job_id = first.id
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/jobs/?page_size=100")).json()
+        assert [i["id"] for i in body["items"]] == [first.id]
+        assert body["total"] == 1
+
+    async def test_a_uk_duplicate_of_a_quarantined_row_stays_visible(self, client, db_session):
+        """Never lose the vacancy: if the canonical copy is not listable, the duplicate is."""
+        from tests.conftest import TEST_USER_ID
+
+        make = TestLocationFilteringEndToEnd._job
+        quarantined = make(TEST_USER_ID, title="ML Eng", location="Cambridge", platform="careers:x")
+        uk_copy = make(TEST_USER_ID, title="ML Eng", location="Cambridge, UK")
+        db_session.add_all([quarantined, uk_copy])
+        await db_session.commit()
+        quarantined.canonical_job_id = quarantined.id
+        uk_copy.canonical_job_id = quarantined.id
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/jobs/?page_size=100")).json()
+        assert [i["id"] for i in body["items"]] == [uk_copy.id]
 
 
 class TestResumeRecommendation:

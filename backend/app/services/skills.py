@@ -22,6 +22,7 @@ from app.schemas.skills import (
     SkillHitOut,
     SkillScoreResponse,
 )
+from app.services.job_location import classify_pending
 from app.services.resume import get_resume
 
 logger = structlog.get_logger(__name__)
@@ -37,9 +38,12 @@ async def _corpus_counts(db: AsyncSession) -> dict[str, int]:
     Tenant scoping is automatic (the ORM SELECT is filtered to the current user), so this only
     ever reads the caller's own jobs.
     """
+    # The candidate's market is the UK, so only UK-eligible jobs count as demand evidence.
+    await classify_pending(db)
     rows = (
         await db.execute(
             select(Job.title, Job.description)
+            .where(Job.uk_eligible.is_(True))
             .order_by(Job.created_at.desc())
             .limit(_CORPUS_SCAN_LIMIT)
         )

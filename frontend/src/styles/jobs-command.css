@@ -396,13 +396,50 @@
   [data-jc-theme] * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
-/* ---- Responsive: left rail collapses under 1024px, cards simplify under 640px ---------- */
-@media (max-width: 1024px) {
-  [data-jc-theme] .jc-layout { flex-direction: column; }
-  [data-jc-theme] .jc-rail { flex: 1 1 auto !important; width: 100%; }
+/* ---- Layout: rail | results ------------------------------------------------------------
+   A grid with a capped rail track. It used to be flex with `flex: 0 0 268px` on the rail,
+   which is a basis, not a limit: flex items default to `min-width: auto`, so the rail grew to
+   the min-content width of its longest unbreakable child (a source label, an input's
+   intrinsic size) and squeezed the results. `minmax(0, …)` on both tracks means neither can
+   be forced wider by content; long labels ellipsize instead. */
+[data-jc-theme] .jc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 268px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+[data-jc-theme] .jc-rail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+[data-jc-theme] .jc-results { min-width: 0; }
+[data-jc-theme] .jc-rail input:not([type="range"]):not([type="checkbox"]) { min-width: 0; width: 100%; }
+@media (min-width: 1600px) {
+  [data-jc-theme] .jc-layout { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 20px; }
+}
+
+/* ---- Responsive: the rail stacks when the *space this page gets* is too narrow ----------
+   A container query, not a viewport query: with the app sidebar expanded a 1100px window
+   leaves the page ~800px, and a viewport breakpoint kept the two-column layout there and
+   squeezed the results to ~440px. The wrapper holds no fixed-position descendants (the
+   selection bar is portalled to <body>, the drawer sits outside it), so the containment a
+   query container implies cannot re-anchor anything. */
+[data-jc-theme] .jc-layout-wrap { container-type: inline-size; }
+@container (max-width: 760px) {
+  [data-jc-theme] .jc-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@supports not (container-type: inline-size) {
+  @media (max-width: 1024px) {
+    [data-jc-theme] .jc-layout { grid-template-columns: minmax(0, 1fr); }
+  }
 }
 @media (max-width: 640px) {
   [data-jc-theme] .jc-pipeline { flex-wrap: wrap; }
   [data-jc-theme] .jc-pipeline-stage { flex: 1 1 33%; min-width: 88px; }
   [data-jc-theme] .jc-card { flex-wrap: wrap; }
 }
+@media (max-width: 640px) {
+  /* The page bleeds into the app gutter (margin -20px); the gutter is 12px on phones. */
+  [data-jc-theme].jc-leather { margin: -12px !important; padding: 12px !important; }
+}
+/* Inputs size to their container, never to their intrinsic ~20-character width: that
+   intrinsic width is what pushed the search fields past the edge at 320px. */
+[data-jc-theme] .jc-input { min-width: 0; }
+[data-jc-theme] .jc-input input { min-width: 0; width: 100%; }

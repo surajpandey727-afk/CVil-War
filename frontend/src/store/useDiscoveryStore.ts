@@ -6,6 +6,8 @@ import type { SponsorshipStatus } from '@/types/job';
 
 export type SortKey = 'match' | 'newest' | 'salary';
 export type PostedWithin = '24h' | '7d' | '30d' | 'any';
+/** Work arrangement as the posting states it. Applied on the server. */
+export type WorkplaceFilter = 'any' | 'onsite' | 'hybrid' | 'remote';
 
 export interface DiscoveryFilters {
   /** 0–100. Roles below this are still listed but never auto-applied to. */
@@ -26,6 +28,7 @@ export interface DiscoveryFilters {
   seniority: string[];
   postedWithin: PostedWithin;
   remoteOnly: boolean;
+  workplace: WorkplaceFilter;
   hideApplied: boolean;
   publishedSalaryOnly: boolean;
   sort: SortKey;
@@ -42,6 +45,7 @@ export const DEFAULT_FILTERS: DiscoveryFilters = {
   seniority: [],
   postedWithin: '30d',
   remoteOnly: false,
+  workplace: 'any',
   hideApplied: true,
   publishedSalaryOnly: false,
   sort: 'match',
@@ -111,6 +115,8 @@ interface DiscoveryState {
   setLocation: (v: string) => void;
   /** Promote the typed location/title to the filter the list is fetched with. */
   commitSearch: () => void;
+  /** Set and apply a location in one step (the rail's location chips). */
+  applyLocation: (v: string) => void;
   toggleTitle: (title: string) => void;
   setTitles: (titles: string[]) => void;
   toggleFamily: (family: RoleFamily) => void;
@@ -142,7 +148,8 @@ interface DiscoveryState {
  * with no way to tell from the screen.
  *
  * v3 replaces the single `minSalaryK` slider with brackets plus a custom window, and adds the
- * sponsorship filter. v4 retires the old 70% default match floor.
+ * sponsorship filter. v4 retires the old 70% default match floor. v5 adds the work-arrangement
+ * filter (defaulting to "any", so nobody's list narrows on upgrade).
  */
 export function migrateDiscoveryState(persisted: unknown, from: number): Record<string, unknown> {
   const state = (persisted ?? {}) as Record<string, unknown>;
@@ -166,6 +173,9 @@ export function migrateDiscoveryState(persisted: unknown, from: number): Record<
     const filters = { ...((state['filters'] ?? {}) as Record<string, unknown>) };
     if (filters['minAtsScore'] === 70) filters['minAtsScore'] = 0;
     state['filters'] = { ...DEFAULT_FILTERS, ...filters };
+  }
+  if (from < 5) {
+    state['filters'] = { ...DEFAULT_FILTERS, ...((state['filters'] ?? {}) as Record<string, unknown>) };
   }
   return state;
 }
@@ -201,6 +211,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       setQuery: (v) => set({ query: v }),
       setLocation: (v) => set({ location: v }),
       commitSearch: () => set((s) => ({ appliedLocation: s.location, appliedQuery: s.query })),
+      applyLocation: (v) => set({ location: v, appliedLocation: v }),
       toggleTitle: (title) => set((s) => ({ activeTitles: toggle(s.activeTitles, title) })),
       setTitles: (titles) => set({ activeTitles: titles }),
       toggleFamily: (family) => set((s) => ({ activeFamilies: toggle(s.activeFamilies, family) })),
@@ -253,7 +264,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       // reference cache — with no way to tell from the screen.
       // v3 replaces the single `minSalaryK` slider with brackets plus a custom window, and
       // adds the sponsorship filter.
-      version: 4,
+      version: 5,
       migrate: migrateDiscoveryState,
       partialize: (s) => ({
         activeTitles: s.activeTitles,

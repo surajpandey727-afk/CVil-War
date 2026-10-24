@@ -98,6 +98,12 @@ export const handlers = [
     });
   }),
 
+  // Registered before `/jobs/:jobId`, which would otherwise swallow it as a job id — the same
+  // ordering the backend router relies on.
+  http.get('/api/v1/jobs/location-summary', () =>
+    HttpResponse.json({ total: 5, uk_eligible: 2, outside_uk: 2, quarantined: 1 }),
+  ),
+
   http.get('/api/v1/jobs/:jobId', ({ params }) => {
     if (params['jobId'] === 'job-1') {
       return HttpResponse.json(sampleJob);

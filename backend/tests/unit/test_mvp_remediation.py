@@ -304,7 +304,7 @@ class TestJobSearchDedup:
         listings = [
             JobListing(
                 platform="linkedin", platform_job_id="", title=f"Job {i}",
-                company="C", url=f"https://x/{i}",
+                company="C", url=f"https://x/{i}", location="London, UK",
             )
             for i in range(3)
         ]
