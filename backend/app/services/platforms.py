@@ -87,6 +87,11 @@ def _needs_credential(key: str) -> bool:
         return True
     if not platform_registry.has(key):
         return False
+    spec = BY_KEY.get(key)
+    if spec is not None and spec.api_key_field is not None:
+        # Its credential is an API key (Adzuna), not a login: there is no page to sign in on,
+        # so a Connect button could only fail.
+        return False
     try:
         return bool(platform_registry.create(key).capabilities().get("needs_credential"))
     except Exception:
@@ -94,7 +99,12 @@ def _needs_credential(key: str) -> bool:
 
 
 def _actions(
-    *, implemented: bool, needs_login: bool, connected: bool, health: SourceHealth
+    *,
+    implemented: bool,
+    needs_login: bool,
+    connected: bool,
+    health: SourceHealth,
+    api_key: bool = False,
 ) -> list[PlatformAction]:
     """Which controls to offer, and why one is unavailable when it is."""
     actions: list[PlatformAction] = []
@@ -122,6 +132,20 @@ def _actions(
                 label="Disconnect",
                 available=connected,
                 reason="" if connected else "Nothing is connected for this platform.",
+            )
+        )
+    elif api_key:
+        # Adzuna-style sources are reached with the platform's API key, which the server
+        # already holds. Offering a sign-in here opened nothing and failed every time.
+        actions.append(
+            PlatformAction(
+                key="connect",
+                label="Connect",
+                available=False,
+                reason=(
+                    "Searched through its API key, which is already configured — no sign-in "
+                    "needed. Its listings send you to the employer's own site to apply."
+                ),
             )
         )
     else:
@@ -170,7 +194,7 @@ async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
         health = health_for(spec)
         implemented = platform_registry.has(spec.key)
         session = sessions.get(spec.key)
-        needs_login = _needs_credential(spec.key) or spec.api_key_field is not None
+        needs_login = _needs_credential(spec.key)
         connected = bool(session and session.state in _USABLE)
 
         statuses.append(
@@ -197,6 +221,7 @@ async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
                 actions=_actions(
                     implemented=implemented,
                     needs_login=needs_login,
+                    api_key=spec.api_key_field is not None,
                     connected=connected,
                     health=health,
                 ),
@@ -246,9 +271,14 @@ async def test_platforms(
                 # ``create`` instantiates; ``get`` returns the class, which has no
                 # bound health_check to await.
                 adapter = registry.create(key)
-                state, detail = await asyncio.wait_for(
-                    adapter.health_check(), timeout=_TEST_TIMEOUT
-                )
+                check = getattr(adapter, "health_check", None)
+                if check is None:
+                    # The browser-scraper adapters predate health_check. Report why they are
+                    # offline instead of the AttributeError the sweep used to show.
+                    state = "unavailable"
+                    detail = spec.known_broken or "This adapter has no live check."
+                else:
+                    state, detail = await asyncio.wait_for(check(), timeout=_TEST_TIMEOUT)
             except TimeoutError:
                 state, detail = "unavailable", f"No answer within {_TEST_TIMEOUT:.0f}s"
             except Exception as exc:

@@ -11,6 +11,7 @@
 .EXAMPLE
   .\scripts\db-worker.ps1 -DryRun     # read-only: list what would run against production
   .\scripts\db-worker.ps1 -Start
+  .\scripts\db-worker.ps1 -Start -ConnectOnly   # only open the sign-in windows Connect asks for
   .\scripts\db-worker.ps1 -Status
   .\scripts\db-worker.ps1 -Stop
 #>
@@ -18,7 +19,8 @@ param(
     [switch]$Start,
     [switch]$Stop,
     [switch]$Status,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$ConnectOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,7 +52,9 @@ if ($DryRun) {
 if ($Start) {
     if (Get-WorkerProcess) { Write-Host 'Worker already running.'; exit 0 }
     New-Item -ItemType Directory -Force $logDir | Out-Null
-    $proc = Start-Process -FilePath $python -ArgumentList 'scripts/db_worker.py', '--prod' `
+    $workerArgs = @('scripts/db_worker.py', '--prod', '--poll', '10')
+    if ($ConnectOnly) { $workerArgs += '--connect-only' }
+    $proc = Start-Process -FilePath $python -ArgumentList $workerArgs `
         -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err"
     Set-Content -Path $pidFile -Value $proc.Id

@@ -107,6 +107,31 @@ Foreground, for watching it work:
 still moves each claimed application to `applied`, labelled *simulated*. Point it at production
 only when you want that to happen to the rows it lists.
 
+### Connecting Reed, LinkedIn, Indeed… (Settings → Platforms → Connect)
+
+The sign-in window has to open on a machine with a browser and a person in front of it, and
+Vercel has neither (every Connect in production used to fail with `No module named
+'playwright'`). With `APPLY_DISPATCH=db_queue`, a Connect click is queued in
+`platform_sessions` and **this worker opens the platform's real sign-in page on your desktop**.
+You sign in there yourself (password, 2FA, any "are you human" check). Only that platform's own
+cookies are stored, encrypted with `SECRETS__APP_KEYS`. The Settings dialog follows progress
+from the database and closes once the window has done its job.
+
+```powershell
+$env:PROD_DATABASE_URL = '<session pooler URL>'
+$env:SECRETS__APP_KEYS = '<same value as on the cvil-war-api Vercel project>'
+.\scripts\db-worker.ps1 -Start -ConnectOnly   # sign-ins only; never touches applications
+# now click Connect on https://cvil-war.vercel.app/settings
+```
+
+`-ConnectOnly` is the safe way to connect accounts: the full worker would also process approved
+applications (as *simulated* applies unless `BROWSER__LIVE_APPLY=true`). Playwright's Chromium
+must be installed in the backend venv (`.venv\Scripts\python -m playwright install chromium`).
+
+Sources with an API key (Adzuna) have nothing to sign in to. Their Connect is disabled with
+that explanation, and the server's key is used for search. Adzuna listings send you to the
+employer's own site to apply.
+
 ### Turning it on in production
 
 ```powershell

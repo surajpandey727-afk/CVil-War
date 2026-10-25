@@ -474,10 +474,10 @@ class ConnectManager:
 
     async def _persist(self, attempt: ConnectAttempt, storage_state: dict[str, Any]) -> None:
         """Hand the captured session to encrypted storage."""
-        from app.db.session import get_session_factory
+        from app.db.session import async_session_factory
         from app.services import platform_session as service
 
-        session_factory = get_session_factory()
+        session_factory = async_session_factory
         async with session_factory() as db:
             await service.import_session(
                 db,
@@ -497,3 +497,91 @@ class ConnectManager:
 
 #: Process-wide manager, matching how the rest of the automation holds browser state.
 MANAGER = ConnectManager()
+
+
+# -- Queued sign-in: run by the automation host --------------------------------------------
+
+
+async def claim_connect(db: Any, row_id: str) -> bool:
+    """Take a queued request for this host. A conditional UPDATE, so two hosts never both
+    open a window for the same request: only the one that flips the state gets it."""
+    from sqlalchemy import update
+
+    from app.models.enums import SessionState
+    from app.models.platform_session import PlatformSession
+
+    result = await db.execute(
+        update(PlatformSession)
+        .where(
+            PlatformSession.id == row_id,
+            PlatformSession.state == SessionState.INTERACTIVE_AVAILABLE,
+        )
+        .values(
+            state=SessionState.HUMAN_VERIFICATION_REQUIRED,
+            state_detail="Opening the sign-in window on your PC…",
+        )
+    )
+    await db.commit()
+    return bool(result.rowcount)
+
+
+async def run_queued_connect(row_id: str, user_id: str, platform: str) -> ConnectState:
+    """Drive one queued sign-in on this machine and report its progress through the row.
+
+    The same capture as :meth:`ConnectManager.start` — headed window, the person signs in,
+    only the platform's own cookies are kept — but the attempt's progress is mirrored to the
+    ``platform_sessions`` row the web app polls, and a Cancel clicked there (which moves the
+    row out of the pending states) closes the window here.
+    """
+    from app.db.session import async_session_factory
+    from app.models.enums import SessionState
+    from app.models.platform_session import PlatformSession
+    from app.services.platform_session import CONNECT_PENDING, settle_connect
+
+    target = target_for(platform)
+    session_factory = async_session_factory
+    if target is None:
+        async with session_factory() as db:
+            row = await db.get(PlatformSession, row_id)
+            if row is not None:
+                await settle_connect(
+                    db,
+                    row,
+                    state=SessionState.AUTH_REQUIRED,
+                    detail=f"{platform} has no sign-in page this host can open.",
+                )
+        return ConnectState.FAILED
+
+    attempt = ConnectAttempt(
+        id=row_id, user_id=user_id, platform=platform, instructions=target.instructions
+    )
+    task = asyncio.create_task(ConnectManager()._run(attempt, target))
+    announced = False
+    while not task.done():
+        await asyncio.wait({task}, timeout=POLL_INTERVAL)
+        async with session_factory() as db:
+            row = await db.get(PlatformSession, row_id)
+            if row is None or row.state not in CONNECT_PENDING:
+                attempt.cancelled.set()  # cancelled or disconnected from the web app
+                continue
+            if attempt.state == ConnectState.AWAITING_LOGIN and not announced:
+                row.state_detail = (
+                    f"The sign-in window is open on your PC. {target.instructions}"
+                )[:300]
+                await db.commit()
+                announced = True
+
+    if attempt.state != ConnectState.CONNECTED:
+        async with session_factory() as db:
+            row = await db.get(PlatformSession, row_id)
+            if row is not None and row.state in CONNECT_PENDING:
+                await settle_connect(
+                    db,
+                    row,
+                    state=SessionState.NOT_CONNECTED
+                    if attempt.state == ConnectState.CANCELLED
+                    else SessionState.AUTH_REQUIRED,
+                    detail=attempt.detail or f"Sign-in {attempt.state.value}.",
+                )
+    logger.info("connect_queued_finished", platform=platform, state=attempt.state.value)
+    return attempt.state

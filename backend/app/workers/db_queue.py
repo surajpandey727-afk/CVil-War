@@ -92,12 +92,43 @@ async def _unlock(conn: Any, app_id: str) -> None:
         await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _lock_key(app_id)})
 
 
+async def run_connects(*, dry_run: bool = False) -> list[dict[str, str]]:
+    """Open a sign-in window here for each platform the web app asked to connect.
+
+    Production has no browser, so a Connect click there is queued for this machine; see
+    ``services.platform_session``. Each capture is headed — the person signs in themselves on
+    this desktop — and runs one at a time, because each needs that person's attention.
+    """
+    import structlog
+
+    from app.core.automation.connect import claim_connect, run_queued_connect
+    from app.db.session import async_session_factory
+    from app.services.platform_session import pending_connects
+
+    log = structlog.get_logger(__name__)
+    results: list[dict[str, str]] = []
+    async with async_session_factory() as db:
+        pending = [(r.id, r.user_id, r.platform) for r in await pending_connects(db)]
+    for row_id, owner, platform in pending:
+        if dry_run:
+            results.append({"id": row_id, "outcome": f"would_open_sign_in:{platform}"})
+            continue
+        async with async_session_factory() as db:
+            if not await claim_connect(db, row_id):
+                continue  # another host took it, or it was cancelled
+        outcome = await run_queued_connect(row_id, owner, platform)
+        results.append({"id": row_id, "outcome": f"sign_in_{outcome.value}:{platform}"})
+        log.info("db_queue.connect", platform=platform, outcome=outcome.value)
+    return results
+
+
 async def run_once(
     *,
     state: WorkerState,
     dry_run: bool = False,
     user_id: str | None = None,
     limit: int = 20,
+    connect_only: bool = False,
 ) -> list[dict[str, str]]:
     """One pass over the queue. Returns what happened to each row (for logs and tests)."""
     import structlog
@@ -111,6 +142,9 @@ async def run_once(
     token = current_user_id.set(None)
     results: list[dict[str, str]] = []
     try:
+        results.extend(await run_connects(dry_run=dry_run))
+        if connect_only:
+            return results
         async with async_session_factory() as db:
             ids = await claimable_ids(db, user_id=user_id, limit=limit)
         now = time.monotonic()
@@ -163,6 +197,11 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--user-id", default=None, help="only this user's applications")
     p.add_argument("--poll", type=float, default=30.0, help="seconds between passes")
     p.add_argument("--limit", type=int, default=20)
+    p.add_argument(
+        "--connect-only",
+        action="store_true",
+        help="only open queued platform sign-ins; never touch applications",
+    )
     return p.parse_args(argv)
 
 
@@ -180,12 +219,17 @@ def main(argv: list[str] | None = None) -> int:
             print("Use `python scripts/db_worker.py --prod ...` (it sets the URL before import).")
             return 2
     state = WorkerState()
-    kw = {"dry_run": args.dry_run, "user_id": args.user_id, "limit": args.limit}
+    kw = {
+        "dry_run": args.dry_run,
+        "user_id": args.user_id,
+        "limit": args.limit,
+        "connect_only": args.connect_only,
+    }
     if args.once or args.dry_run:
         results = asyncio.run(run_once(state=state, **kw))
         for r in results:
             print(f"{r['id']}  {r['outcome']}")
-        print(f"{len(results)} application(s) {'claimable' if args.dry_run else 'processed'}")
+        print(f"{len(results)} item(s) {'claimable' if args.dry_run else 'processed'}")
         return 0
     asyncio.run(run_forever(poll_seconds=args.poll, state=state, **kw))
     return 0

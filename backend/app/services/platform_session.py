@@ -7,7 +7,7 @@ before an apply run. Both are keyed by an explicit ``user_id`` (neither is a ten
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -15,6 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.secrets.credential_store import CredentialStore
+from app.models.enums import SessionState
 from app.models.platform_session import PlatformSession
 from app.schemas.platform_session import PlatformSessionResponse
 
@@ -69,6 +70,10 @@ async def import_session(
         row.last_verified_at = now
         row.expires_at = expires_at
         row.fingerprint_hash = fingerprint
+    # A stored session is a usable one. Without this a first connection stayed at the column
+    # default (``not_connected``), so a successful sign-in never showed as connected.
+    row.state = SessionState.SESSION_ACTIVE
+    row.state_detail = None
     await db.commit()
     await db.refresh(row)
     logger.info("platform_session_imported", user_id=user_id, platform=platform)
@@ -98,3 +103,101 @@ async def delete_session(db: AsyncSession, user_id: str, platform: str) -> bool:
     if removed:
         logger.info("platform_session_deleted", user_id=user_id, platform=platform)
     return removed
+
+
+# -- Queued sign-in (production) ------------------------------------------------------------
+#
+# The production API runs on Vercel, where there is no browser to open, and an in-memory
+# attempt would not survive the next request landing on another instance. So in production a
+# Connect click becomes a row the automation host (the DB-queue worker on the owner's PC)
+# picks up: it opens the sign-in window on that desktop and stores the session. The row's
+# ``state`` carries the progress, so no new table is needed:
+#
+#   interactive_available        -> requested, waiting for the automation host
+#   human_verification_required  -> window open, the person is signing in
+#   session_active               -> stored (import_session sets it)
+#   auth_required / not_connected -> failed / cancelled, with the reason in ``state_detail``
+
+CONNECT_PENDING = (SessionState.INTERACTIVE_AVAILABLE, SessionState.HUMAN_VERIFICATION_REQUIRED)
+
+#: Shown while nothing has picked the request up yet.
+WAITING_FOR_HOST = (
+    "Waiting for the automation host on your PC to open the sign-in window. If nothing opens "
+    "within a minute, start it: .\\scripts\\db-worker.ps1 -Start -ConnectOnly "
+    "(see docs/LOCAL_SETUP.md)."
+)
+
+
+#: A pending request untouched for longer than a sign-in window can stay open belongs to a
+#: host that died mid-capture; a new click starts over instead of waiting on it forever.
+_PENDING_STALE_AFTER = timedelta(minutes=12)
+
+
+def _stale(row: PlatformSession) -> bool:
+    stamp = row.updated_at
+    if stamp is None:
+        return False
+    if stamp.tzinfo is None:  # SQLite hands back naive UTC
+        stamp = stamp.replace(tzinfo=UTC)
+    return datetime.now(UTC) - stamp > _PENDING_STALE_AFTER
+
+
+async def _row(db: AsyncSession, user_id: str, platform: str) -> PlatformSession | None:
+    return (
+        await db.execute(
+            select(PlatformSession).where(
+                PlatformSession.user_id == user_id, PlatformSession.platform == platform
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def request_connect(db: AsyncSession, user_id: str, platform: str) -> PlatformSession:
+    """Record a sign-in request for the automation host. Idempotent while one is pending."""
+    row = await _row(db, user_id, platform)
+    if row is None:
+        row = PlatformSession(user_id=user_id, platform=platform)
+        db.add(row)
+    elif row.state in CONNECT_PENDING and not _stale(row):
+        return row
+    row.state = SessionState.INTERACTIVE_AVAILABLE
+    row.state_detail = WAITING_FOR_HOST
+    await db.commit()
+    await db.refresh(row)
+    logger.info("platform_connect_requested", user_id=user_id, platform=platform)
+    return row
+
+
+async def get_connect_request(
+    db: AsyncSession, user_id: str, row_id: str
+) -> PlatformSession | None:
+    """The request row, scoped to its owner so an id cannot be read across accounts."""
+    row = await db.get(PlatformSession, row_id)
+    return row if row is not None and row.user_id == user_id else None
+
+
+async def settle_connect(
+    db: AsyncSession, row: PlatformSession, *, state: SessionState, detail: str
+) -> None:
+    """End a request that did not store a session.
+
+    A reconnect that fails must not strand a session that still works: when the stored
+    cookies have not expired, the row goes back to active and the failure is kept as detail.
+    """
+    still_valid = row.fingerprint_hash is not None and (
+        row.expires_at is None or row.expires_at > datetime.now(UTC)
+    )
+    row.state = SessionState.SESSION_ACTIVE if still_valid else state
+    row.state_detail = detail[:300]
+    await db.commit()
+
+
+async def pending_connects(db: AsyncSession, limit: int = 5) -> list[PlatformSession]:
+    """Requests no host has started yet, oldest first. Unscoped: the worker serves everyone."""
+    result = await db.execute(
+        select(PlatformSession)
+        .where(PlatformSession.state == SessionState.INTERACTIVE_AVAILABLE)
+        .order_by(PlatformSession.updated_at.asc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
