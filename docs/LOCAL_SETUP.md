@@ -124,6 +124,8 @@ $env:SECRETS__APP_KEYS = '<same value as on the cvil-war-api Vercel project>'
 # now click Connect on https://cvil-war.vercel.app/settings
 ```
 
+Shortcut: `.\scripts\start-connect-host.ps1` does all of this in one step. It pulls the two values from Vercel (after `npx vercel login`), never prints them, deletes the temporary file, and starts `-ConnectOnly`.
+
 `-ConnectOnly` is the safe way to connect accounts: the full worker would also process approved
 applications (as *simulated* applies unless `BROWSER__LIVE_APPLY=true`). Playwright's Chromium
 must be installed in the backend venv (`.venv\Scripts\python -m playwright install chromium`).
