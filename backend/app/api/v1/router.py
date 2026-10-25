@@ -7,6 +7,7 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.agent_runs import router as agent_runs_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.applications import router as applications_router
+from app.api.v1.apply_pack import router as apply_pack_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.command_centre import router as command_centre_router
 from app.api.v1.communications import public_router as communications_public_router
@@ -33,6 +34,9 @@ _auth = [Depends(get_current_user)]
 v1_router.include_router(jobs_router, prefix="/jobs", tags=["Jobs"], dependencies=_auth)
 v1_router.include_router(
     applications_router, prefix="/applications", tags=["Applications"], dependencies=_auth
+)
+v1_router.include_router(
+    apply_pack_router, prefix="/applications", tags=["Applications"], dependencies=_auth
 )
 v1_router.include_router(resumes_router, prefix="/resumes", tags=["Resumes"], dependencies=_auth)
 v1_router.include_router(

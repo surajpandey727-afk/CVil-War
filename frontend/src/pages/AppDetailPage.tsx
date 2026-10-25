@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
+import ApplyPackPanel from '@/components/applications/ApplyPackPanel';
 import EvidencePanel from '@/components/applications/EvidencePanel';
 import FillActivityPanel from '@/components/applications/FillActivityPanel';
 import RunTimeline from '@/components/applications/RunTimeline';
@@ -39,6 +40,7 @@ export default function AppDetailPage() {
   const resumes = resumeData?.items ?? [];
   const [pickedResumeId, setPickedResumeId] = useState('');
   const [contactOpen, setContactOpen] = useState(false);
+  const [packOpen, setPackOpen] = useState(false);
   const [contact, setContact] = useState({ email: '', first_name: '', last_name: '', title: '' });
 
   const setStatus = (status: string, msg: string) =>
@@ -149,6 +151,11 @@ export default function AppDetailPage() {
                     onClick={generateLetter}
                   />
                   <ActionButton
+                    icon="briefcase"
+                    label={packOpen ? 'Hide application pack' : 'Application pack'}
+                    onClick={() => setPackOpen((o) => !o)}
+                  />
+                  <ActionButton
                     icon="mail"
                     label="Log recruiter contact"
                     disabled={logRecruiterContact.isPending}
@@ -161,6 +168,8 @@ export default function AppDetailPage() {
                       evidence panel's "Open job" opens the actual stored URL, so the
                       misleading duplicate is gone rather than sitting next to the real one. */}
                 </div>
+
+                {packOpen && <ApplyPackPanel applicationId={app.id} />}
 
                 {contactOpen && (
                   <div style={{ marginTop: 14, padding: 14, borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
