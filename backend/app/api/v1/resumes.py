@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -10,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from app.api.deps import CurrentUser, get_tenant_db
-from app.core.exceptions import RecordNotFoundError
+from app.core.exceptions import RecordNotFoundError, StorageUnavailableError
 from app.core.ratelimit import rate_limit
 from app.core.storage import StorageService, get_storage
+from app.core.storage.supabase import SupabaseStorage
 from app.schemas.resume import (
     ExtractProfileResponse,
     ResumeAtsReviewResponse,
@@ -280,6 +282,16 @@ async def download_resume(
         )
     except (FileNotFoundError, PermissionError) as exc:
         raise RecordNotFoundError("Resume file", resume_id) from exc
+    except httpx.HTTPStatusError as exc:
+        # Supabase answers a missing object with 400 + {"statusCode": "404"}; anything else
+        # from the store is an outage, not a missing file.
+        if SupabaseStorage._is_not_found(exc.response):
+            raise RecordNotFoundError("Resume file", resume_id) from exc
+        logger.error("resume_storage_read_failed", resume_id=resume_id, error=str(exc)[:300])
+        raise StorageUnavailableError("The résumé file could not be fetched from storage.") from exc
+    except httpx.TransportError as exc:
+        logger.error("resume_storage_read_failed", resume_id=resume_id, error=str(exc)[:300])
+        raise StorageUnavailableError("The résumé file could not be fetched from storage.") from exc
 
     media_type = (
         "application/pdf"

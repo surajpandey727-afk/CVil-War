@@ -31,13 +31,27 @@ jobs:
       - name: Probe /health (keep-warm + uptime)
         env:
           HEALTH_URL: https://cvil-war-api.vercel.app/health
+        # Up to 3 attempts, 50s each, 20s apart. The API is a ~280 MB Python function; a cold
+        # start can exceed the old single 25s attempt, which failed the job (and emailed the
+        # owner) while the site was actually healthy. Every attempt logs its HTTP status and
+        # timing so a real outage is distinguishable from a slow cold start.
         run: |
           set -uo pipefail
-          body="$(curl -sS --max-time 25 "$HEALTH_URL" || true)"
-          echo "health: $body"
-          # Pass only when the database is actually reachable, not merely when the API answers.
-          echo "$body" | grep -q '"db": *true' || echo "$body" | grep -q '"db":true' || {
-            echo "::error::Health check failed — database not reachable. Check the Supabase project."
-            exit 1
-          }
-          echo "OK — database reachable."
+          for attempt in 1 2 3; do
+            body="$(curl -sS --max-time 50 -w '\n%{http_code} %{time_total}s' "$HEALTH_URL" || true)"
+            meta="$(printf '%s' "$body" | tail -n1)"
+            json="$(printf '%s' "$body" | sed '$d')"
+            echo "attempt $attempt: HTTP/time $meta"
+            echo "health: $json"
+            if printf '%s' "$json" | grep -Eq '"db": ?true'; then
+              if printf '%s' "$json" | grep -Eq '"storage": ?\{"ok": ?false'; then
+                echo "::error::Database is up but file storage is unreachable — résumé uploads will fail. Check SUPABASE_URL / SUPABASE_SECRET_KEY / the storage bucket."
+                exit 1
+              fi
+              echo "OK — database reachable."
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] && sleep 20
+          done
+          echo "::error::Health check failed 3 times — database not reachable (or the API is down). Check Vercel logs and the Supabase project."
+          exit 1

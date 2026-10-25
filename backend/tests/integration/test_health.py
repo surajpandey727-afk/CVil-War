@@ -97,3 +97,23 @@ class TestHealthEndpoint:
 
         assert response.status_code == 503
         assert response.json()["db"] is False
+
+
+class TestHealthReportsTheLlmRoute:
+    async def test_reports_model_route_and_key_presence_but_never_the_key(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-must-never-appear")
+        resp = await client.get("/health")
+        body = resp.json()
+        assert body["llm"]["anthropic_key_configured"] is True
+        assert set(body["llm"]) == {
+            "default_model", "classify_model", "fallback_models",
+            "anthropic_key_configured", "anthropic_route",
+        }
+        assert "sk-ant-must-never-appear" not in resp.text
+
+    async def test_reports_a_missing_key(self, client, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        body = (await client.get("/health")).json()
+        assert body["llm"]["anthropic_key_configured"] is False

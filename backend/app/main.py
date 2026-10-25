@@ -154,6 +154,8 @@ def create_app() -> FastAPI:
             status_code = 429
         elif exc.code.endswith("INTEGRITY_ERROR"):
             status_code = 409
+        elif exc.code == "STORAGE_UNAVAILABLE":
+            status_code = 503
         elif isinstance(exc, ParseError | GenerationError):
             # The caller gave us something we cannot work with - an unreadable resume, a
             # posting with no text. That is a 422 they can act on, not a 500 that reads as
@@ -239,6 +241,28 @@ def create_app() -> FastAPI:
             "apollo": bool(settings.apollo_api_key.get_secret_value()),
         }
 
+        # Soft, like Redis: the API can still serve reads with storage down, but uploads and
+        # downloads cannot — the keep-warm probe alerts on it separately.
+        from app.core.storage import get_storage
+        from app.core.storage.health import probe_storage
+
+        try:
+            storage = await probe_storage(get_storage())
+        except Exception as exc:  # get_storage() itself raises on a misconfigured provider
+            storage = {"ok": False, "provider": "unknown", "error": type(exc).__name__}
+
+        from app.core.llm.client import anthropic_key_configured, is_anthropic_model
+
+        llm_cfg = settings.llm
+        llm = {
+            "default_model": llm_cfg.default_model,
+            "classify_model": llm_cfg.classify_model or llm_cfg.default_model,
+            "fallback_models": list(llm_cfg.fallback_models),
+            # Presence only — the key itself is never read into a response or a log line.
+            "anthropic_key_configured": anthropic_key_configured(),
+            "anthropic_route": is_anthropic_model(llm_cfg.default_model),
+        }
+
         if not db_ok:
             response.status_code = 503
         return {
@@ -246,6 +270,8 @@ def create_app() -> FastAPI:
             "version": APP_VERSION,
             "db": db_ok,
             "redis": redis_ok,
+            "storage": storage,
+            "llm": llm,
             "llm_gateway": llm_gateway,
             "external_apis": external_apis,
         }

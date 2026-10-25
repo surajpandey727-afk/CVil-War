@@ -160,6 +160,19 @@ class GenerationError(DocumentError):
         self.code = "DOCUMENT_GENERATION_ERROR"
 
 
+class StorageUnavailableError(CVilWarError):
+    """The file store could not be reached or refused the request (maps to HTTP 503).
+
+    Distinct from "file not found": the object may well exist, but the backend holding it is
+    down or misconfigured (wrong project URL, revoked key, missing bucket). Production hit this
+    after the Supabase project was replaced — every upload parsed, then died on the storage
+    write as a bare 500 with nothing in the log saying why.
+    """
+
+    def __init__(self, message: str = "File storage is unavailable") -> None:
+        super().__init__(message, code="STORAGE_UNAVAILABLE")
+
+
 class TemplateError(DocumentError):
     """Template not found or invalid."""
 

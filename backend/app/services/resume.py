@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.documents.generator import DocumentGenerator
 from app.core.documents.parser import DocumentParser, ParsedResume
-from app.core.exceptions import GenerationError, ParseError, RecordNotFoundError
+from app.core.exceptions import (
+    GenerationError,
+    ParseError,
+    RecordNotFoundError,
+    StorageUnavailableError,
+)
 from app.core.llm.factory import build_llm_client_for_user
 from app.core.resume_tailoring.engine import tailor
 from app.core.resume_tailoring.extract import (
@@ -173,9 +178,27 @@ async def upload_resume(
     # local temp path); then drop the temp file used only for parsing.
     upload_key = keys.upload_key(user_id, file_id, file_ext.lstrip("."))
     content_type = PDF_CONTENT_TYPE if file_ext == ".pdf" else DOCX_CONTENT_TYPE
-    await StorageService(get_storage(), user_id).put(upload_key, content, content_type=content_type)
-    with contextlib.suppress(OSError):
-        dest.unlink()
+    try:
+        await StorageService(get_storage(), user_id).put(
+            upload_key, content, content_type=content_type
+        )
+    except Exception as exc:
+        # Logged here because nothing else records it: the request used to end as a bare 500
+        # with no traceback in the function log, so a dead storage backend looked identical
+        # to a bug in parsing. No row is written for a file that was never stored.
+        logger.error(
+            "resume_storage_write_failed",
+            file=file.filename,
+            error_type=type(exc).__name__,
+            error=str(exc)[:300],
+        )
+        raise StorageUnavailableError(
+            "Your résumé was read, but it could not be saved because file storage is "
+            "unavailable. Nothing was recorded — please try again shortly."
+        ) from exc
+    finally:
+        with contextlib.suppress(OSError):
+            dest.unlink()
 
     resume = Resume(
         user_id=user_id,
