@@ -58,6 +58,14 @@ async def enqueue_apply(
     status transition the API just promised actually happens before the response returns.
     """
     if pool is None:
+        from app.config.settings import get_settings
+
+        if get_settings().apply_dispatch == "db_queue":
+            # The row is already approved/queued, which is exactly what the DB-queue worker
+            # polls for. Nothing runs here — not even a deferred hold, which the worker
+            # re-checks on its own backoff.
+            logger.info("enqueue_apply.left_for_db_worker", application_id=application_id)
+            return f"db-queue:{application_id}"
         if defer:
             logger.warning(
                 "enqueue_apply.queue_unavailable_deferred_dropped",
