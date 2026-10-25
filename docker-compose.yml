@@ -3,6 +3,9 @@
 #   docker compose up --build -d     # from a clean checkout; no .env required
 #   docker compose ps                # backend / worker / frontend / redis report "healthy"
 #
+# Host ports default to 8000 / 3000 / 6379; set API_HOST_PORT, WEB_HOST_PORT or REDIS_HOST_PORT
+# when another local project already uses one (only the host side changes).
+#
 # Every variable below has a working local default. A repo-root .env (copy .env.example)
 # overrides them: compose reads it for ${VAR:-default} interpolation and, through the optional
 # `env_file`, for everything else (API keys, LLM__*, ANTHROPIC_API_KEY...). See
@@ -44,7 +47,7 @@ services:
   backend:
     <<: *backend
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -81,7 +84,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.frontend
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -100,7 +103,7 @@ services:
     # commonly scanned-and-compromised misconfigurations. A natively-run backend/worker on the
     # host still reaches it at redis://localhost:6379.
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
