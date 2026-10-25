@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
+import '@/styles/notifications.css';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -80,10 +81,10 @@ export default function NotificationBell() {
       {open && (
         <div
           role="dialog"
+          className="nb-panel"
           aria-label="Notifications"
           style={{
-            position: 'absolute', top: 42, right: 0, width: 'min(380px, calc(100vw - 24px))',
-            maxHeight: 'min(520px, calc(100vh - 90px))', display: 'flex', flexDirection: 'column',
+            display: 'flex', flexDirection: 'column',
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
             boxShadow: 'var(--shadow-pop)', overflow: 'hidden', zIndex: 40,
           }}
