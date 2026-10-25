@@ -199,6 +199,20 @@ class TestTailorForApplication:
         versions = (await db_session.execute(select(Resume).where(Resume.type == "tailored"))).scalars().all()
         assert len(versions) == 1
 
+    async def test_tailoring_works_on_a_fresh_temp_dir(self, client, db_session, tmp_path, ds_pdf, monkeypatch):
+        # Regression: the output folder (<tmp>/cvilwar-tailored) was never created. It passed on
+        # a long-lived dev box where the folder already existed and failed on every fresh /tmp
+        # — CI, and each cold Vercel instance in production.
+        fresh = tmp_path / "fresh-tmp"
+        fresh.mkdir()
+        monkeypatch.setattr(tailored_service.tempfile, "gettempdir", lambda: str(fresh))
+        await _upload(client, tmp_path, ds_pdf, "ds.pdf")
+        app = await _application(db_session, await _job(db_session, "Data Scientist", GOOD_JD, "fresh"))
+        llm = StubLLM(_plan(ds_pdf, "Designed an experimentation framework", "rollout decisions across", "rollout decisions for stakeholders across", "stakeholders"))
+        with patch.object(tailored_service, "build_llm_client_for_user", AsyncMock(return_value=llm)):
+            assert (await client.post(f"{APPS}/{app.id}/tailor", json={})).status_code == 200
+        assert (fresh / "cvilwar-tailored").is_dir()
+
     async def test_tailoring_records_a_cv_tailored_timeline_event(self, client, db_session, tmp_path, ds_pdf):
         # Regression: record_event was called without await, so the timeline entry was a
         # discarded coroutine and never persisted — the tailoring left no history.

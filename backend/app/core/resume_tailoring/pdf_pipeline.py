@@ -230,6 +230,10 @@ async def tailor_pdf(
     max_rounds: int = MAX_ROUNDS,
 ) -> PdfTailoring:
     src, out = Path(src), Path(out)
+    # The caller's output directory may not exist yet: a fresh /tmp on a new serverless
+    # instance (or CI) has no cvilwar-tailored/ folder, and the final copy into it failed with
+    # FileNotFoundError — every tailoring on a cold Vercel instance returned 422.
+    out.parent.mkdir(parents=True, exist_ok=True)
     trusted = with_declared(tuple(trusted), job_text, job_title)
     try:
         original = build_document(str(src))
