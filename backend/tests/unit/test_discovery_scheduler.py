@@ -183,7 +183,7 @@ class TestRunDiscoveryForAllUsers:
 
         seen_user_ids: list[str] = []
 
-        async def _fake_discover(db, user_id):
+        async def _fake_discover(db, user_id, deadline=None):
             seen_user_ids.append(user_id)
             return 0
 
@@ -201,7 +201,7 @@ class TestRunDiscoveryForAllUsers:
 
         seen_during_call: list[str | None] = []
 
-        async def _fake_discover(db, user_id):
+        async def _fake_discover(db, user_id, deadline=None):
             seen_during_call.append(current_user_id.get())
             return 0
 
@@ -224,7 +224,7 @@ class TestRunDiscoveryForAllUsers:
 
         seen: list[str] = []
 
-        async def _fake_discover(db, user_id):
+        async def _fake_discover(db, user_id, deadline=None):
             if user_id == u1.id:
                 raise RuntimeError("boom")
             seen.append(user_id)

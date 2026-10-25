@@ -63,6 +63,39 @@ class TestStageBudgets:
         assert out["digests_sent"] == 1
 
 
+class TestDeadlineAwareDiscovery:
+    async def test_discovery_stops_between_searches_at_the_soft_deadline(self, db_session) -> None:
+        import time
+
+        from app.models.user_settings import UserSettings
+        from app.services import discovery_scheduler as ds
+
+        settings = UserSettings(
+            user_id=TEST_USER_ID,
+            role_targets=[{"title": "PM"}, {"title": "Data Scientist"}, {"title": "ML Engineer"}],
+        )
+        searched: list[str] = []
+
+        async def fake_search(db, request, user_id):  # noqa: ANN001, ANN202
+            searched.append(request.query)
+            from app.schemas.job import JobListResponse
+
+            return JobListResponse(items=[], total=1, page=1, page_size=25, has_next=False)
+
+        with (
+            patch.object(ds, "search_jobs", new=fake_search),
+            patch.object(ds, "usable_keys", return_value=["reed"]),
+        ):
+            db_session.add(settings)
+            await db_session.commit()
+            # Deadline already passed: no search starts, and nothing raises.
+            assert await ds._discover_for_user(db_session, TEST_USER_ID, time.monotonic() - 1) == 0
+            assert searched == []
+            # No deadline: every target is searched.
+            assert await ds._discover_for_user(db_session, TEST_USER_ID, None) == 3
+        assert searched == ["PM", "Data Scientist", "ML Engineer"]
+
+
 class TestDigest:
     @pytest.fixture()
     async def seeded(self, async_engine, monkeypatch):

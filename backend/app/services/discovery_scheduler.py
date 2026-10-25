@@ -10,6 +10,7 @@ exactly as the UI does (same dedup, same zero-cost-mode guard, same platform reg
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import structlog
@@ -52,7 +53,7 @@ def _queries_for(settings: UserSettings | None) -> list[str]:
     return titles[:MAX_QUERIES_PER_USER]
 
 
-async def _discover_for_user(db: AsyncSession, user_id: str) -> int:
+async def _discover_for_user(db: AsyncSession, user_id: str, deadline: float | None = None) -> int:
     """Run one discovery cycle for one user. Returns the number of jobs the search found.
 
     Assumes ``current_user_id`` is already scoped to ``user_id`` by the caller.
@@ -78,6 +79,11 @@ async def _discover_for_user(db: AsyncSession, user_id: str) -> int:
 
     found = 0
     for query in queries:
+        # A time-boxed run (the serverless daily cron) stops between searches rather than
+        # being cancelled in the middle of one, so what it found is committed and recorded.
+        if deadline is not None and time.monotonic() > deadline:
+            logger.info("discovery.deadline_reached", user_id=user_id, query=query)
+            break
         try:
             response = await search_jobs(
                 db,
@@ -105,6 +111,7 @@ async def run_discovery_for_all_users(ctx: dict[str, Any]) -> None:
     another's tenant-scoped reads (``search_jobs``'s own-jobs dedup lookup, in particular).
     """
     redis = ctx.get("redis")
+    deadline: float | None = ctx.get("deadline")
     async with async_session_factory() as db:
         user_ids = (
             (
@@ -129,7 +136,7 @@ async def run_discovery_for_all_users(ctx: dict[str, Any]) -> None:
                     linked_entity_id=user_id,
                     redis=redis,
                 ) as run:
-                    found = await _discover_for_user(db, user_id)
+                    found = await _discover_for_user(db, user_id, deadline)
                     run.output_summary = f"{found} job(s) found"
                 total_found += found
             except Exception as exc:

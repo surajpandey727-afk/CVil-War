@@ -13,6 +13,7 @@ emailed individually — Dreamwork's "email you what went out ... as a daily sum
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,8 +27,11 @@ from app.models.user import User
 
 logger = structlog.get_logger(__name__)
 
-DISCOVERY_BUDGET_S = 75.0
-INBOX_BUDGET_S = 20.0
+#: Inside the API function's 300 s ceiling (backend/vercel.json), with headroom for the digest.
+DISCOVERY_BUDGET_S = 200.0
+INBOX_BUDGET_S = 40.0
+#: Discovery stops starting new searches this long before its hard budget.
+SOFT_STOP_MARGIN_S = 45.0
 DIGEST_WINDOW = timedelta(hours=24)
 
 
@@ -41,8 +45,11 @@ async def run_daily(*, discovery_budget: float = DISCOVERY_BUDGET_S) -> dict[str
         ("discovery", run_discovery_for_all_users, discovery_budget),
         ("inbox_sync", run_inbox_sync_for_all_users, INBOX_BUDGET_S),
     ):
+        # The soft deadline lets discovery finish its current search and stop cleanly; the
+        # hard timeout below is only a backstop.
+        ctx = {"redis": None, "deadline": time.monotonic() + max(0.0, budget - SOFT_STOP_MARGIN_S)}
         try:
-            await asyncio.wait_for(fn({"redis": None}), timeout=budget)
+            await asyncio.wait_for(fn(ctx), timeout=budget)
             out[name] = "ok"
         except TimeoutError:
             out[name] = f"stopped at {int(budget)}s budget"
