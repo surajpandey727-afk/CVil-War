@@ -19,6 +19,8 @@ interface NavItem {
 /** Day-to-day workspace. */
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'grid' },
+  { to: '/assistant', label: 'Assistant', icon: 'sparkle' },
+  { to: '/agents', label: 'AI Agents', icon: 'cpu' },
   { to: '/jobs', label: 'Jobs', icon: 'briefcase' },
   { to: '/skills', label: 'Skill Radar', icon: 'gauge' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },

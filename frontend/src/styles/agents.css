@@ -1,0 +1,54 @@
+/* AI Agents roster. Builds on assistant.css (page shell, buttons, confirm card) and keeps to
+   theme.css tokens. Status colour is the only colour that carries meaning here. */
+
+.ag-banner { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 13px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border-2); font: 500 12.5px/1.45 var(--font); color: var(--text-2); }
+.ag-banner svg { flex: 0 0 auto; color: var(--review); }
+
+.ag-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+
+.ag-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
+.ag-card[data-status="needs_attention"] { border-color: var(--review-line, var(--review)); }
+
+.ag-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ag-icon { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.ag-card-head h2 { margin: 0; flex: 1 1 auto; min-width: 0; font: 800 16px/1.2 var(--font); letter-spacing: -.02em; color: var(--text); overflow-wrap: anywhere; }
+
+.ag-status { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; font: 700 10px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); background: var(--surface-3); }
+.ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-4); }
+.ag-status[data-status="idle"] { color: var(--text); background: var(--applied-soft); }
+.ag-status[data-status="idle"] .ag-dot { background: var(--applied); }
+.ag-status[data-status="running"] { color: var(--text); background: var(--accent-soft); }
+.ag-status[data-status="running"] .ag-dot { background: var(--accent); animation: aaPulse 1.6s var(--ease-io) infinite; }
+.ag-status[data-status="needs_attention"] { color: var(--text); background: var(--review-soft); }
+.ag-status[data-status="needs_attention"] .ag-dot { background: var(--review); }
+
+.ag-desc { margin: 0; font: 500 12.5px/1.5 var(--font); color: var(--text-2); }
+.ag-state { margin: 0; font: 600 12.5px/1.45 var(--font); color: var(--text); overflow-wrap: anywhere; }
+
+.ag-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)); gap: 8px; margin: 2px 0 0; }
+.ag-count { min-width: 0; padding: 9px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.ag-count dt { font: 600 10.5px/1.25 var(--font); color: var(--text-2); overflow-wrap: anywhere; }
+.ag-count dd { margin: 4px 0 0; font: 800 18px/1 var(--font); letter-spacing: -.02em; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.ag-run { margin: 0; font: 600 11px/1.45 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
+.ag-error { margin: 0; padding: 8px 10px; border-radius: var(--r-sm); background: var(--rejected-soft); font: 500 11.5px/1.45 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.ag-notice { margin: 0; font: 600 12px/1.45 var(--font); color: var(--text-2); overflow-wrap: anywhere; }
+
+.ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
+.ag-link { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: var(--r-md); cursor: pointer; background: var(--surface-2); border: 1px solid var(--border-2); color: var(--text-2); font: 700 11.5px/1 var(--font); text-decoration: none; max-width: 100%; }
+.ag-link:hover { color: var(--text); }
+.ag-link:disabled { opacity: .55; cursor: not-allowed; }
+.ag-link-primary { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+
+@media (max-width: 1100px) {
+  .ag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .ag-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .ag-card { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ag-status[data-status="running"] .ag-dot { animation: none; }
+}
