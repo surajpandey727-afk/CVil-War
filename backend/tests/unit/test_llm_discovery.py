@@ -126,6 +126,16 @@ class TestParsing:
         assert providers == ()
 
 
+@pytest.fixture
+def gateway_configured(monkeypatch):  # type: ignore[no-untyped-def]
+    """These tests mock the gateway's HTTP replies, so they need a gateway configured. They
+    used to inherit LLM__API_BASE from a developer's local .env and failed on a clean machine."""
+    from app.config.settings import get_settings
+
+    monkeypatch.setattr(get_settings().llm, "api_base", "http://gateway.test/v1")
+
+
+@pytest.mark.usefixtures("gateway_configured")
 class TestDiscovery:
     async def test_a_reachable_gateway_reports_its_catalogue(self) -> None:
         with patch("httpx.AsyncClient", return_value=_client(_response(LIVE_SHAPE))):

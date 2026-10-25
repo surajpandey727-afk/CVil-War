@@ -15,6 +15,14 @@ import os
 # — slow, non-isolated, and (via /health's own direct use of that engine) a source of
 # asyncpg/event-loop teardown flakiness that has nothing to do with what a test is checking.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
+# Same for the LLM route: a developer's .env (an OmniRoute gateway, a gpt model) used to decide
+# whether these tests passed — CI, with no .env, failed ten of them. The suite was written
+# against an OpenAI-style default with no gateway, so pin exactly that here; tests of the
+# real (Anthropic) code defaults clear these variables themselves (test_llm_anthropic.py).
+os.environ["LLM__DEFAULT_MODEL"] = "openai/gpt-4o"
+os.environ["LLM__PREFERRED_PROVIDER"] = "openai"
+os.environ["LLM__API_BASE"] = ""
+os.environ["LLM__FALLBACK_MODELS"] = "[]"
 # Same reasoning for the live-apply flag: it is a real environment switch (drives a real
 # Playwright browser at a real employer's site), never something a dev .env value should
 # leak into automated tests. Tests that specifically exercise the real-browser path opt in

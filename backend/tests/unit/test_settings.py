@@ -54,10 +54,14 @@ class TestLLMSettings:
         settings = LLMSettings(max_tokens=0)
         assert settings.max_tokens == 1
 
-    def test_default_provider_is_openai(self) -> None:
-        """Default preferred provider should be openai."""
+    def test_default_provider_is_anthropic(self, monkeypatch) -> None:
+        """The code default is Claude via the Anthropic API (the test session pins an
+        OpenAI-style route in conftest, so clear that to see the real default)."""
+        for name in ("LLM__DEFAULT_MODEL", "LLM__PREFERRED_PROVIDER", "LLM__FALLBACK_MODELS"):
+            monkeypatch.delenv(name, raising=False)
         settings = LLMSettings()
-        assert settings.preferred_provider == "openai"
+        assert settings.preferred_provider == "anthropic"
+        assert settings.default_model == "anthropic/claude-sonnet-5-5"
 
 
 class TestBrowserSettings:

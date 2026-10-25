@@ -45,6 +45,10 @@ dependencies = [
     # Not imported directly; litellm loads it for the "portkey" success/failure callback
     # configured in core/llm/client.py::_configure_portkey.
     "portkey-ai>=1.6.0",
+    # Official Anthropic SDK — the in-app Assistant's tool-use loop (core/assistant/) calls
+    # Claude directly with AsyncAnthropic. Already resolved transitively (browser-use), pinned
+    # here because the assistant imports it itself. <1 keeps the 0.x API the loop is written to.
+    "anthropic>=0.76,<1",
 
     # Document generation
     "weasyprint>=62.0",
@@ -70,6 +74,11 @@ dependencies = [
     # en_core_web_sm model, which pip does not install — see README. Without it the ATS
     # analysers silently degrade to regex, and the PII gate fails closed by design.
     "spacy>=3.7.0",
+    # preshed 3.0.14 (a spaCy dependency) makes spacy.load("en_core_web_sm") raise
+    # "OverflowError: Python int too large to convert to C ssize_t" on Linux (verified in a
+    # clean python:3.12 container: 3.0.13 works, 3.0.14 fails). That broke the PII gate and
+    # ATS analysers in CI and in the Docker images. Lift once a fixed preshed ships.
+    "preshed<3.0.14",
     # REMOVED (verified never imported anywhere in app/ or tests/):
     #   sentence-transformers, faiss-cpu, scikit-learn, numpy, fuzzywuzzy,
     #   python-Levenshtein, python-dateutil

@@ -35,7 +35,9 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
     # via pydantic
 anthropic==0.76.0
-    # via browser-use
+    # via
+    #   cvil-war-backend (pyproject.toml)
+    #   browser-use
 antlr4-python3-runtime==4.13.2
     # via moto
 anyio==4.12.1
@@ -493,8 +495,9 @@ portkey-ai==2.3.4
     # via cvil-war-backend (pyproject.toml)
 posthog==7.7.0
     # via browser-use
-preshed==3.0.14
+preshed==3.0.13
     # via
+    #   cvil-war-backend (pyproject.toml)
     #   spacy
     #   thinc
 prometheus-client==0.26.0
