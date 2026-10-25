@@ -1,6 +1,7 @@
 /** One turn of the assistant conversation: the text, the tools it used, and any action cards. */
 import Icon from '@/components/ui/Icon';
 import ConfirmCard, { type ConfirmState } from '@/components/assistant/ConfirmCard';
+import RichText from '@/components/assistant/RichText';
 import type { PendingAction, ToolCallSummary } from '@/types/assistant';
 
 export interface PendingEntry extends PendingAction {
@@ -43,7 +44,11 @@ export default function ChatTurn({ turn, onResolve }: Props) {
           ))}
         </ul>
       )}
-      <div className="as-bubble">{turn.content}</div>
+      {turn.role === 'assistant' ? (
+        <div className="as-bubble" data-rich="true"><RichText text={turn.content} /></div>
+      ) : (
+        <div className="as-bubble">{turn.content}</div>
+      )}
       {turn.pending?.map((p) => (
         <ConfirmCard
           key={p.token}

@@ -83,3 +83,11 @@
   .as { animation: none; }
   .as-spin { animation: none; border-top-color: var(--border-3); }
 }
+
+/* Rendered assistant replies (RichText): paragraphs and lists, not pre-wrapped raw text. */
+.as-bubble[data-rich] { white-space: normal; }
+.as-para { margin: 0 0 8px; }
+.as-para:last-child, .as-list:last-child { margin-bottom: 0; }
+.as-list { margin: 0 0 8px; padding-left: 18px; }
+.as-list li { margin: 2px 0; }
+.as-code { font: 600 12px/1.4 var(--mono); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }

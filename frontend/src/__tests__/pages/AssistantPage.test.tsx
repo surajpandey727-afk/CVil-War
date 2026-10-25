@@ -49,7 +49,7 @@ describe('AssistantPage', () => {
     const input = screen.getByLabelText('Message the assistant');
     await userEvent.type(input, 'Best matches?{Enter}');
 
-    expect(await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble' })).toBeInTheDocument();
+    expect(await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble, .as-bubble *' })).toBeInTheDocument();
     const chips = screen.getByRole('list', { name: 'Tools used' });
     expect(within(chips).getByText('get_best_matches')).toBeInTheDocument();
     expect(within(chips).getByLabelText('succeeded')).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe('AssistantPage', () => {
     seedChat(REPLY);
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: 'Show my best UK matches' }));
-    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble' });
+    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble, .as-bubble *' });
     const live = document.querySelector('[aria-live="polite"]');
     expect(live).toHaveTextContent('Assistant: You have 3 strong UK matches.');
   });
@@ -115,7 +115,7 @@ describe('AssistantPage', () => {
     await userEvent.type(screen.getByLabelText('Message the assistant'), 'hello{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('ANTHROPIC_API_KEY is not configured.');
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble' });
+    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble, .as-bubble *' });
     expect(bodies).toHaveLength(2);
     expect(bodies[1]?.messages).toEqual([{ role: 'user', content: 'hello' }]);
   });
@@ -124,13 +124,13 @@ describe('AssistantPage', () => {
     const bodies = seedChat(REPLY, { ...REPLY, reply: 'Second answer.' });
     const { unmount } = renderPage();
     await userEvent.type(screen.getByLabelText('Message the assistant'), 'first{Enter}');
-    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble' });
+    await screen.findByText('You have 3 strong UK matches.', { selector: '.as-bubble, .as-bubble *' });
     unmount();
 
     renderPage();
-    expect(screen.getByText('first', { selector: '.as-bubble' })).toBeInTheDocument();
+    expect(screen.getByText('first', { selector: '.as-bubble, .as-bubble *' })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Message the assistant'), 'second{Enter}');
-    await screen.findByText('Second answer.', { selector: '.as-bubble' });
+    await screen.findByText('Second answer.', { selector: '.as-bubble, .as-bubble *' });
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
   });
