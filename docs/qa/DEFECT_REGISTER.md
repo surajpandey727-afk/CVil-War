@@ -34,3 +34,8 @@ proceed without something outside the code · **NOT RUN** not yet verified.
 | D-025 | P2 | UX | FastAPI 422 validation messages replaced by "An unexpected error occurred" | The interceptor read only a string `detail` | PASS | The message reaches the user (checker page test) |
 | D-026 | P1 | Automation | Nothing scheduled ran in production: no new-job discovery unless the owner pressed Search | No worker or cron on Vercel | PASS (code + config) · NOT RUN (first scheduled run is 07:00 UTC) | Vercel Cron `0 7 * * *` → `/internal/cron/daily` (discovery → inbox sync → digest); `CRON_SECRET` set; 6 tests |
 | D-027 | P1 | Notifications | No in-app notifications; Gmail emails only for confirmed submissions | Not built | PASS (in-app) · BLOCKED (email: the owner must connect Gmail) | Notifications table migrated in prod; bell and feed; 15 + 6 tests |
+| D-028 | P1 | Tailoring | "Tailor for this application" returned 422 on every fresh instance (CI, cold Vercel) | Output folder `<tmp>/cvilwar-tailored` never created; passed only on a dev box where it already existed | PASS | `tailor_pdf` creates it; regression test on a brand-new temp dir fails on the old code |
+| D-029 | P2 | Notifications UI | Panel ran off-screen at 320/375 px | Anchored under the bell, which is not at the right edge | PASS | Pinned to the viewport ≤640 px; measured inside at 320/375/720/1440 |
+| D-030 | P2 | Assistant UI | Replies showed raw markdown (`**Best matches**`) | Plain-text bubble | PASS | `RichText` renderer; injection test |
+| D-031 | P3 | Local stack | `docker compose up` failed when another project held port 6379 | Fixed host ports | PASS | `API_HOST_PORT`/`WEB_HOST_PORT`/`REDIS_HOST_PORT`; clean-clone stack healthy |
+

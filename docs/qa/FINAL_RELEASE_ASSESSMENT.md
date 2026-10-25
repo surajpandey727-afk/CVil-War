@@ -1,36 +1,54 @@
-# Release assessment — 2026-10-24
+# Release assessment — 2026-10-25
 
 ## Verdict
 
-**The UK-only jobs release is shippable; the full 16-phase mandate is not complete.** The
-defects reported from the /jobs screenshot are fixed and verified, and the production data
-has been migrated and backfilled. Several gates in the mandate cannot honestly be marked PASS
-yet — they are listed below with the reason, not rounded up.
+**Shippable, and shipped.** Résumé upload is fixed in production. CI is green for the first time
+(backend, frontend, Docker). The LLM runs on Claude via the Anthropic API, and the new
+features are live and smoke-tested on production: the résumé checker, notifications with a
+daily discovery run, the application pack, and the assistant with its AI Agents roster.
+
+Two things remain the owner's to do; neither is a code gap:
+1. Connect Gmail in Communications so email copies and the daily digest can go out.
+2. Decide whether this machine should make real submissions: run the DB-queue worker with
+   `BROWSER__LIVE_APPLY=true` and production's `SECRETS__APP_KEYS`.
 
 ## Release gates
 
 | Gate | Status | Evidence / reason |
 |---|---|---|
-| 100% of displayed jobs have verified UK eligibility | PASS | list query filters `uk_eligible`; 1,014 / 2,143 prod rows eligible; 1,129 hidden (1,039 non-UK, 90 quarantined); no deletions |
-| Every actionable job has a verified location and an application link | PASS | listed rows are `verified` by construction; all 2,143 rows carry an http(s) `url` |
-| Posting date shown, or "Posting date unavailable" — never fabricated | PASS | `posted_at` from source only; card/drawer state unknowns |
-| 100% critical interactions pass | FAIL (partial) | /jobs critical path PASS (UI-01…UI-14); other pages NOT RUN this pass |
-| Zero duplicate submissions | BLOCKED | no automation worker in production (D-016); vacancy-level dedup added (D-008) |
-| 100% SUBMITTED backed by evidence | BLOCKED | same |
-| Interruption recovery | BLOCKED | same |
-| Zero open P0/P1 | FAIL | D-016 (automation cannot run on Vercel) is P1 and needs a hosting decision |
-| CI green | FAIL | frontend green; backend install `resolution-too-deep` (D-013) and Docker build (D-014) pre-existing, not fixed this pass |
+| Résumé upload works in production | PASS | Smoke S4: upload → download round trip on cvil-war.vercel.app; root cause and fix in D-018 |
+| CI green (backend, frontend, docker) | PASS | GitHub Actions run 40160487508 on `71dd696`: all three jobs success |
+| `docker compose up --build` from a clean checkout | see REGRESSION_RESULTS | clean clone of `main`, no `.env` |
+| LLM is Claude, key only from `ANTHROPIC_API_KEY`, fallback kept | PASS | real calls (Sonnet 5.5, Haiku 5.5); prod `/health` reports `anthropic_key_configured: true`; fallback `anthropic/claude-haiku-5-5`; key never printed, logged or committed (secret scans 0 hits) |
+| Every LLM JSON response validated before use | PASS | `complete_json` schema validation; checker review rejects unknown sections and non-verbatim originals; assistant tool inputs validated; tests in `test_llm_anthropic.py`, `test_resume_check_core.py`, `test_assistant_loop.py` |
+| Experience policy (never invent; "add only if true") | PASS | one guard decides evidence status for rules, Claude and the application pack; 6 policy tests + API tests |
+| UK-only jobs policy intact | PASS | `core/geo` untouched; its tests pass; demand counts and best matches use UK-eligible jobs only (US posting excluded in a test) |
+| Production automation host (D-016) | PASS (mechanism) / BLOCKED (live submission, owner's decision) | DB-queue worker; prod dry run lists exactly the 2 waiting applications; `APPLY_DISPATCH=db_queue` in prod |
+| No real application submitted | PASS | none submitted; all tests mock the browser; prod probes used throwaway accounts and never approved anything |
+| Production DB changes additive, backed up, previewed, session pooler | PASS | JSON export of all 28 tables (2,470 rows) before the change; `alembic upgrade e5b2c8d41f07:head --sql` previewed (one `CREATE TABLE` + indexes); applied over :5432; row counts of existing tables unchanged |
+| Responsive 320–1920 px, no design regression | PASS | 12 existing pages × 3 widths identical to the previous release apart from the new sidebar link; new pages 0 px overflow (REGRESSION_RESULTS) |
+| Zero open P0 | PASS | D-018 fixed |
+| Zero open P1 | PASS for code; BLOCKED items need the owner (Gmail OAuth, live-submit decision) | D-012 (P2) and D-017 (P3) remain open |
 
-## Production changes made (all additive, reversible)
+## Production changes made (all additive or config)
 
-1. Alembic `a3d9c51e7b20 → e5b2c8d41f07`: ten nullable/defaulted columns + two indexes on
-   `jobs`. Downgrade drops them; raw `location` untouched.
-2. Backfill: derived location fields written for 2,143 rows; re-run reports 0 changes.
-3. JSON backup of the `jobs` table taken before either step (kept outside the repo).
+1. Supabase: private storage bucket `cvilwar-files` created in the live project.
+2. Vercel `cvil-war-api` env: `SUPABASE_URL` and `SUPABASE_SECRET_KEY` repointed to the live
+   project; `ANTHROPIC_API_KEY` added (sensitive); `LLM__DEFAULT_MODEL` set to
+   `anthropic/claude-sonnet-5-5`, `LLM__PREFERRED_PROVIDER` to `anthropic`;
+   `APPLY_DISPATCH=db_queue`; `CRON_SECRET` added (sensitive).
+3. Alembic `e5b2c8d41f07 → f7c3a9e1d2b4`: new `notifications` table only.
+4. Daily discovery ran twice to verify the cron path: 314 new jobs (304 UK-eligible) added to
+   the owner's account; 9 strong-match and 3 new-jobs notifications.
+5. Anthropic Console: API key `cvil-war-prod` in the SimplyPhi org's Default workspace (the
+   workspace the owner named), expiring 2027-10-24. **Its usage bills to SimplyPhi.**
+6. Throwaway QA accounts (`qa-*@example.com`) were created by the smoke tests and
+   soft-deleted.
 
-## Not done this pass (carried forward)
+## Not done (carried forward)
 
-Phase 4 (React Bits LatticeLoader — the requested `npx shadcn add` needs Tailwind + shadcn,
-which conflicts with the project rule "no component library; extend the hand-rolled design
-system"; needs the owner's call), Phases 5/9/11/12 beyond the jobs surface, CI repairs (D-013/D-014), batch description enrichment
-(D-012).
+- D-012 batch description enrichment; D-017 sidebar auto-expand.
+- The assistant has no persistent conversation memory. Each chat sends its history from the
+  browser session.
+- The Assistant and Résumé agents have no run log (needs an `AgentName` enum migration).
+- Phase 4 LatticeLoader decision (from the previous assessment) is still the owner's call.

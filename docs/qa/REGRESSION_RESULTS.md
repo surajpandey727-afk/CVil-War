@@ -1,26 +1,41 @@
-# Regression results — 2026-10-24
+# Regression results — 2026-10-25
+
+Statuses: PASS / FAIL / BLOCKED / NOT RUN.
+
+## Automated
 
 | Suite | Command | Result | Status |
 |---|---|---|---|
-| Backend (all) | `pytest -q` | 2,058 passed, 2 skipped, 1 xfailed, 0 failed (the 422 workplace test was added after this run and passed on its own) | PASS |
-| Backend lint | `ruff check app/` · `ruff format --check app/` | clean | PASS |
+| Backend tests (local) | `pytest -q` | 2,185 passed, 2 skipped, 1 xfailed, 0 failed | PASS |
+| Backend tests (clean Linux, as CI) | python:3.12 container, `pip install -c constraints.txt -e .[dev]`, spaCy model, Redis | 2,176 passed; the remaining 7 traced to a real tailoring bug (fixed, see D-028; its regression test fails on the old code) and to `docs/` not being copied into the container | PASS after fixes |
+| Backend lint | `ruff check app/` · `ruff format --check app/` | clean · 308 files formatted | PASS |
 | Frontend types | `tsc --noEmit` | clean | PASS |
 | Frontend lint | `eslint src --max-warnings=0` | clean | PASS |
-| Frontend tests | `vitest run` | 53 files, 449 passed, 0 failed | PASS |
+| Frontend tests | `vitest run` | 59 files, 482 passed | PASS |
 | Frontend build | `npm run build` | built (pre-existing >500 kB chunk warning) | PASS |
-| Migration on production Postgres | `alembic upgrade head` (session pooler) | `a3d9c51e7b20 → e5b2c8d41f07`, transactional | PASS |
-| Backfill idempotence | `reclassify_locations.py` twice | second run `changed: 0` | PASS |
-| Live search (local, scratch DB, 65 real sources) | UI | 23.5 s, finished, 2 non-UK rejected at ingestion | PASS |
-| Responsive sweep | 320 / 720 / 1100 / 1440 / 1920 px | 0 px horizontal overflow | PASS |
-| Backend CI job (GitHub) | `pip install -e .[dev]` | `resolution-too-deep` (pre-existing) | FAIL |
+| GitHub CI | backend · frontend · docker | run 40160487508 (`71dd696`): all three success, the first fully green run | PASS |
+| `pip install` from clean (D-013) | clean python:3.12 container | 85 s, `pip check` clean | PASS |
+| `docker compose up --build`, clean clone of `main`, no `.env` | `REDIS_HOST_PORT=6391` (6379 taken by another local project) | backend, worker, frontend, redis **healthy**; migrate exited 0; `/health` db/redis/storage ok; frontend 200; `/api` proxied (401 unauthenticated); spaCy loads in the worker | PASS |
 
-New tests added this pass: `test_uk_location_policy.py` (74), `test_posted_at_parsing.py` (15),
-ingestion policy test, 9 jobs-API tests (UK filter, quarantine, summary, workplace incl. 422,
-nationwide, response shape, duplicates ×2), dashboard UK-count test; frontend `jobPlace.test.ts`
-(10), `JobSearchPage.location.test.tsx` (6), dashboard D-015 test.
+## Production (https://cvil-war.vercel.app)
 
-Changed existing tests (deliberate contract change, not weakened): fixtures that used a bare
-`"Remote"` or blank location now use a UK location, because those rows are correctly
-quarantined under the UK-only policy; "no filter returns everything (8)" became "no filter
-returns every UK job (5) and nothing else", with a new test proving the other 3 are kept and
-reviewable via `include_quarantined=true`.
+| Check | Result | Status |
+|---|---|---|
+| Smoke S1–S10 (`scripts/smoke_prod.py`) | 10/10: health, SPA, register, upload + download, jobs, checker, Claude review (Sonnet 5.5, 14 s, 0 rejected), notifications, assistant + agents, cleanup | PASS |
+| Real Claude calls through the app client | Sonnet 5.5 1.4 s / $0.0006; Haiku 5.5 1.4 s / $0.00003; JSON validated | PASS |
+| `/health` | db true, storage supabase ok, `anthropic_key_configured: true`, default `anthropic/claude-sonnet-5-5` | PASS |
+| Daily cron (`/internal/cron/daily`) | 401 without the secret; with it: discovery done (446 found), inbox sync ok, digest 0 (Gmail not connected), 92 s | PASS |
+| Notifications produced by the real run | 304 new UK jobs; 9 strong-match + 3 new-jobs notifications for the owner | PASS |
+| Gmail email copy / digest | needs the owner to connect Gmail (OAuth consent) | BLOCKED |
+| DB-queue worker vs prod (dry run, session pooler :5432) | lists exactly the 2 waiting applications; writes nothing | PASS |
+| Live submission from the worker | owner's decision + `SECRETS__APP_KEYS`; never run in this session by policy | NOT RUN |
+| Migration `e5b2c8d41f07 → f7c3a9e1d2b4` | JSON backup (28 tables, 2,470 rows) → `--sql` preview → applied; existing row counts unchanged | PASS |
+
+## Browser (local build, scratch SQLite DB — never production)
+
+| Check | Result | Status |
+|---|---|---|
+| Existing pages unchanged | 12 pages × 375/1100/1536: layout identical to the previous release; only difference is the new sidebar link | PASS |
+| New/changed pages, 320–1920 px | Assistant, AI Agents, application page with pack open, dashboard with the bell open, Résumé checker: 0 px horizontal overflow at 320/375/720/1100/1440/1920 | PASS |
+| Notification panel at 320/375 px | was clipped off-screen (anchored to the bell); now pinned to the viewport with a 12 px gutter; verified inside at 320/375/720/1440 | PASS (fixed) |
+| Assistant with real Claude | used 3 read tools, reported honestly, declined to stage when nothing qualified; markdown now rendered (was raw `**`) | PASS (fixed) |
