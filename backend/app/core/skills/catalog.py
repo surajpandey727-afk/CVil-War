@@ -248,6 +248,8 @@ SKILLS: dict[str, Skill] = dict(
             "Experimentation / A/B",
             Category.DATA,
             "a/b testing",
+            "a/b tests",
+            "a/b test",
             "ab testing",
             "experimentation",
             "split test",

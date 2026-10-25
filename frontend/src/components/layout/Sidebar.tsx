@@ -23,6 +23,7 @@ const NAV: NavItem[] = [
   { to: '/skills', label: 'Skill Radar', icon: 'gauge' },
   { to: '/applications', label: 'Applications', icon: 'inbox' },
   { to: '/resumes', label: 'Résumés', icon: 'file' },
+  { to: '/resume-checker', label: 'Résumé checker', icon: 'check' },
   { to: '/resume-intelligence', label: 'Resume Intelligence', icon: 'wand' },
   { to: '/communications', label: 'Communications', icon: 'mail' },
   { to: '/analytics', label: 'Insights', icon: 'chart' },

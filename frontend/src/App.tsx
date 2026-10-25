@@ -11,6 +11,7 @@ import AppDetailPage from '@/pages/AppDetailPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
 import ResumesPage from '@/pages/ResumesPage';
 import ResumeIntelligencePage from '@/pages/ResumeIntelligencePage';
+import ResumeCheckerPage from '@/pages/ResumeCheckerPage';
 import RoleTargetsPage from '@/pages/RoleTargetsPage';
 import SourcesPage from '@/pages/SourcesPage';
 import AutomationPage from '@/pages/AutomationPage';
@@ -56,6 +57,7 @@ function App() {
           <Route path="/applications/:id" element={<AppDetailPage />} />
           <Route path="/resumes" element={<ResumesPage />} />
           <Route path="/resume-intelligence" element={<ResumeIntelligencePage />} />
+          <Route path="/resume-checker" element={<ResumeCheckerPage />} />
           <Route path="/communications" element={<CommunicationsPage />} />
           <Route path="/targets" element={<RoleTargetsPage />} />
           <Route path="/sources" element={<SourcesPage />} />

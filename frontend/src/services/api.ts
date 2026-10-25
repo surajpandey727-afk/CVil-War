@@ -33,6 +33,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * The human sentence in an error body. FastAPI sends a string for HTTPException but a list of
+ * `{ msg }` objects for a 422 validation error; without unpacking the list, a model-validator
+ * message such as "Give exactly one target" was replaced by the generic fallback.
+ */
+function errorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d: unknown) => (typeof d === 'object' && d !== null ? (d as { msg?: unknown }).msg : null))
+      .filter((m): m is string => typeof m === 'string' && m.trim() !== '')
+      .map((m) => m.replace(/^Value error,\s*/, ''));
+    if (msgs.length) return msgs.join(' ');
+  }
+  return 'An unexpected error occurred';
+}
+
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 
 /** Requests to these paths must never trigger a refresh-retry (they ARE the auth flow). */
@@ -97,9 +114,9 @@ api.interceptors.response.use(
       }
     }
 
-    const data = error.response.data as Record<string, unknown>;
+    const data = (error.response.data ?? {}) as Record<string, unknown>;
     const apiError: ApiError = {
-      detail: typeof data['detail'] === 'string' ? data['detail'] : 'An unexpected error occurred',
+      detail: errorDetail(data['detail']),
       status_code: status,
       trace_id: typeof data['trace_id'] === 'string' ? data['trace_id'] : undefined,
     };

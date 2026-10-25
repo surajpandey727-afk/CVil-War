@@ -33,6 +33,7 @@ export default function CommandPalette() {
     { id: 'nav-jobs', group: 'Navigate', label: 'Jobs', icon: 'briefcase', run: () => navigate('/jobs') },
     { id: 'nav-apps', group: 'Navigate', label: 'Applications', icon: 'inbox', run: () => navigate('/applications') },
     { id: 'nav-res', group: 'Navigate', label: 'Résumés', icon: 'file', run: () => navigate('/resumes') },
+    { id: 'nav-rcheck', group: 'Navigate', label: 'Résumé checker', icon: 'check', run: () => navigate('/resume-checker') },
     { id: 'nav-ins', group: 'Navigate', label: 'Insights', icon: 'chart', run: () => navigate('/analytics') },
     { id: 'nav-set', group: 'Navigate', label: 'Settings', icon: 'sliders', run: () => navigate('/settings') },
     { id: 'act-search', group: 'Actions', label: 'New job search', icon: 'search', run: () => navigate('/jobs') },
