@@ -654,6 +654,8 @@ class WorkerSettings:
     ]
     max_jobs = get_settings().browser.max_parallel
     job_timeout = 600
+    # Heartbeat for `arq --check` (the compose worker healthcheck); arq's default is an hour.
+    health_check_interval = 60
     max_tries = MAX_TRIES
     on_startup = _on_startup
     on_shutdown = _on_shutdown

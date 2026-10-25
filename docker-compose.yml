@@ -1,68 +1,79 @@
+# Local stack: API, frontend, arq worker, Redis, and a one-shot schema migration.
+#
+#   docker compose up --build -d     # from a clean checkout; no .env required
+#   docker compose ps                # backend / worker / frontend / redis report "healthy"
+#
+# Every variable below has a working local default. A repo-root .env (copy .env.example)
+# overrides them: compose reads it for ${VAR:-default} interpolation and, through the optional
+# `env_file`, for everything else (API keys, LLM__*, ANTHROPIC_API_KEY...). See
+# docs/LOCAL_SETUP.md.
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.backend
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    ENVIRONMENT: ${ENVIRONMENT:-development}
+    # Absolute path (four slashes) so every service resolves the same file in the volume.
+    DATABASE_URL: ${COMPOSE_DATABASE_URL:-sqlite+aiosqlite:////app/data/db/cvilwar.db}
+    REDIS_URL: redis://redis:6379/0
+    STORAGE__PROVIDER: ${STORAGE__PROVIDER:-local}
+    STORAGE__LOCAL_ROOT: /app/data/storage
+    # API and worker must share one encryption key, or the worker cannot read credentials the
+    # API stored. This default is a public, local-trial-only placeholder (it decodes to
+    # "local-dev-only-change-me-32-byte"); set a generated key in .env for real use.
+    SECRETS__APP_KEYS: ${SECRETS__APP_KEYS:-bG9jYWwtZGV2LW9ubHktY2hhbmdlLW1lLTMyLWJ5dGU=}
+    BROWSER__LIVE_APPLY: ${BROWSER__LIVE_APPLY:-false}
+    BROWSER__HEADLESS: "true"
+  volumes:
+    - ./data:/app/data
+  networks:
+    - cvil-war
+
 services:
-  # One-shot schema migration. The app does NOT create tables at startup — app/main.py
-  # states the schema is owned by Alembic — so without this a fresh `docker compose up`
-  # booted against an empty database, /health returned 503, and the backend healthcheck
-  # never passed. backend and worker both gate on this completing successfully.
+  # One-shot schema migration. The app does NOT create tables at startup (Alembic owns the
+  # schema), so backend and worker both gate on this completing successfully.
   migrate:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.backend
-    command: alembic upgrade head
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-    networks:
-      - cvil-war
+    <<: *backend
+    command: ["sh", "-c", "mkdir -p /app/data/db /app/data/storage && alembic upgrade head"]
     restart: "no"
 
   backend:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.backend
+    <<: *backend
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - ./data:/app/data
-      - ./templates:/app/templates
+      - "127.0.0.1:8000:8000"
     depends_on:
       redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=8).raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - cvil-war
     restart: unless-stopped
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.backend
-    command: arq app.workers.tasks.WorkerSettings
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - ./data:/app/data
-      - ./templates:/app/templates
+    <<: *backend
+    command: ["arq", "app.workers.tasks.WorkerSettings"]
     depends_on:
       redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    networks:
-      - cvil-war
+    # arq refreshes a heartbeat key in Redis every health_check_interval (60s, see
+    # WorkerSettings); `arq --check` exits non-zero once it goes stale.
+    healthcheck:
+      test: ["CMD", "arq", "--check", "app.workers.tasks.WorkerSettings"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
@@ -70,11 +81,12 @@ services:
       context: .
       dockerfile: docker/Dockerfile.frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -84,13 +96,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Bound to loopback only, not "6379:6379" — nothing outside this container needs to
-    # reach Redis directly; backend/worker talk to it over the internal `cvil-war` network
-    # by service name. An unauthenticated Redis published on a public/LAN interface is one
-    # of the most commonly scanned-and-compromised misconfigurations on the internet (used
-    # for cryptomining/ransomware via CONFIG SET). This still lets a backend/worker running
-    # natively on the host (outside Docker) reach it via redis://localhost:6379, same as
-    # before, since loopback traffic is exactly what "127.0.0.1:" publishes.
+    # Loopback only: an unauthenticated Redis on a LAN/public interface is one of the most
+    # commonly scanned-and-compromised misconfigurations. A natively-run backend/worker on the
+    # host still reaches it at redis://localhost:6379.
     ports:
       - "127.0.0.1:6379:6379"
     volumes:

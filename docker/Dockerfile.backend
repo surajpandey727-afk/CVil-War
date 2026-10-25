@@ -1,9 +1,21 @@
-FROM python:3.11-slim
+# Local-stack image for the API, the arq worker and the one-shot `migrate` service
+# (docker-compose.yml builds all three from this file).
+#
+# Python 3.12 to match CI and the Vercel runtime. Dependencies install against
+# backend/constraints.txt — the uv-compiled resolution of pyproject.toml — because pip's own
+# resolver hits `resolution-too-deep` on this graph and the build failed outright (D-013/D-014).
+FROM python:3.12-slim
 
-# WeasyPrint system dependencies. libgdk-pixbuf2.0-0 was renamed libgdk-pixbuf-2.0-0
-# upstream (confirmed live: python:3.11-slim now tracks Debian trixie, where the old name
-# has no installation candidate at all — this broke `docker build` outright, not just a
-# deprecation warning).
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PYTHONPATH=/app
+
+# WeasyPrint (PDF render) runtime libraries. libgdk-pixbuf2.0-0 was renamed
+# libgdk-pixbuf-2.0-0 upstream; the slim image tracks Debian trixie, where the old name has no
+# installation candidate.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev libcairo2 libglib2.0-0 fonts-liberation fonts-crosextra-carlito \
@@ -11,25 +23,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy application code first (needed for non-editable install)
-COPY backend/pyproject.toml backend/setup.cfg* ./
-# alembic.ini is required by the compose `migrate` service (`alembic upgrade head`). Without
-# it the image has the migration scripts under app/db/migrations but no config pointing at
-# them, so the migration fails and the stack starts against an empty database.
+# Dependencies first, in their own layer, so a code change does not reinstall the world.
+# A stub package lets `pip install .` resolve without the real source.
+COPY backend/pyproject.toml backend/constraints.txt ./
+# pip 25.0.x (the base image's) crashes evaluating the constraint file's python_full_version
+# markers when extras are requested; CI upgrades pip for the same reason.
+RUN pip install --upgrade "pip>=25.1" \
+    && mkdir app && touch app/__init__.py \
+    && pip install -c constraints.txt ".[postgres,aws]" \
+    && python -m spacy download en_core_web_sm \
+    && playwright install chromium --with-deps \
+    && chmod -R a+rx /ms-playwright \
+    && pip uninstall -y cvil-war-backend \
+    && rm -rf app build
+
+# alembic.ini is required by the compose `migrate` service (`alembic upgrade head`).
 COPY backend/alembic.ini ./
 COPY backend/app/ ./app/
+COPY backend/scripts/ ./scripts/
+# Jinja/WeasyPrint document templates resolve via a relative "templates" path from /app.
+COPY templates/ ./templates/
 
-# Install Python dependencies (non-editable)
-RUN pip install --no-cache-dir ".[dev]"
-
-# Install spaCy English model (required for ATS scoring)
-RUN python -m spacy download en_core_web_sm
-
-# Install Playwright Chromium (playwright is in deps, just install browser)
-RUN playwright install chromium --with-deps
-
-# Create data directories
-RUN mkdir -p data/db data/sessions data/vector_indices data/generated/resumes data/generated/cover_letters data/uploads
+RUN useradd -m appuser \
+    && mkdir -p data/db data/storage data/sessions data/generated data/uploads \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 
