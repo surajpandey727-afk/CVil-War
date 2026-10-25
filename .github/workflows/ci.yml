@@ -42,6 +42,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c constraints.txt -e ".[dev]"
+          # Required, and not installable through pip's resolver (see AGENTS.md): without it the
+          # ATS analysers degrade and the harness PII gate fails closed, failing those tests.
+          python -m spacy download en_core_web_sm
 
       - name: Ruff (lint)
         # app/ is the gate (see AGENTS.md); tests/ carries tolerated pre-existing nits, so
@@ -105,6 +108,11 @@ jobs:
       # path) actually build — not pushed anywhere, just confirmed to succeed, so a broken
       # Dockerfile (a missing COPY, an install step that only worked locally) fails CI
       # instead of surfacing as "docker compose up" not working for someone new.
+      # The gha cache backend needs a buildx (docker-container) builder; the default docker
+      # driver rejects cache-to: type=gha, which failed this job before it built anything.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build backend image
         uses: docker/build-push-action@v6
         with:

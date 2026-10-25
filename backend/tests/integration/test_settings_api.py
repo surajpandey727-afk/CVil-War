@@ -1,5 +1,7 @@
 """Integration tests for the Settings API routes."""
 
+import pytest
+
 from app.core.policy import RULES
 from app.models.application import Application
 from app.models.enums import ApplicationStatus
@@ -91,6 +93,17 @@ class TestUpdateSettings:
         assert response.json()["platforms_enabled"] == ["linkedin"]
 
 
+@pytest.fixture
+def gateway_configured(monkeypatch):
+    """These tests mock the gateway's HTTP replies, so they need *a* gateway configured. They
+    used to inherit LLM__API_BASE from a developer's local .env and failed on a clean machine
+    (CI) where discovery correctly reports "no gateway configured" before making any call."""
+    from app.config.settings import get_settings
+
+    monkeypatch.setattr(get_settings().llm, "api_base", "http://gateway.test/v1")
+
+
+@pytest.mark.usefixtures("gateway_configured")
 class TestListLLMProviders:
     """Tests for GET /api/v1/settings/llm-providers."""
 
@@ -494,6 +507,7 @@ class TestSponsorshipRegister:
         assert body["error"] is None
 
 
+@pytest.mark.usefixtures("gateway_configured")
 class TestAICatalogueIsDiscovered:
     """The list this replaced was five hard-coded providers with model names the configured
     gateway does not offer."""
