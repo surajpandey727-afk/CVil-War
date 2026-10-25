@@ -47,9 +47,19 @@ class LLMSettings(BaseSettings):
     # Gateways that authenticate by other means (or not at all) still expect a non-empty
     # bearer token from OpenAI clients; this is the placeholder sent when no key is set.
     api_base_key: SecretStr = SecretStr("local-gateway")
-    preferred_provider: str = "openai"
+    # Default route is the Anthropic API directly (litellm's native ``anthropic/`` adapter).
+    # The key is read ONLY from the ``ANTHROPIC_API_KEY`` environment variable — never from a
+    # settings field, a .env value echoed into logs, or the database (see core.llm.client).
+    preferred_provider: str = "anthropic"
     fallback_providers: list[str] = ["groq", "openrouter"]
-    default_model: str = "gpt-4o"
+    default_model: str = "anthropic/claude-sonnet-5-5"
+    # Cheap, short, structured calls (verdicts, extraction, tagging) — see
+    # core.llm.client.CLASSIFICATION_PURPOSES. Empty means "use default_model".
+    classify_model: str = "anthropic/claude-haiku-5-5"
+    # Explicit ordered fallback models. When non-empty this REPLACES the legacy
+    # ``fallback_providers`` synthesis, which builds ``<provider>/<model-name>`` and so turns
+    # ``anthropic/claude-sonnet-5-5`` into nonsense like ``groq/claude-sonnet-5-5``.
+    fallback_models: list[str] = ["anthropic/claude-haiku-5-5"]
     temperature: float = 0.7
     max_tokens: int = 4096
     # Résumé-tailoring planning call, tunable without a code change. The planning prompt is
@@ -196,6 +206,11 @@ class Settings(BaseSettings):
 
     # Application behavior
     apply_mode: ApplyMode = ApplyMode.REVIEW
+    # Where an apply runs when this process has no arq queue (no Redis):
+    #   "inline"   — run the pipeline inside the request (the historical behaviour);
+    #   "db_queue" — leave the row approved/queued for app.workers.db_queue, a long-running
+    #                worker on a machine with a browser (D-016; the production setting).
+    apply_dispatch: str = "inline"
     min_ats_score: float = 0.75
     environment: Environment = Environment.DEVELOPMENT
     log_level: str = "INFO"

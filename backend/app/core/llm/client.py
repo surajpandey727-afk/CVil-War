@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 
@@ -22,6 +23,24 @@ from app.observability.metrics import (
 )
 
 logger = structlog.get_logger(__name__)
+
+#: Purposes that are short, structured, low-judgement calls — routed to ``classify_model``
+#: (Claude Haiku by default) unless the caller names a model explicitly.
+CLASSIFICATION_PURPOSES = frozenset({"harness_judge", "profile_extract", "classify"})
+
+#: Claude 5.5-generation models think adaptively by default and the thinking counts against
+#: ``max_tokens``; below this floor a structured answer can be cut off mid-JSON.
+ANTHROPIC_MIN_MAX_TOKENS = 8192
+
+
+def is_anthropic_model(model: str) -> bool:
+    """True for models litellm routes to the Anthropic API (``anthropic/...`` or ``claude-...``)."""
+    return model.startswith("anthropic/") or model.startswith("claude-")
+
+
+def anthropic_key_configured() -> bool:
+    """Whether ``ANTHROPIC_API_KEY`` is present. Reports presence only — never the value."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
 
 class LLMResponse(BaseModel):
@@ -103,22 +122,37 @@ class LLMClient:
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _get_model_chain(self, model: str | None) -> list[str]:
+    def _primary_model(self, model: str | None, purpose: str) -> str:
+        """The first model to try: explicit > classification model for cheap purposes > default."""
+        if model:
+            return model
+        classify = self._llm.classify_model
+        if purpose in CLASSIFICATION_PURPOSES and isinstance(classify, str) and classify:
+            return classify
+        return self._llm.default_model
+
+    def _get_model_chain(self, model: str | None, purpose: str = "general") -> list[str]:
         """Return the ordered list of models to try (primary + fallbacks)."""
         # BYO-key: use only the user's preferred model (their key won't work cross-provider).
         if self._credentials is not None:
             return [model or self._credentials.default_model]
-        primary = model or self._llm.default_model
+        primary = self._primary_model(model, purpose)
+        explicit = [m for m in list(self._llm.fallback_models or []) if isinstance(m, str) and m]
+        if explicit:
+            return [primary, *(m for m in explicit if m != primary)]
         # Bedrock is platform-authenticated (AWS creds) — cross-provider fallbacks like
         # ``groq/anthropic.claude-...`` would be nonsense, so route Bedrock straight through.
-        if primary.startswith("bedrock/"):
+        # Same for Anthropic model ids, which no other provider serves under that name.
+        if primary.startswith("bedrock/") or is_anthropic_model(primary):
             return [primary]
         fallbacks = [
             f"{provider}/{primary.split('/')[-1]}" for provider in self._llm.fallback_providers
         ]
         return [primary, *fallbacks]
 
-    def _get_attempts(self, model: str | None) -> list[tuple[str, str | None]]:
+    def _get_attempts(
+        self, model: str | None, purpose: str = "general"
+    ) -> list[tuple[str, str | None]]:
         """Expand the model chain into ``(model, api_key)`` attempts.
 
         A model served by a pooled provider becomes one attempt per *usable* key, so a spent
@@ -128,7 +162,7 @@ class LLMClient:
         ``api_key`` is None when the key comes from litellm's global registry or the AWS
         credential chain (Bedrock).
         """
-        chain = self._get_model_chain(model)
+        chain = self._get_model_chain(model, purpose)
         attempts: list[tuple[str, str | None]] = []
         for attempt_model in chain:
             provider = attempt_model.split("/")[0] if "/" in attempt_model else "openai"
@@ -196,8 +230,8 @@ class LLMClient:
         messages = self._build_messages(prompt, system_prompt)
         temp = temperature if temperature is not None else self._llm.temperature
         tokens = max_tokens if max_tokens is not None else self._llm.max_tokens
-        model_chain = self._get_model_chain(model)
-        attempts = self._get_attempts(model)
+        model_chain = self._get_model_chain(model, purpose)
+        attempts = self._get_attempts(model, purpose)
         metadata = self._portkey_metadata()
         last_error: Exception | None = None
 
@@ -205,17 +239,32 @@ class LLMClient:
             provider = attempt_model.split("/")[0] if "/" in attempt_model else "openai"
             start = time.perf_counter()
             try:
+                anthropic = is_anthropic_model(attempt_model)
                 kwargs: dict[str, Any] = {
                     "model": attempt_model,
                     "messages": messages,
-                    "temperature": temp,
-                    "max_tokens": tokens,
+                    "max_tokens": max(tokens, ANTHROPIC_MIN_MAX_TOKENS) if anthropic else tokens,
                 }
-                if response_format is not None:
-                    kwargs["response_format"] = response_format
+                if not anthropic:
+                    # Claude 5.5 models reject a non-default temperature with a 400, and
+                    # litellm may map json_object mode onto a forced tool call, which these
+                    # models also reject. JSON is requested in the prompt and validated by
+                    # complete_with_structured_output instead.
+                    kwargs["temperature"] = temp
+                    if response_format is not None:
+                        kwargs["response_format"] = response_format
                 if metadata:
                     kwargs["metadata"] = metadata
-                if attempt_model.startswith("bedrock/"):
+                if anthropic and self._credentials is None:
+                    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+                    if not key:
+                        last_error = LLMProviderError(
+                            provider="anthropic", message="ANTHROPIC_API_KEY is not set"
+                        )
+                        logger.warning("llm_anthropic_key_missing", model=attempt_model)
+                        continue
+                    kwargs["api_key"] = key
+                elif attempt_model.startswith("bedrock/"):
                     # Bedrock authenticates via the AWS credential chain (env/~/.aws/role);
                     # only the region is passed — never an api_key.
                     kwargs["aws_region_name"] = self._llm.bedrock_region
@@ -227,7 +276,11 @@ class LLMClient:
                 # Route through an OpenAI-compatible gateway when configured. Applied after
                 # the key branches so a BYO-key user's own key still travels with the request,
                 # and skipped for Bedrock, which authenticates via the AWS credential chain.
-                if self._llm.api_base and not attempt_model.startswith("bedrock/"):
+                if (
+                    self._llm.api_base
+                    and not attempt_model.startswith("bedrock/")
+                    and not anthropic
+                ):
                     kwargs["api_base"] = self._llm.api_base
                     kwargs.setdefault(
                         "api_key",
@@ -261,6 +314,16 @@ class LLMClient:
                 )
 
                 content = response.choices[0].message.content or ""
+                finish = getattr(response.choices[0], "finish_reason", None)
+                if not content.strip() or finish in ("refusal", "content_filter"):
+                    # A refusal or an all-thinking/no-text answer is not a result; let the
+                    # next model in the chain try rather than handing back an empty string.
+                    last_error = LLMProviderError(
+                        provider=provider,
+                        message=f"empty response (finish_reason={finish})",
+                    )
+                    logger.warning("llm_empty_response", model=attempt_model, finish=finish)
+                    continue
                 logger.info(
                     "llm_completion_success",
                     model=attempt_model,
@@ -385,6 +448,28 @@ class LLMClient:
         Raises:
             LLMProviderError: If JSON parsing or validation fails.
         """
+        parsed, _ = await self.complete_json(
+            prompt,
+            output_schema,
+            system_prompt=system_prompt,
+            model=model,
+            purpose=purpose,
+            temperature=temperature,
+        )
+        return parsed
+
+    async def complete_json(
+        self,
+        prompt: str,
+        output_schema: type[BaseModel],
+        *,
+        system_prompt: str = "",
+        model: str | None = None,
+        purpose: str = "structured",
+        temperature: float | None = None,
+    ) -> tuple[BaseModel, LLMResponse]:
+        """Like :meth:`complete_with_structured_output`, also returning the raw response
+        (which model answered, tokens, cost) for callers that report provenance."""
         schema = output_schema.model_json_schema()
         augmented_system = (
             f"{system_prompt}\n\n"
@@ -404,7 +489,7 @@ class LLMClient:
 
         try:
             data = json.loads(extract_json(response.content))
-            return output_schema.model_validate(data)
+            return output_schema.model_validate(data), response
         except (json.JSONDecodeError, ValueError) as exc:
             logger.error(
                 "structured_output_parse_failed",
