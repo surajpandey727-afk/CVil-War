@@ -182,12 +182,14 @@ async def send_application_confirmation(
     return NotifyOutcome.SENT
 
 
-async def send_test_email(db: AsyncSession, user_id: str) -> NotifyOutcome:
-    """Send a one-off test message from the connected account to itself, to prove it works.
+async def send_notification_email(
+    db: AsyncSession, user_id: str, *, subject: str, body: str
+) -> NotifyOutcome:
+    """Send the operator a plain-text email from their own connected Gmail to itself.
 
-    Returns the outcome so the caller can show the operator exactly what happened. Never raises.
-    The recipient is the authenticated account's own address, so "verify in your inbox" means
-    checking the same mailbox CVil-War will send future notifications to.
+    The one send path for everything that is not the worded application confirmation above:
+    the test email, and in-app notifications that also go out by email
+    (``services.notifications``). Returns the outcome; never raises.
     """
     if not gmail_auth.is_configured():
         return NotifyOutcome.NOT_CONFIGURED
@@ -201,16 +203,7 @@ async def send_test_email(db: AsyncSession, user_id: str) -> NotifyOutcome:
     except gmail_auth.GmailNotConnectedError:
         return NotifyOutcome.NOT_CONNECTED
 
-    raw = _build_raw_message(
-        to=user.email,
-        subject="CVil-War: email notifications are working",
-        body=(
-            "This is a test from CVil-War.\n\n"
-            "Your Gmail is connected, and application-confirmation emails will arrive here when "
-            "your applications go out. You can disconnect any time under Communications.\n\n"
-            "— CVil-War"
-        ),
-    )
+    raw = _build_raw_message(to=user.email, subject=subject, body=body)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             response = await client.post(
@@ -220,10 +213,30 @@ async def send_test_email(db: AsyncSession, user_id: str) -> NotifyOutcome:
             return NotifyOutcome.INSUFFICIENT_SCOPE
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        logger.warning("gmail_send.test_failed", user_id=user_id, error=str(exc))
+        logger.warning("gmail_send.failed", user_id=user_id, error=str(exc))
         return NotifyOutcome.FAILED
-    logger.info("gmail_send.test_sent", user_id=user_id)
+    logger.info("gmail_send.notification_sent", user_id=user_id)
     return NotifyOutcome.SENT
+
+
+async def send_test_email(db: AsyncSession, user_id: str) -> NotifyOutcome:
+    """Send a one-off test message from the connected account to itself, to prove it works.
+
+    Returns the outcome so the caller can show the operator exactly what happened. Never raises.
+    The recipient is the authenticated account's own address, so "verify in your inbox" means
+    checking the same mailbox CVil-War will send future notifications to.
+    """
+    return await send_notification_email(
+        db,
+        user_id,
+        subject="CVil-War: email notifications are working",
+        body=(
+            "This is a test from CVil-War.\n\n"
+            "Your Gmail is connected, and application-confirmation emails will arrive here when "
+            "your applications go out. You can disconnect any time under Communications.\n\n"
+            "— CVil-War"
+        ),
+    )
 
 
 _TIMELINE_NOTE: dict[NotifyOutcome, str] = {

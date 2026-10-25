@@ -17,6 +17,7 @@ from app.models.harness import (
 )
 from app.models.job import Job
 from app.models.llm_usage import LLMUsage
+from app.models.notification import Notification
 from app.models.password_reset_token import PasswordResetToken
 from app.models.platform_session import PlatformSession
 from app.models.refresh_token import RefreshToken
@@ -45,6 +46,7 @@ __all__ = [
     "Job",
     "JobResumeAnalysis",
     "LLMUsage",
+    "Notification",
     "PasswordResetToken",
     "PlatformSession",
     "RefreshToken",

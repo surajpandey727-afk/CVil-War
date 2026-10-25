@@ -26,6 +26,7 @@ from app.core.job_discovery.location import location_matches
 from app.core.job_discovery.source_registry import usable_keys
 from app.core.job_discovery.sources.base import matches_query
 from app.core.sponsorship.classify import classify as classify_sponsor
+from app.models.base import generate_uuid
 from app.models.enums import JobStatus, SponsorConfidence
 from app.models.job import Job
 from app.models.resume import Resume
@@ -142,6 +143,13 @@ async def search_jobs(
     }
     seen: set[tuple[str, str]] = set()
     rejected_non_uk = 0
+    #: Ids of rows this search created (not ones it merely saw again) — what "new jobs" means.
+    #: Captured as plain strings before the commit, which expires every ORM instance.
+    new_ids: set[str] = set()
+
+    def _mark_new(job: Job) -> None:
+        job.id = job.id or generate_uuid()
+        new_ids.add(job.id)
 
     def _register(job: Job) -> None:
         """Add a new job or fold it onto an already-known one; never append a duplicate.
@@ -158,6 +166,7 @@ async def search_jobs(
         if not ident:  # no id and no url — can't key it; keep as-is (degenerate data)
             db.add(job)
             all_jobs.append(job)
+            _mark_new(job)
             return
         # Persist the derived id so distinct blank-id listings don't collide on the unique index.
         job.platform_job_id = ident
@@ -177,6 +186,7 @@ async def search_jobs(
             db.add(job)
             existing_by_key[key] = job
             all_jobs.append(job)
+            _mark_new(job)
 
     # Fetching is concurrent (bounded); registering results into `db`/`all_jobs` stays
     # strictly sequential afterward, unchanged from before. Measured real-world cause: the
@@ -313,6 +323,19 @@ async def search_jobs(
             logger.error("job_search.commit_failed", error=str(exc))
             await db.rollback()
             all_jobs = []
+
+    # Tell the user what this search found: new UK jobs, and the strongest of them. Uses the
+    # refreshed rows (committed above) and never fails the search.
+    if all_jobs and new_ids:
+        from app.services.notifications import notify_new_jobs
+
+        fresh_new = [j for j in all_jobs if j.id in new_ids]
+        try:
+            if await notify_new_jobs(db, user_id, fresh_new):
+                await db.commit()
+        except Exception as exc:
+            logger.warning("job_search.notify_failed", error=str(exc)[:200])
+            await db.rollback()
 
     # Only UK-eligible jobs are returned; quarantined ones were stored for review, not display.
     visible = [j for j in all_jobs if j.uk_eligible]

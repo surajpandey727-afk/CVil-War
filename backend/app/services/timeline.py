@@ -61,6 +61,12 @@ async def record_event(
     if recompute:
         apply_verdict(app, compute_action(app))
 
+    # Every application state change passes through here, so this is the one place the bell
+    # (and, for the kinds that warrant it, an email) hears about all of them.
+    from app.services.notifications import from_application_event
+
+    await from_application_event(db, app, event_type, summary, payload)
+
     logger.info(
         "application.event",
         application_id=app.id,

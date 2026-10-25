@@ -345,6 +345,8 @@ export const handlers = [
   }),
 
   // Analytics
+  // The header bell polls this on every page that renders the app shell.
+  http.get('/api/v1/notifications/', () => HttpResponse.json({ items: [], unread: 0 })),
   http.get('/api/v1/analytics/dashboard', () => {
     return HttpResponse.json({
       total_jobs: 150,

@@ -258,6 +258,9 @@ class Settings(BaseSettings):
     #: than a user JWT (n8n has no interactive login). Unset means the endpoints refuse
     #: everything (fail-closed), matching how METRICS_TOKEN gates /metrics.
     internal_webhook_token: SecretStr = SecretStr("")
+    # Vercel Cron's bearer secret (Vercel sends `Authorization: Bearer $CRON_SECRET` on every
+    # scheduled call). Gates GET /internal/cron/daily — see services.digest.
+    cron_secret: SecretStr = SecretStr("")
 
     # Server
     host: str = "0.0.0.0"

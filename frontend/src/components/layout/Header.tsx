@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
+import NotificationBell from '@/components/layout/NotificationBell';
 import { useUiStore } from '@/store/useUiStore';
 import { useDashboardStats } from '@/hooks/useAnalytics';
 
@@ -70,6 +71,8 @@ export default function Header() {
           <kbd style={{ font: '600 10px/16px var(--mono)', color: 'var(--text-3)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '0 5px' }}>K</kbd>
         </span>
       </button>
+
+      <NotificationBell />
 
       {stats && (
         <div

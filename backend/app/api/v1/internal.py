@@ -57,3 +57,25 @@ async def trigger_inbox_sync(
     job = await pool.enqueue_job("run_inbox_sync_for_all_users", _job_id="internal:inbox-sync:run")
     logger.info("internal.inbox_sync_triggered", job_id=job.job_id if job else None)
     return {"queued": job is not None}
+
+
+def _check_cron(authorization: str | None) -> None:
+    """Vercel Cron authenticates with CRON_SECRET; the n8n token is accepted too, so the same
+    daily run can be triggered by hand. Both compared in constant time."""
+    settings = get_settings()
+    candidates = [
+        settings.cron_secret.get_secret_value(),
+        settings.internal_webhook_token.get_secret_value(),
+    ]
+    if not any(c and hmac.compare_digest(authorization or "", f"Bearer {c}") for c in candidates):
+        raise HTTPException(status_code=401, detail="Invalid or missing cron secret")
+
+
+@router.get("/cron/daily", summary="Daily run: discovery, inbox sync, digest (Vercel Cron)")
+async def cron_daily(authorization: str | None = Header(default=None)) -> dict:
+    """Runs inline — there is no queue on the serverless deployment. Each stage has its own
+    time budget so the whole run stays inside the function's ceiling."""
+    _check_cron(authorization)
+    from app.services.digest import run_daily
+
+    return await run_daily()

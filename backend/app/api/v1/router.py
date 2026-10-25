@@ -13,6 +13,7 @@ from app.api.v1.communications import public_router as communications_public_rou
 from app.api.v1.communications import router as communications_router
 from app.api.v1.internal import router as internal_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.notifications import router as notifications_router
 from app.api.v1.platform_sessions import router as platform_sessions_router
 from app.api.v1.resume_check import router as resume_check_router
 from app.api.v1.resume_intelligence import router as resume_intelligence_router
@@ -64,6 +65,9 @@ v1_router.include_router(
 )
 v1_router.include_router(
     agent_runs_router, prefix="/agent-runs", tags=["Agent Ops"], dependencies=_auth
+)
+v1_router.include_router(
+    notifications_router, prefix="/notifications", tags=["Notifications"], dependencies=_auth
 )
 v1_router.include_router(
     communications_router, prefix="/communications", tags=["Communications"], dependencies=_auth
