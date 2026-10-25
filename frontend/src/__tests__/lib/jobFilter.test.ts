@@ -147,6 +147,23 @@ describe('sorting', () => {
   });
 });
 
+/**
+ * Fastest of several runs. A single cold run also times JIT warm-up, a GC pause or a busy
+ * shared CI runner (one CI run measured 40 ms against the 33 ms bound for exactly that
+ * reason). An accidentally quadratic rule is slow on every run, so the minimum still catches
+ * it while ignoring one-off stalls.
+ */
+function fastestOf<T>(runs: number, fn: () => T): { result: T; elapsed: number } {
+  let result = fn();
+  let elapsed = Infinity;
+  for (let i = 0; i < runs; i += 1) {
+    const started = performance.now();
+    result = fn();
+    elapsed = Math.min(elapsed, performance.now() - started);
+  }
+  return { result, elapsed };
+}
+
 describe('the filter pass stays fast enough to run on every keystroke', () => {
   // It runs inside a useMemo on the render path, so a slow pass shows up as a filter panel
   // that lags behind the control the operator is dragging. The list endpoint caps at 100
@@ -163,17 +180,20 @@ describe('the filter pass stays fast enough to run on every keystroke', () => {
       }),
     );
 
-    const started = performance.now();
-    const { jobs } = applyJobFilters(
-      corpus,
-      ctx({
-        minAtsScore: 40,
-        salaryBrackets: ['50-60', '60-75'],
-        sponsorship: ['available', 'not_specified'],
-        sort: 'salary',
-      }),
+    const {
+      result: { jobs },
+      elapsed,
+    } = fastestOf(5, () =>
+      applyJobFilters(
+        corpus,
+        ctx({
+          minAtsScore: 40,
+          salaryBrackets: ['50-60', '60-75'],
+          sponsorship: ['available', 'not_specified'],
+          sort: 'salary',
+        }),
+      ),
     );
-    const elapsed = performance.now() - started;
 
     expect(jobs.length).toBeGreaterThan(0);
     // Two frames at 60fps. Generous on purpose: this is a guard against an accidentally
@@ -192,9 +212,10 @@ describe('the filter pass stays fast enough to run on every keystroke', () => {
       job({ platform: `careers:employer${i % 200}` }),
     );
 
-    const started = performance.now();
-    const { jobs } = applyJobFilters(corpus, { ...ctx(), enabledSources, knownKeys });
-    const elapsed = performance.now() - started;
+    const {
+      result: { jobs },
+      elapsed,
+    } = fastestOf(5, () => applyJobFilters(corpus, { ...ctx(), enabledSources, knownKeys }));
 
     expect(jobs).toHaveLength(5_000);
     expect(elapsed).toBeLessThan(33);
