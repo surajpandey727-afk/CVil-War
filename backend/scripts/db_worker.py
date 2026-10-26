@@ -52,8 +52,12 @@ if "--prod" in sys.argv[1:]:
     if "PROD_DATABASE_URL" in gaps:
         print("BLOCKED: --prod needs PROD_DATABASE_URL in the environment.")
         raise SystemExit(2)
-    if gaps and "--dry-run" not in sys.argv[1:]:
-        # A dry run only reads the queue; a real run must load CVs and call the model.
+    read_only = "--dry-run" in sys.argv[1:]
+    sign_in_only = "--connect-only" in sys.argv[1:]
+    if gaps and not (read_only or sign_in_only):
+        # A dry run only reads the queue, and --connect-only only opens platform sign-in
+        # windows (it needs the database and SECRETS__APP_KEYS, never CVs or the model); a
+        # real run must load CVs and call the model.
         print(
             "BLOCKED: set "
             + ", ".join(gaps)
