@@ -76,6 +76,65 @@ async def claimable_ids(db: Any, *, user_id: str | None = None, limit: int = 20)
     return list((await db.execute(stmt)).scalars().all())
 
 
+#: An APPLYING row untouched for this long belongs to a run that died (PC asleep, worker
+#: killed). Comfortably above the browser job's own 600 s timeout.
+STALE_APPLYING_SECONDS = 45 * 60
+
+
+async def release_interrupted(db: Any, *, now: Any = None) -> list[str]:
+    """Hand interrupted runs back to the owner instead of leaving them APPLYING forever.
+
+    Not retried automatically: a run that died after clicking Submit may already have gone
+    out, and a blind retry would apply twice. The owner checks the employer's site, then
+    approves again or marks it applied.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.models.application import Application
+    from app.models.enums import ApplicationEventType, ApplicationStatus
+    from app.services.timeline import record_event
+
+    current = now or datetime.now(UTC)
+    cutoff = current - timedelta(seconds=STALE_APPLYING_SECONDS)
+    rows = (
+        (
+            await db.execute(
+                select(Application).where(Application.status == ApplicationStatus.APPLYING)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    released: list[str] = []
+    for app in rows:
+        touched = app.updated_at
+        if touched is not None and touched.tzinfo is None:
+            touched = touched.replace(tzinfo=UTC)
+        if touched is not None and touched > cutoff:
+            continue
+        note = (
+            "The last attempt was interrupted before it finished, so it may or may not have "
+            "been submitted. Check the employer's site, then approve to try again or mark it "
+            "applied."
+        )
+        app.status = ApplicationStatus.PENDING_REVIEW
+        app.notes = note
+        await record_event(
+            db,
+            app,
+            ApplicationEventType.USER_ACTION_REQUIRED,
+            "Attempt interrupted",
+            detail=note,
+            actor="system",
+        )
+        released.append(app.id)
+    if released:
+        await db.commit()
+    return released
+
+
 async def _try_lock(conn: Any, app_id: str) -> bool:
     from sqlalchemy import text
 
@@ -145,6 +204,10 @@ async def run_once(
         results.extend(await run_connects(dry_run=dry_run))
         if connect_only:
             return results
+        if not dry_run:
+            async with async_session_factory() as db:
+                for app_id in await release_interrupted(db):
+                    results.append({"id": app_id, "outcome": "interrupted_returned_to_owner"})
         async with async_session_factory() as db:
             ids = await claimable_ids(db, user_id=user_id, limit=limit)
         now = time.monotonic()
@@ -160,6 +223,15 @@ async def run_once(
                     continue
                 try:
                     await run_apply_pipeline({"job_try": 1, "redis": None}, app_id)
+                except Exception as exc:
+                    # One application's crash must not abort the pass for every other row,
+                    # nor be retried on the very next poll: it backs off like a held row.
+                    log.error(
+                        "db_queue.apply_crashed",
+                        application_id=app_id,
+                        error=type(exc).__name__,
+                        detail=str(exc)[:300],
+                    )
                 finally:
                     await _unlock(lock_conn, app_id)
             async with async_session_factory() as db:

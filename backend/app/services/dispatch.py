@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.application import Application
 from app.models.enums import ApplicationStatus, ApplyMode
 from app.observability.metrics import queue_depth
+from app.services.approval import mark_approved
 
 logger = structlog.get_logger(__name__)
 
@@ -122,6 +123,7 @@ async def bulk_approve(db: AsyncSession, pool: ArqRedis | None, application_ids:
     apps = list(result.scalars().all())
     for app in apps:
         app.status = ApplicationStatus.APPROVED
+        mark_approved(app)
     await db.commit()
     for app in apps:
         await enqueue_apply(pool, app.id)

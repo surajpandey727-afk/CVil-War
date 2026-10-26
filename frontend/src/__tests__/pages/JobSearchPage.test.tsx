@@ -219,7 +219,9 @@ describe('JobSearchPage', () => {
 
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.job_ids).toEqual(['j1', 'j2']);
-    expect(body!.apply_mode).toBe('review');
+    // No mode sent: the server applies the owner's Apply mode setting (it used to be forced
+    // to 'review', so choosing Autonomous in Settings did nothing).
+    expect(body!.apply_mode).toBeUndefined();
   });
 
   it('saves a job for later directly from the card', async () => {

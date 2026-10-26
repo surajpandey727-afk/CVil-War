@@ -148,13 +148,10 @@ Copy `.env.example` to `.env` and set at least one LLM provider key:
 DATABASE_URL=sqlite+aiosqlite:///data/db/cvilwar.db
 REDIS_URL=redis://localhost:6379/0
 
-# LLM (set at least one)
-LLM__PREFERRED_PROVIDER=openai
-LLM__DEFAULT_MODEL=gpt-4o
-LLM__OPENAI_API_KEY=
-LLM__GROQ_API_KEY=
-LLM__OPENROUTER_API_KEY=
-LLM__GEMINI_API_KEY=
+# LLM: Claude via the Anthropic API (the key is read only from this variable)
+ANTHROPIC_API_KEY=
+LLM__PREFERRED_PROVIDER=anthropic
+LLM__DEFAULT_MODEL=anthropic/claude-sonnet-5-5
 
 # Application
 APPLY_MODE=review              # autonomous | review | batch
@@ -290,9 +287,11 @@ This project touches hiring workflows, personal data, and platform automation.
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) -- system architecture and data flows
-- [docs/API.md](docs/API.md) -- API reference
-- [docs/INTEGRATION_PLAN.md](docs/INTEGRATION_PLAN.md) -- integration roadmap
-- [docs/TOOLS.md](docs/TOOLS.md) -- tooling reference
+- [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md) -- local stack, the production worker on your PC, LLM setup
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) -- deployment
+- [docs/AUTOMATION_POLICY.md](docs/AUTOMATION_POLICY.md) -- what the agent may and may not do
+- [docs/qa/](docs/qa/) -- defect register, test matrices, release assessment
+- API reference: the running API serves it at `/docs` (OpenAPI)
 
 ## Adding a New Platform
 

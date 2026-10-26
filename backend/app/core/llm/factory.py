@@ -6,6 +6,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import get_settings
 from app.core.llm.client import LLMClient, ResolvedLLMCredentials
 from app.core.secrets import CredentialStore
 from app.models.user_llm_config import UserLLMConfig
@@ -23,8 +24,11 @@ async def build_llm_client_for_user(
     config = (
         await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == user_id))
     ).scalar_one_or_none()
-    provider = config.preferred_provider if config else "openai"
-    default_model = config.default_model if config else "gpt-4o"
+    # No per-user config: the deployment's own choice (Claude in production), not a hard-coded
+    # OpenAI model this deployment may hold no key for.
+    llm_settings = get_settings().llm
+    provider = config.preferred_provider if config else llm_settings.preferred_provider
+    default_model = config.default_model if config else llm_settings.default_model
 
     store = credential_store or CredentialStore()
     api_key = await store.get_llm_key(db, user_id, provider)

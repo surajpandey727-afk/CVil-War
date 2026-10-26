@@ -49,6 +49,22 @@ export async function listApplications(
   return data;
 }
 
+/** Every application, following pages (the API caps a page at 100). Bounded so a runaway
+ *  account cannot turn one screen into an unbounded loop. */
+export async function listAllApplications(status?: string, maxPages = 50): Promise<ApplicationListResponse> {
+  const first = await listApplications(1, 100, status);
+  const items = [...first.items];
+  let page = 1;
+  let hasNext = first.has_next;
+  while (hasNext && page < maxPages) {
+    page += 1;
+    const next = await listApplications(page, 100, status);
+    items.push(...next.items);
+    hasNext = next.has_next;
+  }
+  return { ...first, items, page: 1, page_size: items.length, has_next: hasNext };
+}
+
 /** Get a single application by ID. */
 export async function getApplication(appId: string): Promise<Application> {
   const { data } = await api.get<Application>(`/applications/${appId}`);

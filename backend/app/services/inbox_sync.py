@@ -25,7 +25,7 @@ from app.db.session import async_session_factory
 from app.db.tenant import current_user_id
 from app.models.application import Application
 from app.models.communication_event import CommunicationEvent
-from app.models.enums import AgentName, ApplicationEventType
+from app.models.enums import AgentName, ApplicationEventType, ApplicationStatus
 from app.models.job import Job
 from app.models.user import User
 from app.services import gmail_auth
@@ -37,7 +37,12 @@ _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 _TIMEOUT = 20.0
 #: Bounded like every other external sync in this codebase (Tarve's page cap, Apollo's
 #: contact-per-call limit) — a personal inbox sync needs recent mail, not the full archive.
-_DEFAULT_MAX_RESULTS = 30
+#: The cron runs once a day, so this must cover a busy day's inbox: it was 30, and on a day
+#: with more mail than that the older messages were never fetched at all. Already-seen ids
+#: cost one DB lookup, not a Gmail fetch.
+_DEFAULT_MAX_RESULTS = 300
+#: Gmail's largest page.
+_PAGE_SIZE = 100
 _DEFAULT_QUERY = "newer_than:30d in:inbox -category:promotions -category:social"
 
 _EVENT_TYPE_FOR_CLASSIFICATION: dict[str, ApplicationEventType] = {
@@ -45,6 +50,32 @@ _EVENT_TYPE_FOR_CLASSIFICATION: dict[str, ApplicationEventType] = {
     "interview_invite": ApplicationEventType.EMAIL_INTERVIEW_INVITE_DETECTED,
     "reply": ApplicationEventType.EMAIL_REPLY_RECEIVED,
 }
+
+
+#: What an employer's email moves a submitted application to. Only from a state that email can
+#: follow (it was sent; an interview can still end in a rejection), never backwards, and the
+#: timeline entry recorded alongside says it came from email, so a misread is easy to undo.
+_EMAIL_TRANSITIONS: dict[str, tuple[frozenset[ApplicationStatus], ApplicationStatus]] = {
+    "interview_invite": (frozenset({ApplicationStatus.APPLIED}), ApplicationStatus.INTERVIEW),
+    "rejection": (
+        frozenset({ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEW}),
+        ApplicationStatus.REJECTED,
+    ),
+}
+
+
+def _advance_from_email(app: Application, classification: str) -> None:
+    """Move the application when the employer's email says where it stands. Detected invites
+    and rejections used to land on the timeline only, so the pipeline and the dashboard
+    never showed an interview the inbox had already found."""
+    rule = _EMAIL_TRANSITIONS.get(classification)
+    if rule is None:
+        return
+    allowed_from, target = rule
+    if app.status in allowed_from:
+        app.status = target
+        if target == ApplicationStatus.REJECTED and app.response_date is None:
+            app.response_date = datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -59,13 +90,25 @@ class InboxSyncResult:
 async def _fetch_message_ids(
     client: httpx.AsyncClient, token: str, query: str, limit: int
 ) -> list[str]:
-    response = await client.get(
-        f"{_GMAIL_API}/messages",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"q": query, "maxResults": limit},
-    )
-    response.raise_for_status()
-    return [m["id"] for m in response.json().get("messages", [])]
+    """Newest-first message ids matching ``query``, following ``nextPageToken`` up to ``limit``."""
+    ids: list[str] = []
+    page_token: str | None = None
+    while len(ids) < limit:
+        params: dict[str, object] = {"q": query, "maxResults": min(_PAGE_SIZE, limit - len(ids))}
+        if page_token:
+            params["pageToken"] = page_token
+        response = await client.get(
+            f"{_GMAIL_API}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
+        response.raise_for_status()
+        body = response.json()
+        ids.extend(m["id"] for m in body.get("messages", []))
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            break
+    return ids[:limit]
 
 
 def _header(headers: list[dict[str, str]], name: str) -> str:
@@ -201,6 +244,7 @@ async def sync_inbox(
                     actor="system",
                     occurred_at=msg["occurred_at"],
                 )
+                _advance_from_email(app, classification)
                 db.add(
                     CommunicationEvent(
                         user_id=user_id,

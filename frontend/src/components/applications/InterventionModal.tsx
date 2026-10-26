@@ -47,11 +47,17 @@ export default function InterventionModal() {
     resolve.mutate(
       { appId: iv.application_id, response },
       {
-        onSuccess: () => {
-          notify(
-            response === 'approved' ? 'Approved — submitting now' : 'Rejected — the application was not sent',
-            response === 'approved' ? 'success' : 'info',
-          );
+        onSuccess: (r) => {
+          // `resolved: false` means no running agent received it (nothing to deliver to);
+          // saying "submitting now" then was untrue.
+          if (!r.resolved) {
+            notify('No running agent received this — the attempt had already ended. Approve it again from Applications.', 'warning');
+          } else {
+            notify(
+              response === 'approved' ? 'Approved — submitting now' : 'Rejected — the application was not sent',
+              response === 'approved' ? 'success' : 'info',
+            );
+          }
           clear();
         },
         onError: () => notify('Could not deliver your response', 'error'),

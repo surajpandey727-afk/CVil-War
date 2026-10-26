@@ -34,3 +34,14 @@ class TestClassify:
 
     def test_never_raises_on_empty_text(self) -> None:
         assert classify("", "") == "reply"
+
+
+def test_common_invite_phrasings_are_invites() -> None:
+    from app.core.comms.classify import classify
+
+    assert classify("Interview invitation - Data Scientist", "") == "interview_invite"
+    assert classify("Next steps", "We'd love to invite you to an interview.") == "interview_invite"
+    # A rejection that mentions an interview is still a rejection.
+    assert classify(
+        "Update", "After your interview, unfortunately we have decided not to move forward."
+    ) == "rejection"

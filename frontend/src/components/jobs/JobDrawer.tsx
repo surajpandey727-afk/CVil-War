@@ -51,6 +51,15 @@ interface JobDrawerProps {
  * actions are deliberately distinct and labelled: the agent applies for you, or you open the
  * real external page and apply yourself.
  */
+/** Readiness action codes (backend services/readiness.py) as words and a place to fix them.
+ *  They used to be printed raw ("connect_platform"). */
+const BLOCKER_FIX: Record<string, { label: string; to?: string }> = {
+  connect_platform: { label: 'Connect it in Settings → Platforms', to: '/settings?section=platforms' },
+  attach_resume: { label: 'Upload a résumé', to: '/resumes' },
+  configure_llm: { label: 'Set up the AI model in Settings', to: '/settings' },
+  manual_only: { label: 'Apply yourself from the posting' },
+};
+
 export default function JobDrawer({
   job, resumes, onClose, onApplyWithAgent, applying, onApplyManually, onOpenJobId,
 }: JobDrawerProps) {
@@ -392,7 +401,10 @@ export default function JobDrawer({
             <PostingPanel
               job={job}
               enriching={enrich.isPending}
-              onEnrich={() => enrich.mutate({ jobId: job.id, force: Boolean(job.enriched_at) })}
+              onEnrich={() => enrich.mutate(
+                { jobId: job.id, force: Boolean(job.enriched_at) },
+                { onError: () => notify('Could not fetch the full posting — the site may be rate-limiting; try again in a minute', 'error') },
+              )}
             />
           )}
 
@@ -428,19 +440,43 @@ export default function JobDrawer({
               The agent can't apply here yet
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {readiness!.blockers.map((b) => (
-                <div key={b.code} style={{ font: '500 11px/1.4 var(--font)', color: 'var(--jc-text-3)' }}>
-                  · {b.message} — <span style={{ color: 'var(--jc-text-2)' }}>{b.action}</span>
-                </div>
-              ))}
+              {readiness!.blockers.map((b) => {
+                const fix = BLOCKER_FIX[b.action];
+                return (
+                  <div key={b.code} style={{ font: '500 11px/1.4 var(--font)', color: 'var(--jc-text-3)' }}>
+                    · {b.message}
+                    {fix && (
+                      <>
+                        {' — '}
+                        {fix.to ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(fix.to!)}
+                            style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'var(--jc-accent-2)', font: 'inherit', fontWeight: 600 }}
+                          >
+                            {fix.label}
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--jc-text-2)' }}>{fix.label}</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+              <div style={{ font: '500 11px/1.4 var(--font)', color: 'var(--jc-text-3)', marginTop: 3 }}>
+                You can still queue it: it waits in Applications until this is sorted. Or apply yourself from the posting.
+              </div>
             </div>
           </div>
         )}
         <div style={{ flex: '0 0 auto', display: 'flex', gap: 9, padding: '16px 24px', borderTop: '1px solid var(--jc-border)', flexWrap: 'wrap' }}>
           <button
             onClick={() => onApplyWithAgent(resumeId || null)}
-            disabled={applying || blocked}
-            title={blocked ? 'Resolve the blockers above first' : undefined}
+            // Not disabled by a blocker: a missing sign-in or CV is something the application
+            // can wait for, and blocking the button was a dead end with no explanation.
+            disabled={applying}
+            title={blocked ? 'Queues it; it waits in Applications until the items above are sorted' : undefined}
             className="jc-btn jc-btn-primary"
             style={{ flex: '1 1 200px', height: 44 }}
           >

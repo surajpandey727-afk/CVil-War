@@ -307,3 +307,58 @@ class TestRunInboxSyncForAllUsers:
         assert run.agent_name == AgentName.TRACKING
         assert run.status == AgentRunStatus.DONE
         assert "2 matched" in run.output_summary
+
+
+class TestEmailMovesTheApplication:
+    async def _sync_one(self, db_session, monkeypatch, snippet: str, subject: str):  # noqa: ANN202
+        db_session.add(User(id=TEST_USER_ID, email="u@x.com", hashed_password="x"))
+        await db_session.commit()
+        app = await _seed_applied(db_session, company="Monzo", platform_job_id="e1")
+        monkeypatch.setattr(
+            inbox_sync.gmail_auth, "get_valid_access_token", AsyncMock(return_value="tok"),
+        )
+        _mock_transport(monkeypatch, _gmail_handler({
+            "m9": {"sender": '"Monzo Talent" <talent@monzo.com>', "subject": subject, "snippet": snippet},
+        }))
+        await inbox_sync.sync_inbox(db_session, TEST_USER_ID)
+        await db_session.refresh(app)
+        return app
+
+    async def test_an_interview_invite_moves_it_to_interview_and_notifies(
+        self, db_session, monkeypatch
+    ) -> None:
+        from app.models.notification import Notification
+
+        app = await self._sync_one(
+            db_session, monkeypatch,
+            snippet="We'd love to invite you to an interview. Please pick a time.",
+            subject="Interview invitation - Data Scientist",
+        )
+        assert app.status == "interview"
+        notes = (await db_session.execute(select(Notification))).scalars().all()
+        assert any(n.kind == "interview" for n in notes), "an invite used to notify nothing"
+
+    async def test_a_rejection_closes_it(self, db_session, monkeypatch) -> None:
+        app = await self._sync_one(
+            db_session, monkeypatch,
+            snippet="Unfortunately, we have decided not to move forward with your application.",
+            subject="Your application",
+        )
+        assert app.status == "rejected"
+        assert app.response_date is not None
+
+
+async def test_message_ids_follow_next_page_token() -> None:
+    """A busy day's inbox is more than one page; only the first 30 used to be read."""
+    pages = {None: (["a", "b"], "p2"), "p2": (["c"], None)}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        ids, nxt = pages[request.url.params.get("pageToken")]
+        body = {"messages": [{"id": i} for i in ids]}
+        if nxt:
+            body["nextPageToken"] = nxt
+        return httpx.Response(200, json=body)
+
+    async with _RealAsyncClient(transport=httpx.MockTransport(handler)) as client:
+        got = await inbox_sync._fetch_message_ids(client, "tok", "q", 300)
+    assert got == ["a", "b", "c"]

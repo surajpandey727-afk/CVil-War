@@ -316,16 +316,22 @@ class ConnectAttempt:
         return max(0, int((self.expires_at - datetime.now(UTC)).total_seconds()))
 
 
-def _earliest_expiry(storage_state: dict[str, Any]) -> datetime | None:
+def _earliest_expiry(
+    storage_state: dict[str, Any], auth_cookies: tuple[str, ...] = ()
+) -> datetime | None:
     """When the session stops being usable, taken from the cookies themselves.
 
-    The soonest-expiring cookie decides, because the session dies with it. A guessed fixed
-    window would either promise a session that has already lapsed or keep prompting to
-    reconnect one that is still perfectly good.
+    When the platform's own sign-in cookies are known (LinkedIn's ``li_at``), they decide:
+    the soonest of *all* cookies was usually a day-long tracking cookie, which made a
+    year-long LinkedIn session read as expiring tomorrow. Otherwise the soonest-expiring
+    cookie decides. A guessed fixed window would either promise a session that has already
+    lapsed or keep prompting to reconnect one that is still perfectly good.
     """
+    cookies = storage_state.get("cookies", [])
+    named = [c for c in cookies if c.get("name") in auth_cookies] if auth_cookies else []
     stamps = [
         float(c["expires"])
-        for c in storage_state.get("cookies", [])
+        for c in (named or cookies)
         if isinstance(c.get("expires"), (int, float)) and float(c["expires"]) > 0
     ]
     if not stamps:
@@ -484,7 +490,10 @@ class ConnectManager:
                 attempt.user_id,
                 attempt.platform,
                 storage_state,
-                expires_at=_earliest_expiry(storage_state),
+                expires_at=_earliest_expiry(
+                    storage_state,
+                    (target_for(attempt.platform) or LoginTarget(login_url="")).auth_cookies,
+                ),
             )
 
         attempt.state = ConnectState.CONNECTED

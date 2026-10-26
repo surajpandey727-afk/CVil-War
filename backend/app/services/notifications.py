@@ -119,9 +119,20 @@ _EVENT_KINDS: dict[ApplicationEventType, tuple[str, str]] = {
     ApplicationEventType.ERROR: ("application_failed", "critical"),
     ApplicationEventType.INTERVIEW_SCHEDULED: ("interview", "success"),
     ApplicationEventType.ASSESSMENT_INVITED: ("interview", "success"),
+    # Detected in the inbox: the most important email there is, and it used to produce no
+    # notification at all.
+    ApplicationEventType.EMAIL_INTERVIEW_INVITE_DETECTED: ("interview", "success"),
     ApplicationEventType.EMAIL_REPLY_RECEIVED: ("recruiter_reply", "info"),
     ApplicationEventType.EMAIL_REJECTION_DETECTED: ("rejection", "info"),
 }
+
+
+def _fingerprint(summary: str, payload: dict | None) -> str:
+    """Short, stable identity for one occurrence: the message id when there is one."""
+    import hashlib
+
+    ident = (payload or {}).get("gmail_message_id") or summary or ""
+    return hashlib.sha1(str(ident).encode()).hexdigest()[:12]
 
 
 async def from_application_event(
@@ -165,7 +176,12 @@ async def from_application_event(
             link=f"/applications/{app.id}",
             entity_type="application",
             entity_id=app.id,
-            dedup_key=f"{kind}:{app.id}:{action or event_type.value}",
+            # Keyed on what happened, not just its type: a second, different reason to need the
+            # owner (a CAPTCHA after a policy question, a new failure after a re-run) used to
+            # collide with the first and never notify. The same reason repeated still dedups.
+            dedup_key=(
+                f"{kind}:{app.id}:{action or event_type.value}:{_fingerprint(summary, payload)}"
+            ),
         )
     except Exception as exc:
         logger.warning("notification_from_event_failed", error=str(exc)[:200])

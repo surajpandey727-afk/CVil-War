@@ -29,6 +29,7 @@ from app.core.job_discovery.source_registry import (
     SourceHealth,
     SourceSpec,
     health_for,
+    usable_keys,
 )
 from app.models.enums import SessionState
 from app.models.platform_session import PlatformSession
@@ -175,19 +176,27 @@ def _actions(
 
 async def list_platforms(db: AsyncSession, user_id: str) -> PlatformsResponse:
     """Every catalogued source, with this user's enablement and connection state."""
-    sessions = {
-        row.platform: row
-        for row in (
-            await db.execute(select(PlatformSession).where(PlatformSession.user_id == user_id))
-        )
+    from app.services.platform_session import expire_if_stranded
+
+    rows = (
+        (await db.execute(select(PlatformSession).where(PlatformSession.user_id == user_id)))
         .scalars()
         .all()
-    }
+    )
+    for row in rows:  # a sign-in a dead host left "in progress" is shown as what it is
+        await expire_if_stranded(db, row)
+    sessions = {row.platform: row for row in rows}
 
     settings = (
         await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     ).scalar_one_or_none()
+    # Empty means "every usable source" - the rule discovery and the Sources page already
+    # apply. Reading it as "none" here made Settings show every row as off while Sources said
+    # "65 enabled", and one click on Enable then saved a one-source list that quietly cut
+    # discovery down to that single source.
     enabled_keys = set(settings.platforms_enabled or []) if settings else set()
+    if not enabled_keys:
+        enabled_keys = set(usable_keys())
 
     statuses: list[PlatformStatus] = []
     for spec in ALL_SOURCES:

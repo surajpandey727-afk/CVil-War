@@ -776,3 +776,25 @@ class TestPlatformManagement:
 
     async def test_the_endpoint_needs_authentication(self, anon_client):
         assert (await anon_client.get(f"{API_PREFIX}/platforms")).status_code in (401, 403)
+
+
+async def test_an_empty_source_list_means_every_usable_source_is_on(client):
+    """Settings read an empty list as "none on" while Sources and discovery read it as "all";
+    one click on Enable then saved a one-source list and cut discovery to that source."""
+    from app.core.job_discovery.source_registry import usable_keys
+
+    body = (await client.get("/api/v1/settings/platforms")).json()
+    on = {p["key"] for p in body["platforms"] if p["enabled"]}
+    assert on == set(usable_keys())
+
+
+async def test_disabling_from_the_default_state_really_disables(client):
+    from app.core.job_discovery.source_registry import usable_keys
+
+    victim = sorted(usable_keys())[0]
+    resp = await client.put(
+        "/api/v1/settings/platforms/bulk", json={"keys": [victim], "enabled": False}
+    )
+    assert resp.status_code == 200, resp.text
+    saved = (await client.get("/api/v1/settings/")).json()["platforms_enabled"]
+    assert victim not in saved and len(saved) == len(usable_keys()) - 1

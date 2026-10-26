@@ -67,6 +67,10 @@ export default function DashboardPage() {
           <p style={{ margin: '7px 0 0', font: '500 13.5px/1.4 var(--font)', color: 'var(--text-3)' }}>
             Your agent applied to <span style={{ color: 'var(--applied)', fontWeight: 700 }}>{fmt(stats?.applications_applied)} {stats?.applications_applied === 1 ? 'role' : 'roles'}</span> and flagged{' '}
             <span style={{ color: 'var(--review)', fontWeight: 700 }}>{fmt(stats?.applications_pending)}</span> for review.
+            {/* Rehearsals are counted apart: they sent nothing, so they are not "applied". */}
+            {(stats?.applications_simulated ?? 0) > 0 && (
+              <> {stats?.applications_simulated} rehearsal {stats?.applications_simulated === 1 ? 'run' : 'runs'} sent nothing.</>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -208,7 +212,7 @@ export default function DashboardPage() {
  *  instead of any interviews. */
 function pipelineStatusLink(status: string): string {
   if (status === 'pending_review') return '/applications?tab=needs_action';
-  if (status === 'queued' || status === 'applying') return '/applications';
+  if (status === 'queued' || status === 'approved' || status === 'applying') return '/applications';
   return `/applications?tab=history&sub=${status}`;
 }
 
@@ -222,6 +226,7 @@ function pipelineBreakdown(stats: DashboardStats | undefined): { status: string;
   const n = (v: number | undefined) => v ?? 0;
   return [
     { status: 'queued', label: 'Queued', count: n(stats?.applications_queued), color: 'var(--text-2)' },
+    { status: 'approved', label: 'Approved', count: n(stats?.applications_approved), color: 'var(--accent)' },
     { status: 'pending_review', label: 'Needs review', count: n(stats?.applications_pending), color: 'var(--review)' },
     { status: 'applying', label: 'In flight', count: n(stats?.applications_applying), color: 'var(--accent)' },
     { status: 'applied', label: 'Applied', count: n(stats?.applications_applied), color: 'var(--applied)' },

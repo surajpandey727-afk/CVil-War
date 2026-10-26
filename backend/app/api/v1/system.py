@@ -33,6 +33,11 @@ class ServiceState(BaseModel):
     #: In-app route that lets the user fix a non-connected service, when one exists.
     action_path: str = ""
     action_label: str = ""
+    #: Informational: shown in the panel but not counted as "to connect". Server-side mail is
+    #: an environment setting the owner cannot change from the app, and alerts already reach
+    #: them in-app and through their own Gmail - counting it kept the pill from ever reading
+    #: "All connected".
+    optional: bool = False
 
 
 class SystemStatusResponse(BaseModel):
@@ -65,18 +70,18 @@ def _email_state() -> ServiceState:
             key="email",
             label="Email delivery",
             status="not_configured",
-            detail="SMTP is selected but no SMTP host is set — email cannot be delivered.",
-            action_path="/settings",
-            action_label="Configure",
+            detail="SMTP is selected but no SMTP host is set — email cannot be delivered. "
+            "Set EMAIL__SMTP_HOST on the server.",
+            optional=True,
         )
     return ServiceState(
         key="email",
         label="Email delivery",
         status="pending",
-        detail="Emails are written to the server log, not delivered. Set EMAIL__PROVIDER=smtp "
-        "with SMTP credentials to send real email (password reset, alerts).",
-        action_path="/settings",
-        action_label="Enable sending",
+        detail="Server email (password reset) is written to the server log, not delivered. "
+        "Alerts still reach you in the app and, once connected, through your Gmail. To send "
+        "server email, set EMAIL__PROVIDER=smtp with SMTP credentials on the server.",
+        optional=True,
     )
 
 
@@ -136,7 +141,7 @@ async def _platforms_state(db: AsyncSession, user_id: str) -> ServiceState:
         detail=f"{connected} connected — the agent can submit on these."
         if connected
         else "No job board connected. The agent can't submit until you sign in to one.",
-        action_path="" if connected else "/settings",
+        action_path="" if connected else "/settings?section=platforms",
         action_label="" if connected else "Connect",
     )
 
@@ -149,16 +154,18 @@ async def _agent_state(db: AsyncSession, user_id: str) -> ServiceState:
     row = (
         await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     ).scalar_one_or_none()
-    automation = (row.automation if row else {}) or {}
-    mode = str(automation.get("mode") or automation.get("apply_mode") or "review")
+    # The setting lives in UserSettings.apply_mode. This used to read an `automation.mode`
+    # key nothing ever writes, so the row stayed "pending" for good. Review mode is a valid
+    # choice, not something left to connect.
+    mode = (row.apply_mode if row else None) or "review"
     autonomous = mode == "autonomous"
     return ServiceState(
         key="ai_agent",
         label="AI apply agent",
-        status="connected" if autonomous else "pending",
+        status="connected",
         detail="Autonomous — applies on its own within your rules."
         if autonomous
-        else f"Review mode — you approve each application ({mode}).",
+        else "Review mode — you approve each application before it goes out.",
         action_path="/settings",
         action_label="Change",
     )
@@ -190,5 +197,9 @@ async def system_status(
     llm = await llm_task
     email = _email_state()
     services = [agent, llm, gmail, email, boards, database]
-    attention = sum(1 for s in services if s.status in ("pending", "unavailable", "not_configured"))
+    attention = sum(
+        1
+        for s in services
+        if not s.optional and s.status in ("pending", "unavailable", "not_configured")
+    )
     return SystemStatusResponse(services=services, all_ok=attention == 0, attention=attention)

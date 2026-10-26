@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_tenant_db
 from app.config.settings import get_settings as get_app_settings
+from app.core.job_discovery.source_registry import usable_keys
 from app.core.policy import POLICY_VERSION, RULES, TAG_TITLES, AutomationPolicy, evaluate
 from app.core.secrets import CredentialStore
 from app.models.application import Application
@@ -433,7 +434,9 @@ async def bulk_update_platforms(
     applied, and the refreshed platform list comes back so the screen needs no second call.
     """
     settings = await _get_or_create_settings(db, user.id)
-    current = set(settings.platforms_enabled or [])
+    # Empty is "every usable source" (see services.platforms.list_platforms); expand it before
+    # subtracting, or "Disable selected" on the default state removed nothing yet said it had.
+    current = set(settings.platforms_enabled or []) or set(usable_keys())
     requested = {k.strip().lower() for k in update.keys if k.strip()}
 
     settings.platforms_enabled = sorted(

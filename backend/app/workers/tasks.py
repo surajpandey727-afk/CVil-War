@@ -1,12 +1,12 @@
 """Arq worker tasks — the reachable apply pipeline (Phase 1).
 
-This is the live consumer fed by ``services.dispatch.enqueue_apply``. It supersedes the
-legacy raw-Redis ``application_worker.py`` (kept until Phase 2 absorbs its ATS-scoring
-logic). The actual browser submission (``_submit_application``) is a placeholder until
-Phase 2 wires the hardened browser-use backbone; everything around it — idempotency,
-the status lifecycle, progress events, and retry classification — is real.
+This is the consumer fed by ``services.dispatch.enqueue_apply``: the arq worker runs it with
+Redis, and ``app.workers.db_queue`` runs the same ``run_apply_pipeline`` on an always-on
+machine for the serverless production API. ``_submit_application`` drives a real browser
+when ``BROWSER__LIVE_APPLY`` is on, and otherwise records an honest SIMULATED run that sends
+nothing.
 
-Run with: ``arq app.workers.tasks.WorkerSettings``.
+Run with: ``arq app.workers.tasks.WorkerSettings`` (or ``python scripts/db_worker.py``).
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from app.models.enums import (
     AgentName,
     AgentRunStatus,
     ApplicationStatus,
+    ApplyMode,
     ConfirmationState,
     RunVerdictResult,
     SubmissionMethod,
@@ -49,6 +50,7 @@ from app.observability.metrics import (
     queue_depth,
     queue_processing_duration_seconds,
 )
+from app.services.approval import human_approved
 from app.services.discovery_scheduler import run_discovery_for_all_users
 from app.services.inbox_sync import run_inbox_sync_for_all_users
 
@@ -127,6 +129,7 @@ async def _submit_application(db: AsyncSession, app: Application, redis: Any | N
 
     from app.core.automation.runtime.apply import (
         ApplyPrerequisiteError,
+        ApprovalRequiredError,
         HumanVerificationRequiredError,
         run_apply,
     )
@@ -134,8 +137,8 @@ async def _submit_application(db: AsyncSession, app: Application, redis: Any | N
 
     try:
         result = await run_apply(db, app, redis=redis)
-    except ApplyPrerequisiteError:
-        raise  # missing session/key/resume — retrying won't help; let it be terminal
+    except (ApplyPrerequisiteError, ApprovalRequiredError):
+        raise  # setup or the owner's approval is missing — retrying won't help
     except HumanVerificationRequiredError:
         raise  # handled distinctly by _apply() — a pause, not a failure
     except SubmissionNotApprovedError:
@@ -188,6 +191,52 @@ async def _ats_score(db: AsyncSession, app: Application) -> float | None:
     return resp.overall_score
 
 
+#: HOLD rules an explicit approval also satisfies. The ATS threshold decides what may go out
+#: *without* the owner looking; once they have looked and approved, their call wins. Pacing
+#: holds (run window, daily caps, cooldowns, pause) are deliberately not here.
+_APPROVAL_WAIVES_HOLDS = frozenset({"match.min_ats_score"})
+
+
+async def _apply_owner_approval(db: AsyncSession, app: Application, decision: Any) -> Any:
+    """Drop the objections an approval answers: every ESCALATE ("a person should look") and
+    the per-application quality holds above. BLOCKs and pacing HOLDs stay. Without this the
+    worker re-asked the same question after every approval and nothing was ever submitted."""
+    from app.core.policy import Verdict
+    from app.core.policy.model import PolicyDecision, worst
+    from app.models.enums import ApplicationEventType
+    from app.services.timeline import record_event
+
+    waived = [
+        o
+        for o in decision.outcomes
+        if o.verdict is Verdict.ESCALATE
+        or (o.verdict is Verdict.HOLD and o.rule_id in _APPROVAL_WAIVES_HOLDS)
+    ]
+    if not waived:
+        return decision
+    remaining = [o for o in decision.outcomes if o not in waived]
+    detail = "You approved this despite: " + "; ".join(o.reason for o in waived if o.reason)
+    # Once per distinct set of reasons: a held row is re-checked every pass, and writing this
+    # note each time buried the timeline under identical lines.
+    if (app.resume_state or {}).get("approval_waiver") != detail:
+        app.resume_state = {**(app.resume_state or {}), "approval_waiver": detail}
+        await record_event(
+            db,
+            app,
+            ApplicationEventType.NOTE_ADDED,
+            "Approved by you - going ahead",
+            detail=detail,
+            actor="user",
+        )
+    holds = [o.retry_after for o in remaining if o.retry_after]
+    return PolicyDecision(
+        verdict=worst([o.verdict for o in remaining]),
+        outcomes=remaining,
+        retry_after=min(holds) if holds else None,
+        policy_version=decision.policy_version,
+    )
+
+
 async def _enforce_policy(
     db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, run: AgentRun
 ) -> bool:
@@ -216,6 +265,8 @@ async def _enforce_policy(
     # (see its docstring), so this assignment is never a regression, only ever a fill-in.
     app.ats_score = score
     decision = await gate(db, app, ats_score=score)
+    if decision.verdict is not Verdict.ALLOW and human_approved(app):
+        decision = await _apply_owner_approval(db, app, decision)
     if decision.verdict is Verdict.ALLOW:
         await db.commit()
         return True
@@ -333,6 +384,35 @@ async def _mark_needs_verification(
     )
 
 
+async def _mark_waiting_for_setup(
+    db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, reason: str
+) -> None:
+    """Put an approved application back to ``approved`` with what it is waiting for.
+
+    The timeline gets one entry per distinct reason, not one per worker pass, so a row that
+    waits a week for a sign-in does not bury its history under identical lines.
+    """
+    from app.models.enums import ApplicationEventType
+    from app.services.timeline import record_event
+
+    note = f"Waiting for setup: {reason}"
+    changed = app.notes != note
+    app.status = ApplicationStatus.APPROVED
+    app.notes = note
+    if changed:
+        await record_event(
+            db,
+            app,
+            ApplicationEventType.USER_ACTION_REQUIRED,
+            f"Needs setup before it can go out on {platform}",
+            detail=reason,
+            actor="system",
+        )
+    await db.commit()
+    await _publish(ctx, app.user_id, app.id, ApplicationStatus.APPROVED.value, note)
+    logger.info("apply.waiting_for_setup", application_id=app.id, reason=reason)
+
+
 async def _mark_submission_not_approved(
     db: AsyncSession, ctx: dict[str, Any], app: Application, platform: str, reason: str
 ) -> None:
@@ -368,15 +448,40 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
         # Scope subsequent queries to the row's owner.
         current_user_id.set(app.user_id)
 
-        # Idempotency: never re-submit a completed application (guards at-least-once retries).
-        if app.status == ApplicationStatus.APPLIED:
-            logger.info("apply.already_applied", application_id=application_id)
+        # Only a row that is still waiting to go out may run. The worker snapshots a batch of
+        # ids and runs them one browser session at a time, and arq re-delivers held/retried
+        # jobs later: by then the owner may have withdrawn it, applied themselves, or it may
+        # already be in flight. Re-checking here is what stops a withdrawn application being
+        # submitted anyway (and a hold silently un-withdrawing it).
+        runnable = {ApplicationStatus.QUEUED, ApplicationStatus.APPROVED}
+        if job_try > 1:
+            runnable.add(ApplicationStatus.APPLYING)  # an arq retry of this same run
+        if app.status not in runnable:
+            logger.info("apply.not_runnable", application_id=application_id, status=app.status)
+            return
+
+        # A review/batch-mode row must be approved by the owner before anything runs. Rows
+        # used to be created QUEUED and only later moved to pending_review, so a worker
+        # polling in that gap could submit an application nobody approved.
+        if (
+            app.status == ApplicationStatus.QUEUED
+            and app.apply_mode != ApplyMode.AUTONOMOUS
+            and not human_approved(app)
+        ):
+            app.status = ApplicationStatus.PENDING_REVIEW
+            app.notes = app.notes or "Waiting for your approval (review mode)."
+            await db.commit()
+            logger.info("apply.review_mode_needs_approval", application_id=application_id)
             return
 
         job = await db.get(Job, app.job_id)
         platform = job.platform if job else "unknown"
 
-        from app.core.automation.runtime.apply import HumanVerificationRequiredError
+        from app.core.automation.runtime.apply import (
+            ApplyPrerequisiteError,
+            ApprovalRequiredError,
+            HumanVerificationRequiredError,
+        )
         from app.core.automation.runtime.confirmation import SubmissionNotApprovedError
 
         async with record_agent_run(
@@ -406,6 +511,22 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
                 run.output_summary = "Blocked: human verification required"
                 await _mark_needs_verification(db, ctx, app, platform, exc)
                 return
+            except ApprovalRequiredError as exc:
+                run.status = AgentRunStatus.NEEDS_REVIEW
+                run.output_summary = str(exc)[:300]
+                app.status = ApplicationStatus.PENDING_REVIEW
+                app.notes = str(exc)
+                await db.commit()
+                await _publish(ctx, app.user_id, app.id, app.status.value, str(exc))
+                return
+            except ApplyPrerequisiteError as exc:
+                # Setup is missing (no signed-in session for this board, no résumé file).
+                # That is "waiting for you", not a failed application: it stays approved,
+                # says exactly what it needs, and goes out once that is in place.
+                run.status = AgentRunStatus.NEEDS_REVIEW
+                run.output_summary = f"Waiting: {exc}"[:300]
+                await _mark_waiting_for_setup(db, ctx, app, platform, str(exc))
+                return
             except SubmissionNotApprovedError as exc:
                 run.status = AgentRunStatus.NEEDS_REVIEW
                 run.output_summary = f"Not submitted: {exc.reason}"[:300]
@@ -427,6 +548,21 @@ async def _apply(db: AsyncSession, ctx: dict[str, Any], application_id: str) -> 
                     job_try=job_try,
                     error=str(exc),
                 )
+                if ctx.get("redis") is None:
+                    # No arq to re-deliver a Retry (the DB-queue worker, or inline): raising
+                    # it escaped the worker's pass and left the row in APPLYING, which nothing
+                    # ever claims again. Put it back where the worker looks, with the reason;
+                    # the worker's own back-off spaces out the next attempt.
+                    run.status = AgentRunStatus.ERROR
+                    run.output_summary = f"Temporary problem, will retry: {exc}"[:300]
+                    app.status = (
+                        ApplicationStatus.APPROVED
+                        if human_approved(app)
+                        else ApplicationStatus.QUEUED
+                    )
+                    app.notes = f"Temporary problem, will retry: {exc}"[:500]
+                    await db.commit()
+                    return
                 raise Retry(defer=job_try * 30) from exc
             except asyncio.CancelledError:
                 # job_timeout cancels the coroutine (CancelledError is not an Exception) —

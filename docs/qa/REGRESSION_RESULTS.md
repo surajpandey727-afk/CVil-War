@@ -39,3 +39,16 @@ Statuses: PASS / FAIL / BLOCKED / NOT RUN.
 | New/changed pages, 320–1920 px | Assistant, AI Agents, application page with pack open, dashboard with the bell open, Résumé checker: 0 px horizontal overflow at 320/375/720/1100/1440/1920 | PASS |
 | Notification panel at 320/375 px | was clipped off-screen (anchored to the bell); now pinned to the viewport with a 12 px gutter; verified inside at 320/375/720/1440 | PASS (fixed) |
 | Assistant with real Claude | used 3 read tools, reported honestly, declined to stage when nothing qualified; markdown now rendered (was raw `**`) | PASS (fixed) |
+
+## 2026-10-26 — Applications dead ends and the codebase-wide sweep (D-037 to D-063)
+
+| Suite | Result | Status |
+|---|---|---|
+| Backend `pytest -q` | 2,248 passed, 2 skipped, 1 xfailed, 0 failed | PASS |
+| Backend lint | `ruff check app/` · `ruff format --check app/` clean | PASS |
+| Frontend | `tsc` clean · `eslint --max-warnings=0` clean · `vitest` 61 files, 500 passed · build OK | PASS |
+| Old-code check | the approval-loop tests (3) and the dashboard/notification/state tests fail on the previous code | PASS |
+| Browser, scratch DB (never production) | Applications at 1440 / 375 / 320 px: each row shows its real blocker (approval, LinkedIn sign-in, automation host, run-window hold, paused at a check); 0 px overflow after fixes to the next-step buttons, the tab row and the bulk-tailor select | PASS |
+| Caught in the browser, fixed | career-page rows said "needs your Monzo sign-in": the platform list carries an unavailable "connect" action for keyless sources, and the helper ignored `available` | PASS (test added) |
+| Production deploy | not done from this machine: its Vercel CLI is signed in to another account and the deploy token is not available here | NOT RUN |
+| Live submission | never run by policy; mechanism tested with the browser mocked | NOT RUN |

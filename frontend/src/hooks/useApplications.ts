@@ -19,6 +19,15 @@ export function useApplications(page = 1, pageSize = 20, status?: string) {
   });
 }
 
+/** Every application across all pages. The Applications screen used to load one page of 100,
+ *  so past that its tabs, badges and "Approve all" silently missed rows. */
+export function useAllApplications(status?: string) {
+  return useQuery({
+    queryKey: [...APPS_KEY, 'list', 'all', status],
+    queryFn: () => appService.listAllApplications(status),
+  });
+}
+
 /** Fetch a single application by ID. */
 export function useApplication(appId: string | undefined) {
   return useQuery({

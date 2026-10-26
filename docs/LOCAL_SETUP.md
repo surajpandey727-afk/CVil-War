@@ -88,6 +88,8 @@ How it works:
 | `ENVIRONMENT` | — | Set `production` once `SECRETS__APP_KEYS` is set. `development` echoes SQL. |
 | `BROWSER__LIVE_APPLY` | — | `false` (default) **records the application as applied (simulated) without sending anything.** Only set `true` when you want real submissions; review mode still requires your approval of each one first. |
 | `ANTHROPIC_API_KEY` | AI steps | Read only from the environment. |
+| `PROD_SUPABASE_URL` | apply | Production storage URL (Supabase -> Project Settings -> API). The worker reads your CVs from here; without it `--prod` refuses to start rather than fail on every application. |
+| `PROD_SUPABASE_SECRET_KEY` | apply | Production storage secret key (same page). Applied over the local `.env`, never written to it. |
 
 ### Start / stop
 

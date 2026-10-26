@@ -96,7 +96,7 @@ export default function SystemStatus({ wsConnected }: { wsConnected: boolean }) 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ font: '700 11.5px/1.2 var(--font)', color: 'var(--text)' }}>{s.label}</span>
                   <span style={{ font: '700 9.5px/1 var(--mono)', letterSpacing: '.04em', textTransform: 'uppercase', color: DOT[s.status] ?? 'var(--text-4)' }}>
-                    {s.status.replace('_', ' ')}
+                    {s.status.replace('_', ' ')}{s.optional ? ' · optional' : ''}
                   </span>
                 </div>
                 <div style={{ font: '500 11px/1.4 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>{s.detail}</div>

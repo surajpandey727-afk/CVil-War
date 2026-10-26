@@ -187,7 +187,10 @@ def compute_action(app: Application, *, now: datetime | None = None) -> ActionVe
 
     # 3. Blocked mid-application. Recoverable, and the work already done is at risk — this is
     #    the case that used to surface as a bare "failed" with nothing the user could do.
-    if app.status == ApplicationStatus.FAILED and app.resume_state:
+    # Keyed on the step marker itself: resume_state also carries bookkeeping (approved_at,
+    # force_headed), and treating any non-empty dict as "paused mid-form" labelled every
+    # failure - including policy blocks - "Paused at 'unknown step' — resume it".
+    if app.status == ApplicationStatus.FAILED and (app.resume_state or {}).get("current"):
         return verdict(
             NextAction.RESUME_APPLICATION,
             ApplicationHealth.BLOCKED,

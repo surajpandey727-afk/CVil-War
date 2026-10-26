@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.sponsorship import register as sponsor_register
 from app.models.application import Application
-from app.models.enums import ApplicationStatus, ResumeType, SponsorConfidence
+from app.models.enums import ApplicationStatus, ConfirmationState, ResumeType, SponsorConfidence
 from app.models.job import Job
 from app.models.llm_usage import LLMUsage
 from app.models.resume import Resume
@@ -66,8 +66,20 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
             Application.status == status,
         )
 
+    # A rehearsal run (live apply off) is stored as `applied` with confirmation_state
+    # `simulated`: nothing reached the employer, so it is not an application sent. Counted
+    # separately so the dashboard never says "your agent applied to N roles" for rehearsals.
+    real = Application.confirmation_state != ConfirmationState.SIMULATED
     pending = (await db.execute(_count_status(ApplicationStatus.PENDING_REVIEW))).scalar() or 0
-    applied = (await db.execute(_count_status(ApplicationStatus.APPLIED))).scalar() or 0
+    applied = (await db.execute(_count_status(ApplicationStatus.APPLIED).where(real))).scalar() or 0
+    simulated = (
+        await db.execute(
+            _count_status(ApplicationStatus.APPLIED).where(
+                Application.confirmation_state == ConfirmationState.SIMULATED
+            )
+        )
+    ).scalar() or 0
+    approved = (await db.execute(_count_status(ApplicationStatus.APPROVED))).scalar() or 0
     interview = (await db.execute(_count_status(ApplicationStatus.INTERVIEW))).scalar() or 0
     rejected = (await db.execute(_count_status(ApplicationStatus.REJECTED))).scalar() or 0
     offer = (await db.execute(_count_status(ApplicationStatus.OFFER))).scalar() or 0
@@ -84,6 +96,7 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
             select(func.count(Application.id)).where(
                 Application.applied_at.isnot(None),
                 Application.applied_at >= now - timedelta(days=1),
+                real,
             )
         )
     ).scalar() or 0
@@ -92,6 +105,7 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
             select(func.count(Application.id)).where(
                 Application.applied_at.isnot(None),
                 Application.applied_at >= now - timedelta(days=7),
+                real,
             )
         )
     ).scalar() or 0
@@ -156,6 +170,8 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
         total_applications=total_apps,
         applications_pending=pending,
         applications_applied=applied,
+        applications_approved=approved,
+        applications_simulated=simulated,
         applications_interview=interview,
         applications_rejected=rejected,
         applications_offer=offer,
@@ -270,7 +286,9 @@ async def get_timeline(db: AsyncSession) -> list[TimelineEntry]:
         Daily timeline entries.
     """
 
-    async def _per_day(col: Any, *, only_non_null: bool = False) -> dict[str, int]:
+    async def _per_day(
+        col: Any, *, only_non_null: bool = False, where: Any = None
+    ) -> dict[str, int]:
         # Truncate to the day (YYYY-MM-DD) IN SQL so each day is one group; grouping by the
         # full timestamp would make every row its own group and the dict would overwrite
         # same-day counts. LIMIT 30 then caps days, not timestamp-rows.
@@ -278,12 +296,19 @@ async def get_timeline(db: AsyncSession) -> list[TimelineEntry]:
         query = select(day, func.count().label("cnt"))
         if only_non_null:
             query = query.where(col.isnot(None))
+        if where is not None:
+            query = query.where(where)
         query = query.group_by(day).order_by(day.desc()).limit(30)
         rows = (await db.execute(query)).all()
         return {str(r.date): r.cnt for r in rows}
 
     created_by_date = await _per_day(Application.created_at)
-    applied_by_date = await _per_day(Application.applied_at, only_non_null=True)
+    # Rehearsal runs are not applications sent (see get_dashboard_stats).
+    applied_by_date = await _per_day(
+        Application.applied_at,
+        only_non_null=True,
+        where=Application.confirmation_state != ConfirmationState.SIMULATED,
+    )
     jobs_by_date = await _per_day(Job.created_at)
 
     all_dates = sorted(

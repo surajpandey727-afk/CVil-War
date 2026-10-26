@@ -1,3 +1,4 @@
+import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 
@@ -58,6 +59,14 @@ export default function Sidebar() {
   const clear = useAuthStore((s) => s.clear);
   const [menuOpen, setMenuOpen] = useState(false);
   const expanded = !collapsed;
+  const { data: stats } = useDashboardStats();
+  const applying = stats?.applications_applying ?? 0;
+  const waiting = (stats?.applications_approved ?? 0) + (stats?.applications_queued ?? 0);
+  const agent = applying > 0
+    ? { live: true, color: 'var(--accent)', title: `Applying to ${applying} now`, sub: 'View active applications' }
+    : waiting > 0
+      ? { live: false, color: 'var(--review)', title: `${waiting} waiting to send`, sub: 'Sent by the automation host on your PC' }
+      : { live: false, color: 'var(--text-4)', title: 'Agent idle', sub: 'Nothing waiting to send' };
   const configNav = user?.is_superuser
     ? [
       ...CONFIG_NAV,
@@ -178,14 +187,18 @@ export default function Sidebar() {
             cursor: 'pointer', textAlign: 'left', marginBottom: 10, color: 'var(--text)',
           }}
         >
+          {/* Pulses only while something is actually being submitted. It used to pulse
+              "Agent active" permanently, including when no worker was running at all. */}
           <span style={{ position: 'relative', flex: '0 0 auto', width: 9, height: 9, display: 'grid', placeItems: 'center' }}>
-            <span style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: 'var(--accent)', animation: 'aaPulse 1.8s var(--ease-io) infinite' }} />
-            <span style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: 'var(--accent)', animation: 'aaRing 1.8s var(--ease-io) infinite' }} />
+            <span style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: agent.color, animation: agent.live ? 'aaPulse 1.8s var(--ease-io) infinite' : undefined }} />
+            {agent.live && (
+              <span style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: agent.color, animation: 'aaRing 1.8s var(--ease-io) infinite' }} />
+            )}
           </span>
           {expanded && (
             <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-              <span style={{ display: 'block', font: '700 11.5px/1.2 var(--font)', color: 'var(--text)' }}>Agent active</span>
-              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>View active applications</span>
+              <span style={{ display: 'block', font: '700 11.5px/1.2 var(--font)', color: 'var(--text)' }}>{agent.title}</span>
+              <span style={{ display: 'block', font: '500 10.5px/1.3 var(--font)', color: 'var(--text-3)', marginTop: 2 }}>{agent.sub}</span>
             </span>
           )}
           {expanded && <span style={{ color: 'var(--text-4)', flex: '0 0 auto' }}><Icon name="chevR" size={15} /></span>}

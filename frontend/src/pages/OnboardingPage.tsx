@@ -49,15 +49,22 @@ export default function OnboardingPage() {
     }
   };
 
+  // Leaves only once the choices are saved. It navigated away without waiting, so a failed
+  // save lost everything the person had just set up, silently.
   const finish = () => {
-    updateSettings.mutate({
-      apply_mode: applyMode,
-      platforms_enabled: [...platforms],
-      role_targets: roleTitles.map((title) => ({
-        title, active: true, fit: 1, why: 'Added during onboarding', family: 'other',
-      })),
-    });
-    navigate('/dashboard');
+    updateSettings.mutate(
+      {
+        apply_mode: applyMode,
+        platforms_enabled: [...platforms],
+        role_targets: roleTitles.map((title) => ({
+          title, active: true, fit: 1, why: 'Added during onboarding', family: 'other',
+        })),
+      },
+      {
+        onSuccess: () => navigate('/dashboard'),
+        onError: () => notify('Could not save your setup — check your connection and try again', 'error'),
+      },
+    );
   };
   const onPrimary = () => (step < STEP_COUNT - 1 ? setStep(step + 1) : finish());
   const primaryLabel = step < STEP_COUNT - 1 ? (step === 0 ? 'Get started' : 'Continue') : 'Go to dashboard';

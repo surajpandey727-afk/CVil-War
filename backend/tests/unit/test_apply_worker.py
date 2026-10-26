@@ -91,9 +91,24 @@ class TestApplyPipeline:
             new=AsyncMock(side_effect=tasks.TransientApplyError("blip")),
         ):
             with pytest.raises(Retry):
-                await tasks._apply(db_session, CTX, app.id)
+                await tasks._apply(db_session, {"job_try": 1, "redis": _fake_pool()}, app.id)
         await db_session.refresh(app)
         assert app.status == ApplicationStatus.APPLYING  # in-flight marker persisted
+
+    async def test_without_arq_a_transient_error_goes_back_to_the_queue(
+        self, db_session, sample_job_data
+    ):
+        """The DB-queue worker has no arq to re-deliver a Retry: raising it aborted the
+        worker's pass and left the row in APPLYING, which nothing ever claims again."""
+        app = await _seed_app(db_session, sample_job_data)
+        with patch.object(
+            tasks, "_submit_application",
+            new=AsyncMock(side_effect=tasks.TransientApplyError("network blip")),
+        ):
+            await tasks._apply(db_session, CTX, app.id)  # no raise
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.QUEUED
+        assert "network blip" in (app.notes or "")
 
     async def test_permanent_error_marks_failed(self, db_session, sample_job_data):
         app = await _seed_app(db_session, sample_job_data)
@@ -421,3 +436,250 @@ class TestAtsScorePersistence:
 
         await db_session.refresh(app)
         assert app.ats_score is not None
+
+
+class TestApprovalSticks:
+    """Approving an application must actually let it go out.
+
+    The defect: the worker re-ran the policy gate after approval, got the same "a human
+    should look at this" ESCALATE (first run on a portal, a match below the threshold), and
+    put the application straight back into Needs action. Approve looped forever and nothing
+    was ever submitted.
+    """
+
+    @staticmethod
+    async def _approved(db, sample_job_data, **policy):  # type: ignore[no-untyped-def]
+        from app.services.approval import mark_approved
+
+        app = await _seed_app(
+            db, sample_job_data, status=ApplicationStatus.APPROVED,
+            policy={**PERMISSIVE_POLICY, **policy},
+        )
+        mark_approved(app)
+        await db.commit()
+        return app
+
+    async def test_an_approved_application_goes_past_a_review_question(
+        self, db_session, sample_job_data
+    ):
+        app = await self._approved(db_session, sample_job_data, review_first_run_per_source=True)
+        with patch.object(tasks, "_submit_application", new=AsyncMock(return_value="ref")) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_awaited_once()
+
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.APPLIED
+        events = (
+            await db_session.execute(
+                select(ApplicationEvent).where(ApplicationEvent.application_id == app.id)
+            )
+        ).scalars().all()
+        assert any("Approved by you" in e.summary for e in events), "the waiver is recorded"
+
+    async def test_a_low_match_the_owner_approved_still_goes_out(self, db_session, sample_job_data):
+        app = await self._approved(db_session, sample_job_data, min_ats_score=0.95)
+        with patch.object(tasks, "_submit_application", new=AsyncMock(return_value="ref")):
+            await tasks._apply(db_session, CTX, app.id)
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.APPLIED
+
+    async def test_an_unapproved_application_still_escalates(self, db_session, sample_job_data):
+        app = await _seed_app(
+            db_session, sample_job_data,
+            policy={**PERMISSIVE_POLICY, "review_first_run_per_source": True},
+        )
+        with patch.object(tasks, "_submit_application", new=AsyncMock()) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_not_awaited()
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.PENDING_REVIEW
+
+    async def test_approval_does_not_override_a_block(self, db_session, sample_job_data):
+        app = await self._approved(
+            db_session, sample_job_data, blocked_companies=[sample_job_data["company"]]
+        )
+        with patch.object(tasks, "_submit_application", new=AsyncMock()) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_not_awaited()
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.FAILED
+
+    async def test_approval_does_not_override_a_hold_but_survives_it(
+        self, db_session, sample_job_data
+    ):
+        from app.services.approval import human_approved
+
+        app = await self._approved(db_session, sample_job_data, paused=True)
+        with patch.object(tasks, "_submit_application", new=AsyncMock()) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_not_awaited()
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.QUEUED
+        assert human_approved(app), "the approval is still there when the hold clears"
+
+    async def test_a_missing_sign_in_leaves_it_approved_and_waiting_not_failed(
+        self, db_session, sample_job_data
+    ):
+        from app.core.automation.runtime.apply import ApplyPrerequisiteError
+
+        app = await self._approved(db_session, sample_job_data)
+        missing = ApplyPrerequisiteError("No saved linkedin session - assisted login required")
+        with patch.object(tasks, "_submit_application", new=AsyncMock(side_effect=missing)):
+            await tasks._apply(db_session, CTX, app.id)
+            await tasks._apply(db_session, CTX, app.id)  # a second worker pass
+
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.APPROVED
+        assert "linkedin session" in (app.notes or "")
+        waits = (
+            await db_session.execute(
+                select(ApplicationEvent).where(
+                    ApplicationEvent.application_id == app.id,
+                    ApplicationEvent.event_type == ApplicationEventType.USER_ACTION_REQUIRED,
+                )
+            )
+        ).scalars().all()
+        assert len(waits) == 1, "one timeline entry per reason, not one per worker pass"
+
+
+async def test_approving_through_the_api_records_the_approval(client, db_session, sample_job_data):
+    from app.services.approval import human_approved
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.PENDING_REVIEW)
+    with patch("app.services.dispatch.enqueue_apply", new=AsyncMock()):
+        resp = await client.put(f"/api/v1/applications/{app.id}/approve")
+    assert resp.status_code == 200
+    await db_session.refresh(app)
+    assert human_approved(app)
+
+
+async def test_bulk_approve_records_the_approval(db_session, sample_job_data):
+    from app.services import dispatch
+    from app.services.approval import human_approved
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.PENDING_REVIEW)
+    with patch.object(dispatch, "enqueue_apply", new=AsyncMock()):
+        assert await dispatch.bulk_approve(db_session, None, [app.id]) == 1
+    await db_session.refresh(app)
+    assert human_approved(app)
+
+
+
+class TestOnlyRunnableRowsRun:
+    @pytest.mark.parametrize(
+        "status",
+        [ApplicationStatus.WITHDRAWN, ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEW,
+         ApplicationStatus.PENDING_REVIEW, ApplicationStatus.FAILED],
+    )
+    async def test_a_row_that_is_no_longer_waiting_is_never_submitted(
+        self, db_session, sample_job_data, status
+    ):
+        """The worker snapshots ids and runs them minutes apart; a row withdrawn meanwhile
+        used to be submitted anyway (and a hold set it back to QUEUED, un-withdrawing it)."""
+        app = await _seed_app(db_session, sample_job_data, status=status)
+        with patch.object(tasks, "_submit_application", new=AsyncMock()) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_not_awaited()
+        await db_session.refresh(app)
+        assert app.status == status
+
+    async def test_an_unapproved_review_mode_row_is_sent_for_approval_not_submitted(
+        self, db_session, sample_job_data
+    ):
+        app = await _seed_app(db_session, sample_job_data)
+        app.apply_mode = ApplyMode.REVIEW
+        await db_session.commit()
+        with patch.object(tasks, "_submit_application", new=AsyncMock()) as submit:
+            await tasks._apply(db_session, CTX, app.id)
+            submit.assert_not_awaited()
+        await db_session.refresh(app)
+        assert app.status == ApplicationStatus.PENDING_REVIEW
+
+
+async def test_resume_refuses_a_row_that_is_not_paused(client, db_session, sample_job_data):
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.APPLIED)
+    resp = await client.post(f"/api/v1/applications/{app.id}/resolve-blocker")
+    assert resp.status_code == 409
+    await db_session.refresh(app)
+    assert app.status == ApplicationStatus.APPLIED
+
+
+async def test_resume_retries_a_paused_row_in_a_visible_window(client, db_session, sample_job_data):
+    from app.services.approval import blocked_reason, human_approved
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.PENDING_REVIEW)
+    app.resume_state = {"blocked_reason": "captcha"}
+    await db_session.commit()
+    with patch("app.services.dispatch.enqueue_apply", new=AsyncMock(return_value="j")):
+        resp = await client.post(f"/api/v1/applications/{app.id}/resolve-blocker")
+    assert resp.status_code == 200
+    await db_session.refresh(app)
+    assert app.status == ApplicationStatus.QUEUED
+    assert app.resume_state.get("force_headed") is True
+    assert human_approved(app) and blocked_reason(app) is None
+
+
+async def test_approving_a_paused_row_also_retries_it_headed(db_session, sample_job_data):
+    from app.services import application as app_service
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.PENDING_REVIEW)
+    app.resume_state = {"blocked_reason": "captcha"}
+    await db_session.commit()
+    await app_service.approve_application(db_session, app.id)
+    await db_session.refresh(app)
+    assert app.resume_state.get("force_headed") is True
+    assert "blocked_reason" not in app.resume_state
+
+
+async def test_approving_a_submitted_row_is_a_conflict_not_a_500(client, db_session, sample_job_data):
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.APPLIED)
+    resp = await client.put(f"/api/v1/applications/{app.id}/approve")
+    assert resp.status_code == 409
+
+
+async def test_a_held_row_rechecked_every_pass_writes_one_timeline_entry(db_session, sample_job_data):
+    """The worker re-checks a held row every 15 minutes; each pass used to add an identical
+    'paused' entry and an 'Approved by you' note."""
+    from app.services.approval import mark_approved
+
+    app = await _seed_app(db_session, sample_job_data, policy={**PERMISSIVE_POLICY, "paused": True,
+                                                                 "review_first_run_per_source": True})
+    mark_approved(app)
+    await db_session.commit()
+    for _ in range(3):
+        app.status = ApplicationStatus.QUEUED
+        await db_session.commit()
+        with patch.object(tasks, "_submit_application", new=AsyncMock()):
+            await tasks._apply(db_session, CTX, app.id)
+    events = (
+        await db_session.execute(select(ApplicationEvent).where(ApplicationEvent.application_id == app.id))
+    ).scalars().all()
+    policy_rows = [e for e in events if e.actor == "policy"]
+    waivers = [e for e in events if e.summary.startswith("Approved by you")]
+    assert len(policy_rows) == 1
+    assert len(waivers) == 1
+
+
+async def test_a_policy_block_is_not_offered_as_resumable(db_session, sample_job_data):
+    from app.core.actions.engine import compute_action
+    from app.models.enums import NextAction
+    from app.services.approval import mark_approved
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.FAILED)
+    mark_approved(app)  # resume_state now carries bookkeeping, not a paused step
+    verdict = compute_action(app)
+    assert verdict.action != NextAction.RESUME_APPLICATION
+
+
+async def test_re_run_dispatches_and_counts_as_approval(client, db_session, sample_job_data):
+    """Re-run used to change the status and nothing else, so outside the DB-queue worker it
+    never ran; and the worker would now send an unapproved review row back for approval."""
+    from app.services.approval import human_approved
+
+    app = await _seed_app(db_session, sample_job_data, status=ApplicationStatus.FAILED)
+    with patch("app.services.dispatch.enqueue_apply", new=AsyncMock(return_value="j")) as enq:
+        resp = await client.put(f"/api/v1/applications/{app.id}/status", json={"status": "queued"})
+    assert resp.status_code == 200
+    enq.assert_awaited_once()
+    await db_session.refresh(app)
+    assert human_approved(app)

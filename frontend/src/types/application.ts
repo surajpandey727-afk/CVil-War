@@ -35,6 +35,14 @@ export interface Application {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /** The board it goes through (the job's platform key, e.g. `linkedin`). */
+  portal?: string | null;
+  /** Where a person opens the posting to apply. */
+  application_url?: string | null;
+  /** True once the owner approved it. Review questions are not asked again after that. */
+  approved?: boolean;
+  /** Set when a run stopped at a CAPTCHA/identity check (`captcha`). */
+  blocked_reason?: string | null;
 }
 
 /** Alias matching the backend schema name `ApplicationResponse`. */

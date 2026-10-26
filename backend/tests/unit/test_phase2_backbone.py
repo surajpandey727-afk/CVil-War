@@ -93,6 +93,11 @@ class TestRunApplyPrerequisites:
             user_id=TEST_USER_ID, job_id=job.id, resume_id=resume_id,
             status="queued", apply_mode="autonomous",
         )
+        # Approved: these tests check the setup prerequisites; an unapproved run with no
+        # live channel stops earlier, for approval (test_run_apply_harness covers that).
+        from app.services.approval import mark_approved
+        
+        mark_approved(app)
         db.add(app)
         await db.commit()
         await db.refresh(app)

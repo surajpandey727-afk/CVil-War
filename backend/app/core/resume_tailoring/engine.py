@@ -70,10 +70,12 @@ def _plan_timeout() -> int:
 
 
 def _plan_model() -> str:
-    """Planning model, from settings (``LLM__PLAN_MODEL``), falling back to the module default."""
+    """Planning model: ``LLM__PLAN_MODEL`` if set, else the deployment's default model (so it
+    always uses a model this deployment can actually reach), else the module default."""
     from app.config.settings import get_settings
 
-    return get_settings().llm.plan_model or PLAN_MODEL
+    llm = get_settings().llm
+    return llm.plan_model or llm.default_model or PLAN_MODEL
 
 
 #: Default planning-call timeout. 0 means "use the settings value"; a non-zero value here (set
@@ -98,7 +100,7 @@ PLAN_TEMPERATURE = 0.1
 #: Rejections a second attempt cannot repair: the edit was a repeat, or targeted nothing.
 _NOT_WORTH_RETRY = frozenset({"no_op", "duplicate", "unknown_line", "empty"})
 
-PLAN_MODEL = "openai/auto/claude-sonnet"
+PLAN_MODEL = "anthropic/claude-sonnet-5-5"
 
 
 def recovered_facts(

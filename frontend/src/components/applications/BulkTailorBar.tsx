@@ -60,14 +60,14 @@ export default function BulkTailorBar(p: Props) {
         </button>
         <span style={{ font: '700 12.5px/1 var(--font)', color: 'var(--text)' }}>{p.selectedCount} selected</span>
         <div style={{ flex: '1 1 auto' }} />
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: '600 11.5px/1 var(--font)', color: 'var(--text-3)' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: '600 11.5px/1 var(--font)', color: 'var(--text-3)', minWidth: 0, maxWidth: '100%', flexWrap: 'wrap' }}>
           Start from
           <select
             aria-label="Résumé to tailor from"
             value={p.baseResumeId}
             onChange={(e) => p.onBaseResumeChange(e.target.value)}
             disabled={p.running}
-            style={{ height: 34, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', minWidth: 190 }}
+            style={{ height: 34, padding: '0 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', font: '600 12px/1 var(--font)', minWidth: 0, width: 'min(260px, 100%)' }}
           >
             <option value="">Best match for each role</option>
             {bases.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}

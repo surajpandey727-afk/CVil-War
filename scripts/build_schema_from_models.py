@@ -17,9 +17,28 @@ from __future__ import annotations
 import asyncio
 import os
 
-#: The current head revision — what the schema produced here corresponds to. Kept in sync with
-#: `alembic heads`; asserted against it at run time so this can't silently drift.
-HEAD_REVISION = "e5b2c8d41f07"
+def _alembic_head() -> str:
+    """The single head of the migration chain, read from the migrations themselves.
+
+    This used to be a hard-coded string that had already drifted one revision behind (it
+    missed the notifications table), so a database built here and then upgraded tried to
+    create that table twice and failed.
+    """
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    backend = Path(__file__).resolve().parents[1] / "backend"
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "app" / "db" / "migrations"))
+    heads = ScriptDirectory.from_config(config).get_heads()
+    if len(heads) != 1:
+        raise SystemExit(f"Expected one Alembic head, found {heads}")
+    return heads[0]
+
+
+HEAD_REVISION = _alembic_head()
 
 
 async def main() -> None:

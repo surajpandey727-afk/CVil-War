@@ -9,7 +9,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # Dev mode wi
 ```
 
 ## Architecture
-- Backend: FastAPI (Python 3.11) at `backend/app/`
+- Backend: FastAPI (Python 3.12, as CI and Vercel run it) at `backend/app/`
 - Frontend: React + TypeScript at `frontend/src/` — **no MUI**; the UI is a hand-rolled
   design system (`src/styles/theme.css`, `src/components/ui/`). Do not introduce a component
   library; extend the existing one.
@@ -26,9 +26,10 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # Dev mode wi
   there; tests that touch it skip explicitly.
 - **`litellm` must stay pinned `>=1.96,<2`.** An open lower-bound range makes pip backtrack to a
   Rust-requiring sdist and the whole install fails on a clean machine.
-- **Job discovery is currently broken** — the LinkedIn/Indeed/Glassdoor plugins go through
-  `core/automation/agent.py`, which targets the pre-0.2 browser-use API. The maintained browser
-  code is `core/automation/runtime/` (apply only).
+- **Discovery runs through `core/job_discovery/sources/`** (API and ATS adapters). The old
+  browser-scraping plugins (`core/automation/agent.py`, used by the `indeed`/`glassdoor`
+  platforms) target the pre-0.2 browser-use API and do not work; don't build on them. The
+  maintained browser code is `core/automation/runtime/` (apply and sign-in).
 
 ## Scores are 0–1 in the API
 All ATS/match scores are stored and returned on a **0–1 scale**. Multiply by 100 to display
@@ -36,7 +37,7 @@ All ATS/match scores are stored and returned on a **0–1 scale**. Multiply by 1
 
 ## Directory Layout
 - `backend/app/config/` — Settings and constants
-- `backend/app/core/` — Domain modules (ats/, automation/, documents/, llm/, matching/)
+- `backend/app/core/` — Domain modules (ats/, ats_engine/, automation/, documents/, geo/, llm/, policy/, skills/, ...)
 - `backend/app/api/v1/` — FastAPI routes
 - `backend/app/services/` — Business logic layer
 - `backend/app/models/` — SQLAlchemy models
@@ -63,7 +64,7 @@ All ATS/match scores are stored and returned on a **0–1 scale**. Multiply by 1
 ```bash
 # Backend (first run)
 cd backend
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"   # constraints avoid pip's resolution-too-deep
 python -m spacy download en_core_web_sm   # required; pip does not fetch it
 alembic upgrade head                      # required; app does not create tables
 uvicorn app.main:app --reload

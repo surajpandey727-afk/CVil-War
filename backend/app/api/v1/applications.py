@@ -38,6 +38,7 @@ from app.services import apollo as apollo_service
 from app.services import application as app_service
 from app.services import application_tailoring, ats_evaluation, dispatch
 from app.services import cover_letter as cover_letter_service
+from app.services.approval import blocked_reason, mark_approved
 from app.services.evidence import build_evidence
 from app.services.readiness import apply_readiness
 from app.services.timeline import record_event
@@ -200,7 +201,10 @@ async def approve_application(
     pool: ArqRedis | None = Depends(get_arq_pool),
 ) -> ApplicationResponse:
     """Approve a pending application and enqueue it for automated submission."""
-    app = await app_service.approve_application(db, app_id)
+    try:
+        app = await app_service.approve_application(db, app_id)
+    except ValueError as exc:  # approving a submitted/withdrawn/failed row: a conflict, not a 500
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await dispatch.enqueue_apply(pool, app.id)
     # When no queue is configured, enqueue_apply just ran the whole pipeline inline, through
     # its own separate DB session (app.workers.tasks.run_apply_pipeline opens one to mirror
@@ -269,7 +273,19 @@ async def resolve_application_blocker(
     This starts a fresh, headed attempt rather than resuming the finished one.
     """
     app = await app_service.get_application(db, app_id)  # 404 + tenant-ownership check
+    # Only a run that actually paused at a check can be resumed. Accepting any status let a
+    # stale "Resume" click re-queue an application that had already been submitted,
+    # withdrawn or reached interview - and the worker would then submit it again.
+    if app.status != ApplicationStatus.PENDING_REVIEW or not blocked_reason(app):
+        raise HTTPException(
+            status_code=409,
+            detail="This application is not paused at a verification check, so there is "
+            "nothing to resume.",
+        )
     app.status = ApplicationStatus.QUEUED
+    # Resuming is the owner acting on this application: it counts as their approval, and the
+    # pause marker is cleared so the row stops reading "paused" once the retry is queued.
+    mark_approved(app)
     app.resume_state = {**(app.resume_state or {}), "force_headed": True}
     await db.commit()
     job_id = await dispatch.enqueue_apply(pool, app.id)
@@ -340,9 +356,20 @@ async def update_status(
     app_id: str,
     update: ApplicationStatusUpdate,
     db: AsyncSession = Depends(get_tenant_db),
+    pool: ArqRedis | None = Depends(get_arq_pool),
 ) -> ApplicationResponse:
-    """Update an application's status and optional notes."""
+    """Update an application's status and optional notes.
+
+    Setting it back to ``queued``/``approved`` (the "Re-run" control) is the owner asking for
+    another attempt: it counts as their approval and is dispatched. It used to change the
+    status and nothing else, so outside the DB-queue worker a re-run never ran.
+    """
     app = await app_service.update_status(db, app_id, update)
+    if app.status in (ApplicationStatus.QUEUED, ApplicationStatus.APPROVED):
+        mark_approved(app)
+        await db.commit()
+        await dispatch.enqueue_apply(pool, app.id)
+        await db.refresh(app)
     return app_service.application_to_response(app)
 
 

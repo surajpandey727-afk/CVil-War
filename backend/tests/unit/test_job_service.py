@@ -119,6 +119,34 @@ class TestSearchJobs:
         assert stored["amb"].location_verification_status == "ambiguous"
         assert stored["uk"].posted_date is None  # the source gave none; none is invented
 
+    async def test_the_adapters_apply_link_is_stored(self, db_session):
+        """Lever-style boards expose a direct application form; it used to be computed by no
+        one, so every application opened the advert instead of the form."""
+        from app.core.automation.platforms.base import JobListing
+
+        listing = JobListing(
+            platform="careers:acme", platform_job_id="a1", title="PM", company="Acme",
+            location="London, UK", url="https://jobs.lever.co/acme/a1",
+            raw_data={"apply_url": "https://jobs.lever.co/acme/a1/apply"},
+        )
+        adapter = MagicMock()
+        adapter.search = AsyncMock(return_value=[listing])
+        adapter.get_application_url = lambda li: li.raw_data["apply_url"]
+        request = JobSearchRequest(query="pm", platforms=["careers:acme"])
+        with (
+            patch.object(job_search.platform_registry, "has", return_value=True),
+            patch.object(job_search.platform_registry, "create", return_value=adapter),
+        ):
+            result = await job_search.search_jobs(db_session, request, TEST_USER_ID)
+
+        from sqlalchemy import select
+
+        from app.models.job import Job
+
+        job = (await db_session.execute(select(Job))).scalar_one()
+        assert job.application_url == "https://jobs.lever.co/acme/a1/apply"
+        assert result.items[0].application_url == "https://jobs.lever.co/acme/a1/apply"
+
     async def test_search_jobs_handles_platform_failure(self, db_session):
         """Search should return empty results when platform raises."""
         mock_platform = AsyncMock()

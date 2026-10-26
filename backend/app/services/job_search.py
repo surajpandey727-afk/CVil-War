@@ -181,6 +181,8 @@ async def search_jobs(
             existing.last_seen_at = job.last_seen_at
             if existing.posted_date is None and job.posted_date is not None:
                 existing.posted_date = job.posted_date
+            if not existing.application_url and job.application_url:
+                existing.application_url = job.application_url
             all_jobs.append(existing)
         else:
             db.add(job)
@@ -196,6 +198,7 @@ async def search_jobs(
     # is not safe for concurrent I/O across tasks, so nothing here touches `db` until every
     # fetch has already resolved on the main task.
     fetch_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SOURCE_FETCHES)
+    apply_urls: dict[int, str | None] = {}
 
     async def _fetch_one(platform_name: str) -> tuple[str, list[JobListing], Exception | None]:
         if not platform_registry.has(platform_name):
@@ -208,6 +211,11 @@ async def search_jobs(
                     location=request.location,
                     filters=request.filters or None,
                 )
+                # Every adapter knows where a person actually applies (Lever's applyUrl, an
+                # employer redirect); that used to be computed by nobody, so
+                # Job.application_url was always empty and every apply opened the advert.
+                for listing in listings:
+                    apply_urls[id(listing)] = _application_url(platform, listing)
                 return platform_name, listings, None
             except Exception as exc:
                 return platform_name, [], exc
@@ -252,7 +260,9 @@ async def search_jobs(
 
         for listing in listings:
             try:
-                _register(_listing_to_job(listing, user_id))
+                _register(
+                    _listing_to_job(listing, user_id, application_url=apply_urls.get(id(listing)))
+                )
             except Exception as exc:
                 logger.warning(
                     "job_search.listing_conversion_failed",
@@ -363,7 +373,24 @@ async def search_jobs(
     )
 
 
-def _listing_to_job(listing: JobListing, user_id: str) -> Job:
+def _application_url(platform: object, listing: JobListing) -> str | None:
+    """The adapter's apply link, kept only when it differs from the advert itself."""
+    getter = getattr(platform, "get_application_url", None)
+    if getter is None:
+        return None
+    try:
+        url = getter(listing)
+    except Exception:  # an adapter quirk must not lose the listing
+        return None
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    return url if url.startswith(("http://", "https://")) and url != listing.url else None
+
+
+def _listing_to_job(
+    listing: JobListing, user_id: str, *, application_url: str | None = None
+) -> Job:
     """Convert a platform ``JobListing`` to a ``Job`` database model.
 
     Args:
@@ -415,6 +442,7 @@ def _listing_to_job(listing: JobListing, user_id: str) -> Job:
         posted_date=parse_posted_at(listing.posted_at, now=now),
         first_seen_at=now,
         last_seen_at=now,
+        application_url=application_url,
     )
     return stamp(job, now=now)
 

@@ -1,5 +1,30 @@
 # CVil-War — System Architecture v2.0
 
+> **Read this first — current architecture (2026-10).** The rest of this file is the original
+> v2.0 design document and is kept for history; several parts were never built or have been
+> replaced (MUI, FAISS/`vector_store.py`, `application_worker.py`, `session_mgr.py`,
+> `gateway.py`). What actually runs:
+>
+> - **Frontend:** React 18 + Vite + TanStack Query + Zustand with a hand-rolled design system
+>   (`frontend/src/styles/theme.css`, `src/components/ui/`) — no component library. Deployed to
+>   Vercel (`cvil-war`), which rewrites `/api/*` to the API project.
+> - **API:** FastAPI on Python 3.12, deployed as a Vercel serverless function (`cvil-war-api`).
+>   No Redis, no worker and no browser in production.
+> - **Database:** Supabase Postgres (pooler: 6543 transaction mode for the app, 5432 session
+>   mode for Alembic and the worker). Schema is owned by Alembic. Files in Supabase Storage.
+> - **LLM:** Claude via the Anthropic API (`ANTHROPIC_API_KEY`), Sonnet for reasoning and Haiku
+>   for classification; the browser agent uses the same model (`runtime/factory.py`).
+> - **Discovery:** API/ATS adapters in `core/job_discovery/sources/` (Reed, Adzuna, LinkedIn
+>   guest search, Greenhouse/Lever/Ashby/SmartRecruiters boards, remote boards). Only
+>   UK-eligible jobs are listed (`core/geo/`). A daily Vercel cron runs discovery, inbox sync
+>   and the digest.
+> - **Applying:** the API leaves applications `approved`/`queued` (`APPLY_DISPATCH=db_queue`);
+>   the DB-queue worker (`app/workers/db_queue.py`, started with `scripts/db-worker.ps1`) runs on
+>   the owner's PC with a real browser and the owner's own signed-in sessions. See
+>   `docs/LOCAL_SETUP.md` and `docs/AUTOMATION_POLICY.md`.
+> - **Status and evidence:** `docs/qa/` (defect register, test matrices, release assessment).
+
+
 ## Table of Contents
 1. [High-Level Architecture](#1-high-level-architecture)
 2. [Project Structure](#2-project-structure)

@@ -28,7 +28,14 @@ _REJECTION_PHRASES: tuple[str, ...] = (
 
 _INTERVIEW_PHRASES: tuple[str, ...] = (
     "invite you to interview",
+    "invite you to an interview",
     "invited to interview",
+    "invited to an interview",
+    "interview invitation",
+    "invitation to interview",
+    "invitation to an interview",
+    "your availability for an interview",
+    "pick a time for",
     "schedule an interview",
     "schedule a call",
     "schedule a chat",

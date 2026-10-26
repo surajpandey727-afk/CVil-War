@@ -173,7 +173,31 @@ async def get_connect_request(
 ) -> PlatformSession | None:
     """The request row, scoped to its owner so an id cannot be read across accounts."""
     row = await db.get(PlatformSession, row_id)
-    return row if row is not None and row.user_id == user_id else None
+    if row is None or row.user_id != user_id:
+        return None
+    await expire_if_stranded(db, row)
+    return row
+
+
+#: Said when a sign-in request outlived any window that could still be open.
+STRANDED = (
+    "The sign-in window didn't finish - the automation host on your PC may have stopped or "
+    "the window was closed. Click Connect to try again."
+)
+
+
+async def expire_if_stranded(db: AsyncSession, row: PlatformSession) -> bool:
+    """End a sign-in request no host is still working on.
+
+    A host that died after claiming a request left it "in progress" for good: the screen kept
+    saying a window was open, and a session that worked before the reconnect showed as
+    disconnected. Past the window's lifetime the request is settled; a still-valid earlier
+    session goes back to active (see ``settle_connect``).
+    """
+    if row.state not in CONNECT_PENDING or not _stale(row):
+        return False
+    await settle_connect(db, row, state=SessionState.AUTH_REQUIRED, detail=STRANDED)
+    return True
 
 
 async def settle_connect(

@@ -46,7 +46,8 @@ function renderQueue() {
         <Routes>
           <Route path="/dashboard" element={<ActionQueue />} />
           <Route path="/applications/:id" element={<div>application detail</div>} />
-          <Route path="/sources" element={<div>connection centre</div>} />
+          <Route path="/sources" element={<div>sources page</div>} />
+          <Route path="/settings" element={<div>connection centre</div>} />
           <Route path="/resumes" element={<div>document picker</div>} />
         </Routes>
       </MemoryRouter>
@@ -82,7 +83,7 @@ describe('ActionQueue', () => {
     expect(screen.queryByText(/nothing needs you/i)).not.toBeInTheDocument();
   });
 
-  it('routes a session action to the connection centre, not the application', async () => {
+  it('routes a session action to the sign-in controls (Settings -> Platforms), not the application', async () => {
     // Each action must land on the surface that actually resolves it; sending a "session
     // expired" item to the application detail page leaves the user to find reconnect
     // themselves, which is the navigation cost the queue exists to remove.

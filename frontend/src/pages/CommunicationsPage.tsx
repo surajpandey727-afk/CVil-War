@@ -1,8 +1,9 @@
+import { apiErrorMessage } from '@/lib/apiError';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
-import { useApplications } from '@/hooks/useApplications';
+import { useAllApplications } from '@/hooks/useApplications';
 import {
   useApolloStatus, useCommunications, useDisconnectGmail, useGmailStatus, useGmailTest,
   useInboxSync, useLinkApplication,
@@ -69,14 +70,14 @@ export default function CommunicationsPage() {
                 `Synced: ${r.matched_to_application} matched, ${r.unmatched} need review`,
                 'success',
               ),
-              onError: (e: unknown) => {
-                const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-                notify(detail || 'Inbox sync failed', 'error');
-              },
+              // The API client already reshapes errors to { detail }; reading
+              // e.response.data.detail always missed it, so "Gmail not connected" showed as a
+              // generic failure.
+              onError: (e: unknown) => notify(apiErrorMessage(e, 'Inbox sync failed'), 'error'),
             })}
             onTest={() => gmailTest.mutate(undefined, {
               onSuccess: (r) => notify(r.message, r.sent ? 'success' : 'warning'),
-              onError: () => notify('Could not send a test email', 'error'),
+              onError: (e: unknown) => notify(apiErrorMessage(e, 'Could not send a test email'), 'error'),
             })}
             syncing={inboxSync.isPending}
             testing={gmailTest.isPending}
@@ -215,7 +216,7 @@ function FeedRow({ item }: { item: CommunicationEventItem }) {
   const [picked, setPicked] = useState('');
   const linkApplication = useLinkApplication();
   const notify = useAppStore((s) => s.showNotification);
-  const { data: appData } = useApplications(1, 100);
+  const { data: appData } = useAllApplications();
   const apps = useMemo(() => appData?.items ?? [], [appData]);
 
   const doLink = () => {

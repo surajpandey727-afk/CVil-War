@@ -38,7 +38,9 @@ class TestGatewayRouting:
     def test_a_configured_gateway_serves_ordinary_models(self, gateway) -> None:
         gateway(api_base="http://localhost:20128/v1")
         assert is_gateway_routed("openai/Full-Send")
-        assert is_gateway_routed("anthropic/claude-sonnet-4")
+        # Mirrors llm.client: Anthropic models go straight to Anthropic even with a gateway
+        # set. Reporting them as gateway-routed said "no key needed" for a direct call.
+        assert not is_gateway_routed("anthropic/claude-sonnet-4")
 
     def test_bedrock_bypasses_the_gateway(self, gateway) -> None:
         """The client sends everything except Bedrock through ``api_base``."""

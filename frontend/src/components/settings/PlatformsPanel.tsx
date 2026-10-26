@@ -103,7 +103,13 @@ export default function PlatformsPanel() {
   }, [data, filter]);
 
   const toggle = (platform: PlatformStatus) => {
-    const current = settings?.platforms_enabled ?? [];
+    // An empty stored list means "every usable source"; the server reports that as
+    // `enabled` on each row. Start from what is actually on, or the first click would save a
+    // one-source list and silently cut discovery to that source.
+    const stored = settings?.platforms_enabled ?? [];
+    const current = stored.length > 0
+      ? stored
+      : (data?.platforms ?? []).filter((p) => p.enabled).map((p) => p.key);
     const next = current.includes(platform.key)
       ? current.filter((k) => k !== platform.key)
       : [...current, platform.key];

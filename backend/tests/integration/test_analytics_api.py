@@ -200,3 +200,31 @@ async def test_dashboard_job_counts_are_uk_eligible_only(client, db_session):
     assert stats["total_jobs_found"] == 2
     assert stats["unique_jobs"] == 2
     assert sum(stats["jobs_by_source"].values()) == 2
+
+
+async def test_rehearsals_are_not_counted_as_sent_and_approved_is_counted(client, db_session):
+    """A run with live apply off is stored as applied/simulated: nothing reached the
+    employer, so it must not be in "Applied" or "Sent today". Approved rows had no count."""
+    from datetime import UTC, datetime
+
+    from app.models.application import Application
+    from app.models.job import Job
+    from tests.conftest import TEST_USER_ID
+
+    rows = [("applied", "confirmed"), ("applied", "simulated"), ("approved", "pending")]
+    for i, (status, conf) in enumerate(rows):
+        job = Job(user_id=TEST_USER_ID, platform="reed", platform_job_id=f"r{i}", title="PM",
+                  company=f"C{i}", url=f"https://x/{i}", location="London", status="new")
+        db_session.add(job)
+        await db_session.flush()
+        db_session.add(Application(
+            user_id=TEST_USER_ID, job_id=job.id, status=status, confirmation_state=conf,
+            applied_at=datetime.now(UTC) if status == "applied" else None,
+        ))
+    await db_session.commit()
+
+    stats = (await client.get("/api/v1/analytics/dashboard")).json()
+    assert stats["applications_applied"] == 1
+    assert stats["applications_simulated"] == 1
+    assert stats["submitted_today"] == 1
+    assert stats["applications_approved"] == 1

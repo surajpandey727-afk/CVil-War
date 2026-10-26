@@ -21,7 +21,9 @@ import { ACTION_META, PRIORITY_COLOR, type ActionItem } from '@/types/commandCen
 const ROUTE_FOR_TARGET: Record<string, (item: ActionItem) => string> = {
   assessment: (i) => `/applications/${i.application_id}`,
   interview: (i) => `/applications/${i.application_id}`,
-  connection: () => '/sources',
+  // Sign-ins live in Settings -> Platforms; /sources only toggles discovery and has no
+  // sign-in controls, so a reconnect action used to land on a page that could not do it.
+  connection: () => '/settings?section=platforms',
   resume: (i) => `/applications/${i.application_id}`,
   documents: () => '/resumes',
   review: (i) => `/applications/${i.application_id}`,

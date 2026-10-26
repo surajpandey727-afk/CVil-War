@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -173,8 +173,12 @@ describe('SettingsPage', () => {
   it('deep-links to the platform section from Sources', async () => {
     // "Manage" used to land on /settings with no indication of where to look.
     server.use(http.get('/api/v1/settings/', () => HttpResponse.json(settings())));
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
     renderSettings('/settings?section=platforms');
 
     expect(await screen.findByText('Platforms')).toBeInTheDocument();
+    // It used to fire on the first render, before the section existed, and never again.
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
   });
 });

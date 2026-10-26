@@ -1,3 +1,5 @@
+import { useAppStore } from '@/store/useAppStore';
+import { apiErrorMessage } from '@/lib/apiError';
 import { useNavigate } from 'react-router-dom';
 
 import CompanyLogo from '@/components/ui/CompanyLogo';
@@ -42,7 +44,12 @@ export default function SourcesPage() {
   const liveCount = all.filter((s) => s.health === 'live').length;
   const navigate = useNavigate();
 
-  const setEnabledKeys = (keys: string[]) => updateSettings.mutate({ platforms_enabled: keys });
+  const notify = useAppStore((s) => s.showNotification);
+  // A failed save used to be silent: the toggle snapped back with no word about why.
+  const setEnabledKeys = (keys: string[]) => updateSettings.mutate(
+    { platforms_enabled: keys },
+    { onError: (e: unknown) => notify(apiErrorMessage(e, 'Could not save your sources — try again'), 'error') },
+  );
   const toggleSource = (key: string) => {
     const current = enabledList && enabledList.length > 0 ? enabledList : allKeys;
     setEnabledKeys(current.includes(key) ? current.filter((k) => k !== key) : [...current, key]);

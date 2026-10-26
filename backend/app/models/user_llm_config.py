@@ -22,8 +22,10 @@ class UserLLMConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         unique=True,
         index=True,
     )
-    preferred_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="openai")
+    preferred_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="anthropic")
     fallback_providers: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=lambda: ["groq", "openrouter"]
     )
-    default_model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-4o")
+    default_model: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="anthropic/claude-sonnet-5-5"
+    )

@@ -26,8 +26,13 @@ def is_gateway_routed(model: str) -> bool:
     Bedrock through ``api_base`` when one is set. A gateway presents its own credential
     upstream, so the user never holds a provider key for these calls.
     """
+    from app.core.llm.client import is_anthropic_model
+
     llm = get_settings().llm
-    return bool(llm.api_base) and not model.startswith("bedrock/")
+    # The client sends Anthropic models straight to Anthropic even when a gateway is set, so
+    # they are not gateway-routed; saying they were reported "no key needed" for a call that
+    # then went out with none.
+    return bool(llm.api_base) and not model.startswith("bedrock/") and not is_anthropic_model(model)
 
 
 def is_platform_authenticated(provider: str, model: str) -> bool:
@@ -37,7 +42,15 @@ def is_platform_authenticated(provider: str, model: str) -> bool:
     uses its own key. Either way, demanding a key from the operator blocks work that would
     otherwise succeed.
     """
-    return provider == "bedrock" or model.startswith("bedrock/") or is_gateway_routed(model)
+    from app.core.llm.client import anthropic_key_configured, is_anthropic_model
+
+    return (
+        provider == "bedrock"
+        or model.startswith("bedrock/")
+        or is_gateway_routed(model)
+        # The deployment's own ANTHROPIC_API_KEY serves Claude for everyone.
+        or (is_anthropic_model(model) and anthropic_key_configured())
+    )
 
 
 def llm_key_required(provider: str, model: str) -> bool:

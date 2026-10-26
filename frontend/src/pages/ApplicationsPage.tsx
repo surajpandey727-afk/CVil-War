@@ -3,10 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import AtsChip from '@/components/applications/AtsChip';
 import BulkTailorBar from '@/components/applications/BulkTailorBar';
+import NextStepBar from '@/components/applications/NextStepBar';
 import CompanyLogo from '@/components/ui/CompanyLogo';
 import Icon from '@/components/ui/Icon';
 import {
-  useApplicationScores, useApplications, useApproveApplication, useBulkApprove, useBulkTailor,
+  useApplicationScores,
+  useAllApplications,
+  useApproveApplication,
+  useBulkApprove,
+  useBulkTailor,
 } from '@/hooks/useApplications';
 import { useApplicationEvents } from '@/hooks/useApplicationEvents';
 import { useResumes } from '@/hooks/useResumes';
@@ -17,6 +22,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { useFocusStore } from '@/store/useFocusStore';
 import { statusMeta, atsColor, atsPercent, isApprovable, relativeTime } from '@/lib/status';
 import { buildAppTimeline, type TimelineState } from '@/lib/timeline';
+import { HOST_COMMAND, needsSignIn, nextStep } from '@/lib/applyNextStep';
+import type { PlatformStatus } from '@/types/platforms';
 import type { Application } from '@/types/application';
 import type { ApplicationScoreItem, TailorRowState } from '@/types/ats';
 
@@ -90,7 +97,7 @@ export default function ApplicationsPage() {
   // One fetch, filtered client-side into the three buckets — the same approach the console
   // this replaces already used for active/recently-finished, just applied consistently
   // across all three views instead of duplicated per page.
-  const { data, isLoading, isError } = useApplications(1, 100);
+  const { data, isLoading, isError } = useAllApplications();
   const approve = useApproveApplication();
   const bulkApprove = useBulkApprove();
   const { data: resumeData } = useResumes();
@@ -109,6 +116,7 @@ export default function ApplicationsPage() {
 
   const counts = {
     queued: apps.filter((a) => a.status === 'queued').length,
+    approved: apps.filter((a) => a.status === 'approved').length,
     applying: apps.filter((a) => a.status === 'applying').length,
     review: needsAction.length,
   };
@@ -117,11 +125,20 @@ export default function ApplicationsPage() {
   const needsIds = useMemo(() => needsAction.map((a) => a.id), [needsAction]);
   const scores = useApplicationScores(needsIds, tab === 'needs_action');
 
+  // Same rule as "Approve selected": never release a role with no résumé to submit. It used
+  // to approve those too, and they could only fail once the worker reached them.
   const approveAll = () => {
-    const ids = needsAction.map((a) => a.id);
-    if (!ids.length) return;
+    const ids = needsAction.filter((a) => a.resume_id).map((a) => a.id);
+    const skipped = needsAction.length - ids.length;
+    if (!ids.length) {
+      notify('None of these has a résumé attached yet — tailor or attach one first', 'warning');
+      return;
+    }
     bulkApprove.mutate(ids, {
-      onSuccess: (r) => notify(`${r.approved} approved · queued for the agent`, 'success'),
+      onSuccess: (r) => notify(
+        `${r.approved} approved — the automation host on your PC sends them${skipped ? ` · ${skipped} skipped (no résumé)` : ''}`,
+        'success',
+      ),
       onError: () => notify('Could not approve the staged applications', 'error'),
     });
   };
@@ -196,10 +213,12 @@ export default function ApplicationsPage() {
         </div>
       )}
 
-      <div role="tablist" aria-label="Applications view" style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+      <div role="tablist" aria-label="Applications view" style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
         {MAIN_TABS.map((t) => {
           const activeTab = t.key === tab;
-          const badge = t.key === 'active' ? counts.queued + counts.applying : t.key === 'needs_action' ? counts.review : 0;
+          // Every row the Active tab lists, approved included: one Approved row used to show
+          // an Active tab with no badge at all.
+          const badge = t.key === 'active' ? counts.queued + counts.approved + counts.applying : t.key === 'needs_action' ? counts.review : 0;
           return (
             <button
               key={t.key}
@@ -238,7 +257,7 @@ export default function ApplicationsPage() {
         <>
           {needsAction.length > 0 && (
             <SubmitBlockerBanner
-              count={needsAction.length}
+              items={needsAction}
               missingResumes={needsAction.filter((a) => !a.resume_id).length}
               navigate={navigate}
             />
@@ -384,6 +403,7 @@ function ActiveOrNeedsActionView({
   /** Needs action only: row selection, the live ATS score per row and bulk-tailoring progress. */
   selection?: RowSelection;
 }) {
+  const { data: platformData } = usePlatforms();
   if (isError) return <div style={card}><Notice text="Couldn't load applications. Retry in a moment." /></div>;
 
   if (isLoading) {
@@ -424,15 +444,18 @@ function ActiveOrNeedsActionView({
           approving={approving}
           showTimeline={showTimeline}
           selection={selection}
+          platforms={platformData?.platforms}
+          onConnect={() => navigate('/settings?section=platforms')}
         />
       ))}
     </div>
   );
 }
 
-function RunRow({ app, onOpen, onApprove, approving, showTimeline, selection }: {
+function RunRow({ app, onOpen, onApprove, approving, showTimeline, selection, platforms, onConnect }: {
   app: Application; onOpen: () => void; onApprove?: () => void; approving?: boolean;
   showTimeline: boolean; selection?: RowSelection;
+  platforms?: PlatformStatus[]; onConnect: () => void;
 }) {
   const meta = statusMeta(app.status);
   const steps = showTimeline ? buildAppTimeline(app.apply_mode, app.status) : [];
@@ -553,13 +576,9 @@ function RunRow({ app, onOpen, onApprove, approving, showTimeline, selection }: 
 
       {tailorState && <TailorStatus state={tailorState} />}
 
-      {/* Needs action's own reason for waiting — the one piece of per-row information that
-          matters here, so it stays even without the full timeline strip above it. */}
-      {!showTimeline && app.notes && (
-        <div style={{ marginTop: 9, font: '500 11.5px/1.45 var(--font)', color: 'var(--text-3)' }}>
-          {app.notes}
-        </div>
-      )}
+      {/* What this row is waiting for and the way forward — including the policy's own
+          reasons, which used to be the only thing shown and never said what to do. */}
+      <NextStepBar app={app} step={nextStep(app, platforms)} onConnect={onConnect} />
     </div>
   );
 }
@@ -664,56 +683,62 @@ function ConfirmationBadge({ app }: { app: Application }) {
   );
 }
 
-/** Why "Approve" doesn't make an application go out, and what to do about it.
- *  The common dead-end: with no signed-in job-board session, every approval is held for review
- *  again (the first run on a source can't clear until one submission succeeds), so nothing ever
- *  submits and no email is sent — which reads as "nothing happens". Say so, and point at the fix. */
-function SubmitBlockerBanner({ count, missingResumes, navigate }: {
-  count: number; missingResumes: number; navigate: (p: string) => void;
+/** What submitting needs, said once above the list — and how many rows are blocked on each.
+ *
+ *  It used to say "no job board is connected" while the Sources page said "65 enabled",
+ *  which read as a contradiction. They are different things: sources *find* jobs (read-only
+ *  searches, no account needed); *submitting* fills in a form in a real browser on the owner's
+ *  PC, and for LinkedIn / Indeed / Reed it uses the owner's own signed-in session for that
+ *  site. Each row's own next step (NextStepBar) says which of these it is waiting on. */
+function SubmitBlockerBanner({ items, missingResumes, navigate }: {
+  items: Application[]; missingResumes: number; navigate: (p: string) => void;
 }) {
   const { data: platforms } = usePlatforms();
-  const connected = platforms?.connected ?? null;
-  const noSessions = connected === 0;
-  if (!noSessions && missingResumes === 0) return null;
+  const bySignIn = new Map<string, { label: string; count: number }>();
+  for (const a of items) {
+    const p = needsSignIn(a.portal, platforms?.platforms);
+    if (p) bySignIn.set(p.key, { label: p.label, count: (bySignIn.get(p.key)?.count ?? 0) + 1 });
+  }
+  const signInTotal = [...bySignIn.values()].reduce((n, v) => n + v.count, 0);
+  const noSignIn = items.length - signInTotal;
+  if (items.length === 0) return null;
   return (
     <div
-      role="alert"
+      role="note"
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 11, padding: '13px 15px', marginBottom: 12,
-        borderRadius: 'var(--r-lg)', background: 'var(--review-soft)', border: '1px solid var(--review-line)',
+        borderRadius: 'var(--r-lg)', background: 'var(--surface-2)', border: '1px solid var(--border-2)',
       }}
     >
-      <span style={{ color: 'var(--review)', marginTop: 1, flex: '0 0 auto' }}><Icon name="alert" size={16} /></span>
-      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+      <span style={{ color: 'var(--text-3)', marginTop: 1, flex: '0 0 auto' }}><Icon name="alert" size={16} /></span>
+      <div style={{ flex: '1 1 auto', minWidth: 0, font: '500 11.5px/1.5 var(--font)', color: 'var(--text-2)' }}>
         <div style={{ font: '700 12.5px/1.35 var(--font)', color: 'var(--text)' }}>
-          {noSessions
-            ? `These ${count} applications can't be submitted yet — no job board is connected.`
-            : `${missingResumes} of these applications have no résumé attached.`}
+          Approve to send. Each row below says what it is waiting for.
         </div>
-        <div style={{ marginTop: 4, font: '500 11.5px/1.5 var(--font)', color: 'var(--text-2)' }}>
-          {noSessions
-            ? 'The agent signs in with your own session for each board — it never sees or stores your password. '
-              + 'Until a session is connected, approving an application re-queues it for review instead of sending it, '
-              + 'and no confirmation email goes out. '
-            : 'An application needs a résumé to be scored and submitted. Tailor one above, or attach it from the application. '}
-          {missingResumes > 0 && noSessions && `Also, ${missingResumes} have no résumé yet. `}
+        <div style={{ marginTop: 4 }}>
+          Your sources find jobs; they never submit anything. Submitting runs in a real browser on your PC
+          (the automation host, <code>{HOST_COMMAND}</code>). An approval stands: the review questions
+          are not asked again.
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
-          {noSessions && (
+        <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+          {[...bySignIn.values()].map((v) => (
+            <li key={v.label}>
+              {v.count} go through {v.label} and need your {v.label} sign-in (once), or you can apply yourself.
+            </li>
+          ))}
+          {noSignIn > 0 && <li>{noSignIn} need no sign-in: approve them and the host sends them.</li>}
+          {missingResumes > 0 && <li>{missingResumes} have no résumé attached yet: tailor one above.</li>}
+        </ul>
+        {signInTotal > 0 && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
             <button
-              onClick={() => navigate('/settings')}
+              onClick={() => navigate('/settings?section=platforms')}
               style={{ height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'var(--accent)', border: '1px solid var(--accent)', color: 'var(--accent-ink)', font: '700 12px/1 var(--font)', cursor: 'pointer' }}
             >
-              Connect a job board
+              Connect {[...bySignIn.values()].map((v) => v.label).join(', ')}
             </button>
-          )}
-          <button
-            onClick={() => navigate('/communications')}
-            style={{ height: 30, padding: '0 13px', borderRadius: 'var(--r-md)', background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)', font: '600 12px/1 var(--font)', cursor: 'pointer' }}
-          >
-            Set up email notifications
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

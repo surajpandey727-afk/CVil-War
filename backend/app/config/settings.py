@@ -66,7 +66,10 @@ class LLMSettings(BaseSettings):
     # large (the product owner's verbatim brief is prepended), so a slow gateway needs a
     # generous timeout; ``plan_model`` lets ops point the single highest-latency call at a
     # faster gateway model when throughput matters more than reasoning depth.
-    plan_model: str = "openai/auto/claude-sonnet"
+    # Empty means "the default model". It used to be ``openai/auto/claude-sonnet``, an id only
+    # the local OmniRoute gateway understands: with no gateway (production) the planning call
+    # went to OpenAI with no key, failed, and silently fell back to Haiku.
+    plan_model: str = ""
     plan_timeout_seconds: int = 180
     # AWS Bedrock: platform-authenticated via the standard AWS credential chain (env vars,
     # ~/.aws, or an instance/role) — no per-user key. Use a ``bedrock/<model-id>`` default_model
@@ -137,7 +140,7 @@ class EmailSettings(BaseSettings):
     # Frontend origin used to build the reset link the user clicks. Matches this project's
     # configured Vite dev-server port (frontend/vite.config.ts) — a mismatch here means every
     # generated reset link 404s, with no error anywhere to point at why.
-    frontend_base_url: str = "http://localhost:3000"
+    frontend_base_url: str = "http://localhost:5174"
     reset_token_expire_minutes: int = 30
 
     # SMTP transport (used when provider == "smtp").
@@ -252,7 +255,7 @@ class Settings(BaseSettings):
     #: Where the Gmail OAuth callback sends the operator's browser back to once done — the
     #: dashboard itself, not this API. Matches this project's configured Vite dev-server port
     #: (frontend/vite.config.ts).
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:5174"
     #: Shared secret for api.v1.internal — lets an external automation tool (n8n) trigger a
     #: discovery or inbox-sync cycle on demand, authenticated by a static bearer token rather
     #: than a user JWT (n8n has no interactive login). Unset means the endpoints refuse

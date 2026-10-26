@@ -362,3 +362,24 @@ describe('getting a tailored résumé from the drawer', () => {
     expect(await screen.findByTestId('tailoring-summary')).toHaveTextContent('ATS 72 → 83');
   });
 });
+
+describe('JobDrawer readiness blockers', () => {
+  it('names each blocker in words with a way to fix it, and still lets you queue', async () => {
+    server.use(
+      http.get('/api/v1/applications/readiness/:jobId', ({ params }) =>
+        HttpResponse.json({
+          job_id: params.jobId, platform: 'linkedin', ready: false, manual_possible: true,
+          blockers: [{ code: 'no_session', message: 'No LinkedIn sign-in saved', action: 'connect_platform', platform: 'linkedin' }],
+        })),
+    );
+    const handlers = renderDrawer();
+
+    expect(await screen.findByText(/No LinkedIn sign-in saved/)).toBeInTheDocument();
+    expect(screen.queryByText('connect_platform')).toBeNull(); // the raw code used to be shown
+    expect(screen.getByRole('button', { name: /Connect it in Settings/ })).toBeInTheDocument();
+    const apply = screen.getByRole('button', { name: /Apply with agent/ });
+    expect(apply).toBeEnabled();
+    await userEvent.click(apply);
+    expect(handlers.onApplyWithAgent).toHaveBeenCalled();
+  });
+});

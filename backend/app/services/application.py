@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.config.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import RecordNotFoundError
 from app.models.application import Application
-from app.models.enums import ApplicationStatus, ConfirmationState, SubmissionMethod
+from app.models.enums import ApplicationStatus, ApplyMode, ConfirmationState, SubmissionMethod
 from app.models.job import Job
 from app.models.resume import Resume
 from app.schemas.application import (
@@ -27,6 +27,7 @@ from app.schemas.application import (
     ApplicationResponse,
     ApplicationStatusUpdate,
 )
+from app.services.approval import blocked_reason, human_approved, mark_approved
 
 logger = structlog.get_logger(__name__)
 
@@ -47,6 +48,10 @@ def application_to_response(app: Application) -> ApplicationResponse:
     if "job" not in unloaded and app.job is not None:
         item.job_title = app.job.title
         item.company = app.job.company
+        item.portal = item.portal or app.job.platform
+        item.application_url = item.application_url or app.job.application_url or app.job.url
+    item.approved = human_approved(app)
+    item.blocked_reason = blocked_reason(app)
     if "resume" not in unloaded and app.resume is not None:
         item.resume_name = app.resume.name
         # str(), not .value: the column holds a StrEnum but a row written in this session and
@@ -98,6 +103,30 @@ def apply_job_provenance(application: Application, job: Job | None) -> None:
     )
 
 
+def _initial_status(mode: ApplyMode) -> ApplicationStatus:
+    """Autonomous rows are ready for the worker; review/batch rows wait for the owner."""
+    return (
+        ApplicationStatus.QUEUED
+        if mode == ApplyMode.AUTONOMOUS
+        else ApplicationStatus.PENDING_REVIEW
+    )
+
+
+async def _effective_mode(db: AsyncSession, user_id: str, requested: ApplyMode | None) -> ApplyMode:
+    """The request's apply mode, else the owner's own setting, else review."""
+    if requested is not None:
+        return requested
+    from app.models.user_settings import UserSettings
+
+    stored = (
+        await db.execute(select(UserSettings.apply_mode).where(UserSettings.user_id == user_id))
+    ).scalar_one_or_none()
+    try:
+        return ApplyMode(stored) if stored else ApplyMode.REVIEW
+    except ValueError:
+        return ApplyMode.REVIEW
+
+
 async def create_application(
     db: AsyncSession,
     data: ApplicationCreate,
@@ -120,8 +149,11 @@ async def create_application(
         user_id=user_id,
         job_id=data.job_id,
         resume_id=data.resume_id,
-        apply_mode=data.apply_mode,
-        status=ApplicationStatus.QUEUED,
+        apply_mode=(mode := await _effective_mode(db, user_id, data.apply_mode)),
+        # Created in its final resting status. It used to be created QUEUED and moved to
+        # pending_review in a later commit; a worker polling in between could submit an
+        # application the owner never approved.
+        status=_initial_status(mode),
     )
     apply_job_provenance(application, await db.get(Job, data.job_id))
     # Attempt the insert inside a SAVEPOINT so a unique-constraint violation rolls back
@@ -187,6 +219,7 @@ async def create_batch(
         .all()
     )
 
+    mode = await _effective_mode(db, user_id, data.apply_mode)
     applications: list[Application] = []
     for job_id in data.job_ids:
         if job_id in existing_active:
@@ -195,8 +228,8 @@ async def create_batch(
             user_id=user_id,
             job_id=job_id,
             resume_id=data.resume_id,
-            apply_mode=data.apply_mode,
-            status=ApplicationStatus.QUEUED,
+            apply_mode=mode,
+            status=_initial_status(mode),
         )
         apply_job_provenance(app, await db.get(Job, job_id))
         db.add(app)
@@ -296,12 +329,15 @@ async def approve_application(db: AsyncSession, app_id: str) -> Application:
         RecordNotFoundError: If application does not exist.
     """
     app = await get_application(db, app_id)
+    if app.status == ApplicationStatus.APPROVED:
+        return app  # a second click (or two tabs) is a no-op, not a server error
     if app.status not in (ApplicationStatus.PENDING_REVIEW, ApplicationStatus.QUEUED):
         raise ValueError(
             f"Cannot approve application in '{app.status}' state. "
             "Only pending_review or queued applications can be approved."
         )
     app.status = ApplicationStatus.APPROVED
+    mark_approved(app)
     await db.commit()
     await db.refresh(app)
     logger.info("application_approved", app_id=app_id)

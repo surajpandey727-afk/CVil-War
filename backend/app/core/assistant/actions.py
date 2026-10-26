@@ -21,7 +21,6 @@ from app.core.assistant import tools as t
 from app.core.assistant.context import (
     ToolContext,
     active_role_titles,
-    apply_mode_of,
     dumps,
     is_uk,
     owned_job,
@@ -176,19 +175,16 @@ async def _do_stage(ctx: ToolContext, params: dict) -> tuple[bool, str]:
         return False, "That job is no longer available to apply to."
     if (existing := await _active_application(ctx, job.id)) is not None:
         return True, f"An application for {job.title} already exists ({existing.status.value})."
-    mode = apply_mode_of(await user_settings(ctx.db, ctx.user_id))
     resume_id = params.get("resume_id") or None
+    # Anything the assistant creates waits for the user's approval, whatever the global mode,
+    # so it is created in review mode outright — never created queued and corrected after,
+    # which left a window for the worker to submit it unapproved.
     app = await app_service.create_application(
-        ctx.db, ApplicationCreate(job_id=job.id, resume_id=resume_id, apply_mode=mode), ctx.user_id
+        ctx.db,
+        ApplicationCreate(job_id=job.id, resume_id=resume_id, apply_mode=ApplyMode.REVIEW),
+        ctx.user_id,
     )
-    if mode == ApplyMode.AUTONOMOUS:
-        # dispatch_for_mode would enqueue it straight away. Anything the assistant creates
-        # waits for the user's approval, whatever the global mode.
-        app.status = ApplicationStatus.PENDING_REVIEW
-        await ctx.db.commit()
-        await ctx.db.refresh(app)
-    else:
-        await dispatch.dispatch_for_mode(ctx.db, ctx.pool, app)
+    await dispatch.dispatch_for_mode(ctx.db, ctx.pool, app)
     logger.info("assistant.application_staged", app_id=app.id, job_id=job.id)
     return True, (
         f"Staged: {job.title} at {job.company} is waiting for your review in Applications."

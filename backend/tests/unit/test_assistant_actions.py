@@ -80,7 +80,8 @@ class TestStageApplication:
 
         assert res.ok
         (app,) = await _apps(db_session)
-        assert app.apply_mode == ApplyMode.AUTONOMOUS
+        # Created in review mode outright, so there is no moment it sits QUEUED for the worker.
+        assert app.apply_mode == ApplyMode.REVIEW
         assert app.status == ApplicationStatus.PENDING_REVIEW
         pool.enqueue_job.assert_not_awaited()
 

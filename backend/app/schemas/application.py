@@ -15,7 +15,9 @@ class ApplicationCreate(BaseModel):
 
     job_id: str
     resume_id: str | None = None
-    apply_mode: ApplyModeEnum = ApplyModeEnum.REVIEW
+    #: ``None`` means "use my Apply mode setting". Every screen used to send ``review``, so the
+    #: Settings and Onboarding choice of Autonomous never took effect.
+    apply_mode: ApplyModeEnum | None = None
 
 
 class ApplicationBatchCreate(BaseModel):
@@ -23,7 +25,8 @@ class ApplicationBatchCreate(BaseModel):
 
     job_ids: list[str] = Field(..., min_length=1)
     resume_id: str | None = None
-    apply_mode: ApplyModeEnum = ApplyModeEnum.REVIEW
+    #: ``None`` means "use my Apply mode setting" — see ApplicationCreate.
+    apply_mode: ApplyModeEnum | None = None
 
 
 class ApplicationBulkApprove(BaseModel):
@@ -93,6 +96,17 @@ class ApplicationResponse(BaseModel):
     notes: str | None = None
     created_at: datetime
     updated_at: datetime
+    #: Which board the application goes through (the job's platform key, e.g. ``linkedin``)
+    #: and where a person opens it. The Applications screen needs both to say what a row is
+    #: actually waiting for ("your LinkedIn sign-in") and to offer "Open posting".
+    portal: str | None = None
+    application_url: str | None = None
+    #: True once the owner approved it. An approval stands: review questions are not asked
+    #: again, so the screen can say "approved - waiting for X" instead of looking stuck.
+    approved: bool = False
+    #: Set when a run stopped at a CAPTCHA/identity check (``captcha``). Approve or Resume
+    #: retries it in a visible browser window on the automation host so the owner can clear it.
+    blocked_reason: str | None = None
 
 
 class CoverLetterResponse(BaseModel):

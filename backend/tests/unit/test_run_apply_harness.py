@@ -17,6 +17,7 @@ from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user import User
 from app.workers import tasks
+from app.services.approval import mark_approved
 from tests.conftest import TEST_USER_ID
 from tests.unit.test_observe import FakeHistory
 
@@ -39,6 +40,10 @@ async def _seed_app(db, *, platform: str = "linkedin", url: str = "https://x") -
         user_id=TEST_USER_ID, job_id=job.id, resume_id=resume.id,
         status="applying", apply_mode="autonomous",
     )
+    # Approved: with no live pub/sub channel (redis=None) the per-submission confirmation can
+    # only be the owner's approval. These tests exercise harness mechanics, not that gate —
+    # see test_an_unapproved_run_without_a_live_channel_asks_for_approval.
+    mark_approved(app)
     db.add(app)
     await db.commit()
     await db.refresh(app)
@@ -245,3 +250,64 @@ class TestReviewTask:
         ) as review:
             await tasks.review_application_run({"redis": None}, "nonexistent-id")
         review.assert_not_awaited()
+
+
+
+async def test_an_unapproved_run_without_a_live_channel_asks_for_approval(db_session):
+    """The DB-queue worker has no pub/sub to ask "submit now?" through. That used to reject
+    every live submission (FAILED). Unapproved, it now stops before any browser opens and goes
+    back for the owner's approval; approved, the approval is the confirmation."""
+    import pytest
+
+    from app.core.automation.runtime import apply as apply_mod
+
+    app = await _seed_app(db_session, platform="careers:acme")
+    app.resume_state = {}
+    await db_session.commit()
+    with pytest.raises(apply_mod.ApprovalRequiredError):
+        await apply_mod.run_apply(db_session, app, redis=None)
+
+
+def test_the_task_starts_at_the_apply_form_and_offers_the_cover_letter() -> None:
+    from app.core.automation.runtime.apply import _build_task
+    from app.models.job import Job
+
+    job = Job(platform="careers:acme", title="PM", company="Acme",
+              url="https://jobs.lever.co/acme/1", application_url="https://jobs.lever.co/acme/1/apply")
+    task = _build_task(job, "/tmp/cv.pdf", "/tmp/cover.pdf")
+    assert "URL: https://jobs.lever.co/acme/1/apply" in task
+    assert "cover letter, upload the file at: /tmp/cover.pdf" in task
+    assert "cover letter" not in _build_task(job, "/tmp/cv.pdf")
+
+
+async def test_an_expired_session_is_refused_before_a_browser_opens(db_session) -> None:
+    """An expired session used to drive the browser into the login wall, which then surfaced
+    as a CAPTCHA pause rather than "reconnect"."""
+    from datetime import UTC, datetime, timedelta
+
+    import pytest
+
+    from app.core.automation.runtime import apply as apply_mod
+    from app.models.enums import SessionState
+    from app.models.platform_session import PlatformSession
+
+    db_session.add(User(id=TEST_USER_ID, email="u@x.com", hashed_password="x"))
+    row = PlatformSession(user_id=TEST_USER_ID, platform="linkedin",
+                          state=SessionState.SESSION_ACTIVE,
+                          expires_at=datetime.now(UTC) - timedelta(days=1))
+    db_session.add(row)
+    await db_session.commit()
+    with pytest.raises(apply_mod.ApplyPrerequisiteError, match="expired"):
+        await apply_mod._require_unexpired_session(db_session, TEST_USER_ID, "linkedin")
+    await db_session.refresh(row)
+    assert row.state == SessionState.SESSION_EXPIRED
+
+
+def test_session_expiry_comes_from_the_sign_in_cookie_not_a_tracking_cookie() -> None:
+    from app.core.automation.connect import _earliest_expiry
+
+    year = 1_900_000_000
+    day = 1_800_000_000
+    state = {"cookies": [{"name": "li_at", "expires": year}, {"name": "lidc", "expires": day}]}
+    assert _earliest_expiry(state, ("li_at",)).timestamp() == year
+    assert _earliest_expiry(state).timestamp() == day  # no hint: soonest cookie decides

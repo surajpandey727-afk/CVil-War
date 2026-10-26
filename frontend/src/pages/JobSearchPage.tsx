@@ -226,10 +226,17 @@ export default function JobSearchPage() {
   /** Queue this job for the agent with the CV chosen in the drawer. */
   const onApplyWithAgent = (job: Job, resumeId: string | null) => {
     createApps.mutate(
-      { job_ids: [job.id], resume_id: resumeId, apply_mode: 'review' },
+      // No apply_mode: the server uses the owner's Apply mode setting. Sending 'review' here
+      // made the Autonomous choice in Settings and Onboarding do nothing.
+      { job_ids: [job.id], resume_id: resumeId },
       {
-        onSuccess: () => {
-          notify(`Queued for review · ${job.title}`, 'success');
+        onSuccess: (apps) => {
+          notify(
+            apps[0]?.status === 'pending_review'
+              ? `Waiting for your approval · ${job.title} (Applications → Needs action)`
+              : `Queued for the agent · ${job.title}`,
+            'success',
+          );
           setDrawerJob(null);
         },
         onError: () => notify('Could not queue this application', 'error'),
@@ -362,19 +369,26 @@ export default function JobSearchPage() {
     );
   };
 
-  /** Queue every ticked job in one request. `review` keeps the approval gate before submit;
-   *  the worker then emits progress over the existing application WebSocket. */
+  /** Queue every ticked job in one request, in the owner's Apply mode (review keeps the
+   *  approval gate before submit). */
   const startRun = () => {
     if (!selected.length) return;
     createApps.mutate(
       {
         job_ids: selected,
-        apply_mode: 'review',
         resume_id: runResumeId === 'auto' ? null : runResumeId,
       },
       {
         onSuccess: (apps) => {
-          notify(`Run started · ${apps.length} applications queued`, 'success');
+          const waiting = apps.filter((a) => a.status === 'pending_review').length;
+          // Said as it is: in review mode nothing goes out until it is approved, and the
+          // old "Run started · N queued" read as if it were already applying.
+          notify(
+            waiting === apps.length
+              ? `${apps.length} sent for your approval — approve them in Applications → Needs action`
+              : `${apps.length - waiting} queued for the agent${waiting ? `, ${waiting} waiting for your approval` : ''}`,
+            'success',
+          );
           clearSelection();
           navigate('/applications');
         },
@@ -563,7 +577,9 @@ export default function JobSearchPage() {
                     {(tier.name ?? tier.id).replace(/ —.*/, '').toUpperCase()}
                   </span>
                   <span style={{ font: '600 10px/1 var(--mono)', color: 'var(--text-4)' }}>
-                    {tier.sources.filter((s) => enabledSources.includes(s.key)).length}/{tier.sources.length}
+                    {/* Empty selection = every source on, as the rows below show; counting only
+                        the explicit list read "0/N" above a column of switched-on rows. */}
+                    {restrictSources ? tier.sources.filter((s) => enabledSources.includes(s.key)).length : tier.sources.length}/{tier.sources.length}
                   </span>
                 </div>
                 {tier.sources.map((src) => {

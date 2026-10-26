@@ -1,8 +1,10 @@
+import { apiErrorMessage } from '@/lib/apiError';
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import Icon from '@/components/ui/Icon';
 import ApplyPackPanel from '@/components/applications/ApplyPackPanel';
+import NextStepBar from '@/components/applications/NextStepBar';
 import EvidencePanel from '@/components/applications/EvidencePanel';
 import FillActivityPanel from '@/components/applications/FillActivityPanel';
 import RunTimeline from '@/components/applications/RunTimeline';
@@ -14,6 +16,8 @@ import {
 } from '@/hooks/useApplications';
 import { useLogRecruiterContact } from '@/hooks/useCommunications';
 import { useResumes } from '@/hooks/useResumes';
+import { usePlatforms } from '@/hooks/useSettings';
+import { nextStep } from '@/lib/applyNextStep';
 import { useApplicationResumeVersion } from '@/hooks/useResumeIntelligence';
 import { useAppStore } from '@/store/useAppStore';
 import { buildAppTimeline } from '@/lib/timeline';
@@ -27,6 +31,7 @@ const ACTIVE = new Set(['queued', 'pending_review', 'approved', 'applying']);
 export default function AppDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { data: platformData } = usePlatforms();
   const notify = useAppStore((s) => s.showNotification);
   const { data: app, isLoading, isError } = useApplication(id);
   const {
@@ -86,7 +91,8 @@ export default function AppDetailPage() {
             'success',
           );
         },
-        onError: () => notify('Could not log that contact', 'error'),
+        // e.g. "Apollo is not configured" — said as it is, not as a generic failure.
+        onError: (e: unknown) => notify(apiErrorMessage(e, 'Could not log that contact'), 'error'),
       },
     );
 
@@ -168,6 +174,15 @@ export default function AppDetailPage() {
                       evidence panel's "Open job" opens the actual stored URL, so the
                       misleading duplicate is gone rather than sitting next to the real one. */}
                 </div>
+
+                {/* What it is waiting for, with Approve / Resume / Connect right here. Dashboard
+                    actions land on this page, which used to have no way to approve. */}
+                <NextStepBar
+                  app={app}
+                  step={nextStep(app, platformData?.platforms)}
+                  onConnect={() => navigate('/settings?section=platforms')}
+                  showApprove
+                />
 
                 {packOpen && <ApplyPackPanel applicationId={app.id} />}
 

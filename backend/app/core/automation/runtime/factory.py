@@ -39,13 +39,30 @@ def build_browser_profile(
     )
 
 
-def build_apply_llm(api_key: str | None, model: str = "gpt-4o") -> Any:
-    """Build the browser-use LLM the agent reasons with.
+def build_apply_llm(api_key: str | None, model: str = "anthropic/claude-sonnet-5-5") -> Any:
+    """Build the browser-use LLM the agent reasons with, routed the way the app's own LLM
+    client routes the same model id.
 
-    A ``bedrock/<model-id>`` model routes through AWS Bedrock, authenticated via the standard
-    AWS credential chain (env / ~/.aws / instance role) — no api_key. Any other model uses the
-    per-user BYO key via ``ChatOpenAI``.
+    * ``bedrock/<model-id>``: AWS Bedrock via the standard AWS credential chain, no api_key.
+    * ``anthropic/<model>`` or ``claude-...``: the Anthropic API directly, with the per-user
+      key if one is stored, else ``ANTHROPIC_API_KEY``. This used to fall through to
+      ``ChatOpenAI``, which sent a Claude model id to OpenAI, so no live apply could run on the
+      production LLM at all.
+    * anything else with ``LLM__API_BASE`` set: the OpenAI-compatible gateway, with its own
+      credential.
+    * anything else: OpenAI with the per-user key.
     """
+    import os
+
+    from app.core.llm.client import is_anthropic_model
+
+    if is_anthropic_model(model):
+        from browser_use.llm.anthropic.chat import ChatAnthropic
+
+        return ChatAnthropic(
+            model=model.split("/", 1)[1] if model.startswith("anthropic/") else model,
+            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY") or None,
+        )
     if model.startswith("bedrock/"):
         from browser_use.llm import ChatAnthropicBedrock
 
@@ -55,6 +72,14 @@ def build_apply_llm(api_key: str | None, model: str = "gpt-4o") -> Any:
         )
     from browser_use import ChatOpenAI
 
+    from app.core.llm.requirements import gateway_credential, is_gateway_routed
+
+    if is_gateway_routed(model):
+        return ChatOpenAI(
+            model=model.split("/", 1)[1] if model.startswith("openai/") else model,
+            api_key=gateway_credential(),
+            base_url=get_settings().llm.api_base,
+        )
     return ChatOpenAI(model=model, api_key=api_key)
 
 

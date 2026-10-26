@@ -193,3 +193,65 @@ class TestApiLeavesWorkForTheDbWorker:
         monkeypatch.setattr("app.workers.tasks.run_apply_pipeline", _inline)
         await dispatch.enqueue_apply(None, "app-2")
         assert ran == ["app-2"]
+
+
+class TestInterruptedRuns:
+    async def _set_applying(self, factory, app_id, minutes_ago):  # noqa: ANN001, ANN202
+        async with factory() as db:
+            app = await db.get(Application, app_id)
+            app.status = ApplicationStatus.APPLYING
+            await db.commit()
+            # updated_at is maintained on write; set it after so it sticks.
+            app.updated_at = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+            await db.commit()
+
+    async def test_a_run_that_died_goes_back_to_the_owner_not_retried(self, seeded, monkeypatch):
+        """APPLYING had no way out: a PC asleep mid-run left it there for good. It may already
+        have been submitted, so it is handed back to the owner rather than retried blind."""
+        factory, ids = seeded
+        await self._set_applying(factory, ids["testu-approved"], minutes_ago=120)
+        run, calls = _fake_pipeline(factory, ApplicationStatus.APPLIED)
+        monkeypatch.setattr("app.workers.tasks.run_apply_pipeline", run)
+        token = current_user_id.set(None)
+        try:
+            out = await db_queue.run_once(state=db_queue.WorkerState())
+            async with factory() as db:
+                app = await db.get(Application, ids["testu-approved"])
+        finally:
+            current_user_id.reset(token)
+        assert app.status == ApplicationStatus.PENDING_REVIEW
+        assert "interrupted" in (app.notes or "")
+        assert ids["testu-approved"] not in calls
+        assert {"id": ids["testu-approved"], "outcome": "interrupted_returned_to_owner"} in out
+
+    async def test_a_run_still_in_progress_is_left_alone(self, seeded):
+        factory, ids = seeded
+        await self._set_applying(factory, ids["testu-approved"], minutes_ago=2)
+        token = current_user_id.set(None)
+        try:
+            async with factory() as db:
+                assert await db_queue.release_interrupted(db) == []
+                app = await db.get(Application, ids["testu-approved"])
+        finally:
+            current_user_id.reset(token)
+        assert app.status == ApplicationStatus.APPLYING
+
+    async def test_one_crashing_application_does_not_stop_the_others(self, seeded, monkeypatch):
+        factory, ids = seeded
+        calls: list[str] = []
+
+        async def run(ctx, application_id):  # noqa: ANN001, ANN202
+            calls.append(application_id)
+            if application_id == ids["testu-approved"]:
+                raise RuntimeError("browser crashed")
+            async with factory() as db:
+                app = await db.get(Application, application_id)
+                app.status = ApplicationStatus.APPLIED
+                await db.commit()
+
+        monkeypatch.setattr("app.workers.tasks.run_apply_pipeline", run)
+        state = db_queue.WorkerState(backoff_seconds=3600)
+        await db_queue.run_once(state=state)
+        assert len(calls) == 3  # the crash did not abort the pass
+        second = await db_queue.run_once(state=state)
+        assert ids["testu-approved"] not in {r["id"] for r in second}  # backed off

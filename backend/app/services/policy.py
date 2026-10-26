@@ -376,6 +376,22 @@ async def _record_decision(db: AsyncSession, app: Application, decision: PolicyD
     if decision.verdict is Verdict.ALLOW and not decision.outcomes:
         return
 
+    # A held row is re-checked on every worker pass (every 15 minutes on the automation
+    # host). The same decision again is not news: recording it each time wrote ~100
+    # identical timeline rows a day per waiting application. A changed reason is recorded.
+    from app.models.application_event import ApplicationEvent
+
+    last = (
+        await db.execute(
+            select(ApplicationEvent.summary)
+            .where(ApplicationEvent.application_id == app.id, ApplicationEvent.actor == "policy")
+            .order_by(ApplicationEvent.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if last == decision.summary[:300]:  # stored truncated, see services.timeline
+        return
+
     event_type = (
         ApplicationEventType.USER_ACTION_REQUIRED
         if decision.verdict is Verdict.ESCALATE

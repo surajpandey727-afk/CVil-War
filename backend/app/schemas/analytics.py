@@ -16,6 +16,11 @@ class DashboardStats(BaseModel):
     applications_failed: int = 0
     #: Agent activity right now, so the dashboard can answer "what is it doing".
     applications_queued: int = 0
+    #: Approved by the owner, waiting for the automation host to submit.
+    applications_approved: int = 0
+    #: Rehearsal runs (live apply off): stored as applied, but nothing was sent. Never part of
+    #: ``applications_applied`` or the "sent" counts.
+    applications_simulated: int = 0
     applications_applying: int = 0
     #: Submissions that actually went out in the last 24 hours / 7 days. Counted on
     #: ``applied_at``, not ``created_at``: a queued application is not an application sent.

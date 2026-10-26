@@ -70,6 +70,12 @@ _GUARDRAILS = (
 )
 
 
+class ApprovalRequiredError(Exception):
+    """The owner's per-submission confirmation is required and there is no live channel to
+    ask through (the DB-queue worker has no pub/sub). Not a failure: it goes back for the
+    owner's approval, and an approval then stands in for the confirmation."""
+
+
 class ApplyPrerequisiteError(Exception):
     """A required input is missing (no session, no key, no resume) — setup needed."""
 
@@ -89,11 +95,21 @@ class HumanVerificationRequiredError(Exception):
         self.url = url
 
 
-def _build_task(job: Job, resume_path: str) -> str:
+def _build_task(job: Job, resume_path: str, cover_letter_path: str | None = None) -> str:
+    """The agent's instructions. Starts at the employer's own application form when the source
+    gave one (``application_url``), else the posting. A generated cover letter is offered for
+    upload; it used to be produced and then never given to the agent."""
+    start = job.application_url or job.url
+    cover = (
+        f"If the form asks for a cover letter, upload the file at: {cover_letter_path}\n"
+        if cover_letter_path
+        else ""
+    )
     return (
         f"Apply to this job on {job.platform}:\n"
-        f"Title: {job.title}\nCompany: {job.company}\nURL: {job.url}\n\n"
+        f"Title: {job.title}\nCompany: {job.company}\nURL: {start}\n\n"
         f"Use the resume file at: {resume_path}\n"
+        f"{cover}"
         "Navigate to the job, complete the application form, upload the resume, and submit."
     )
 
@@ -110,6 +126,36 @@ def _extract_result(history: object) -> ApplicationResult:
         return out
     final = history.final_result() if hasattr(history, "final_result") else None
     return ApplicationResult(submitted=bool(final), notes=str(final or "")[:500])
+
+
+async def _require_unexpired_session(db: AsyncSession, user_id: str, platform: str) -> None:
+    """Stop before opening a browser on a session that has already lapsed.
+
+    Nothing used to check: an expired session drove the browser into the platform's login
+    wall, which then surfaced as a CAPTCHA/verification pause instead of "reconnect". The
+    row is marked expired so Settings shows Reconnect.
+    """
+    from datetime import UTC, datetime
+
+    from app.models.enums import SessionState
+    from app.models.platform_session import PlatformSession
+
+    row = (
+        await db.execute(
+            select(PlatformSession).where(
+                PlatformSession.user_id == user_id, PlatformSession.platform == platform
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or row.expires_at is None:
+        return
+    expires = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=UTC)
+    if expires > datetime.now(UTC):
+        return
+    row.state = SessionState.SESSION_EXPIRED
+    row.state_detail = "Your saved sign-in has expired. Reconnect to keep applying."
+    await db.commit()
+    raise ApplyPrerequisiteError(f"Your {platform} sign-in has expired — reconnect it")
 
 
 async def run_apply(
@@ -131,6 +177,22 @@ async def run_apply(
     if not resume_key:
         raise ApplyPrerequisiteError("Resume file is not available")
 
+    policy = await load_policy(db, app.user_id)
+    # The pre-submit confirmation asks the owner live, over pub/sub. The DB-queue worker that
+    # applies for production has none, so the ask always "failed" and every live apply ended
+    # FAILED. An explicit approval of this application is that confirmation; without one, it
+    # goes back to the owner rather than being submitted unattended or marked failed.
+    ask_live = policy.require_submission_confirmation
+    if ask_live and redis is None:
+        from app.services.approval import human_approved
+
+        if not human_approved(app):
+            raise ApprovalRequiredError(
+                "Your settings ask to confirm each submission. Approve this application to "
+                "send it; your approval is the confirmation."
+            )
+        ask_live = False
+
     store = CredentialStore()
     # Only platforms the registry actually has a login concept for need a saved session —
     # requiring one unconditionally blocked every keyless board (MoveJobs, Tarve, Remotive,
@@ -145,6 +207,7 @@ async def run_apply(
             raise ApplyPrerequisiteError(
                 f"No saved {job.platform} session — assisted login required"
             )
+        await _require_unexpired_session(db, app.user_id, job.platform)
 
     cfg = (
         await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == app.user_id))
@@ -163,7 +226,6 @@ async def run_apply(
         )
 
     # --- Prerequisites satisfied; drive the browser (real-browser spike path) ---
-    policy = await load_policy(db, app.user_id)
 
     # Inject any active, learned site-skills into the agent's system prompt, and remember
     # which were used so the run's verdict can feed back to score them.
@@ -173,9 +235,18 @@ async def run_apply(
     extend = f"{_GUARDRAILS}\n\n{guidance}" if guidance else _GUARDRAILS
 
     # Materialize the stored resume to a local temp file the browser can upload.
-    resume_path = await StorageService(get_storage(), app.user_id).materialize_to_temp(
+    storage = StorageService(get_storage(), app.user_id)
+    resume_path = await storage.materialize_to_temp(
         resume_key, suffix=Path(resume_key).suffix or ".pdf"
     )
+    cover_letter_path: str | None = None
+    if app.cover_letter_path:
+        try:
+            cover_letter_path = await storage.materialize_to_temp(
+                app.cover_letter_path, suffix=Path(app.cover_letter_path).suffix or ".pdf"
+            )
+        except Exception as exc:  # a missing cover letter must not stop the application
+            logger.warning("apply.cover_letter_unavailable", application_id=app.id, error=str(exc))
 
     # A retry the operator explicitly triggered after clearing a verification wall runs
     # headed, so they can see (and clear) it again if the same portal challenges twice — see
@@ -208,7 +279,7 @@ async def run_apply(
     confirmation_outcome: ConfirmationOutcome | None = None
     confirmation_tools = None
     should_stop = None
-    if policy.require_submission_confirmation:
+    if ask_live:
         confirmation_outcome = ConfirmationOutcome()
         confirmation_tools = build_confirmation_tools(
             redis=redis,
@@ -227,7 +298,7 @@ async def run_apply(
         )
 
     agent = build_apply_agent(
-        _build_task(job, resume_path),
+        _build_task(job, resume_path, cover_letter_path),
         llm=llm,
         profile=profile,
         tools=confirmation_tools,
@@ -253,8 +324,10 @@ async def run_apply(
             time.perf_counter() - start
         )
         # The résumé was materialized from storage to a temp file for the upload; remove it.
-        with contextlib.suppress(OSError):
-            os.remove(resume_path)
+        for temp in (resume_path, cover_letter_path):
+            if temp:
+                with contextlib.suppress(OSError):
+                    os.remove(temp)
 
     # Persist + review on BOTH the success and the raise paths.
     await _record_and_review(

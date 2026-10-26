@@ -10,6 +10,10 @@ export interface DashboardStats {
   applications_failed: number;
   /** Agent activity right now. */
   applications_queued: number;
+  /** Approved by the owner, waiting for the automation host to submit. */
+  applications_approved?: number;
+  /** Rehearsal runs (live apply off): nothing was sent. Never part of `applications_applied`. */
+  applications_simulated?: number;
   applications_applying: number;
   /** Submissions actually sent, counted on applied_at — a queued row is not one sent. */
   submitted_today: number;

@@ -243,3 +243,37 @@ class TestPlatformTest:
         assert indeed.ok is False
         assert "health_check" not in indeed.detail
         assert indeed.detail  # the registry's own reason, not an AttributeError
+
+
+class TestStrandedSignIn:
+    async def _stale(self, db_session, user_id, **fields):  # noqa: ANN001, ANN202
+        row = PlatformSession(
+            user_id=user_id, platform="reed", state=SessionState.HUMAN_VERIFICATION_REQUIRED,
+            **fields,
+        )
+        db_session.add(row)
+        await db_session.commit()
+        row.updated_at = datetime.now(UTC) - timedelta(hours=1)
+        await db_session.commit()
+        return row
+
+    async def test_a_dead_hosts_request_stops_claiming_a_window_is_open(
+        self, db_session, current_user
+    ):
+        """A host that died mid-capture left the row "in progress" forever."""
+        row = await self._stale(db_session, current_user.id)
+        listing = await platform_service.list_platforms(db_session, current_user.id)
+        reed = next(p for p in listing.platforms if p.key == "reed")
+        await db_session.refresh(row)
+        assert row.state == SessionState.AUTH_REQUIRED
+        assert reed.detail == service.STRANDED
+
+    async def test_a_failed_reconnect_keeps_the_earlier_working_session(
+        self, db_session, current_user
+    ):
+        row = await self._stale(
+            db_session, current_user.id, fingerprint_hash="f" * 64,
+            expires_at=datetime.now(UTC) + timedelta(days=10),
+        )
+        assert await service.expire_if_stranded(db_session, row)
+        assert row.state == SessionState.SESSION_ACTIVE

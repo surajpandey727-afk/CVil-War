@@ -42,7 +42,9 @@ class TestCreateApplication:
         assert app.id is not None
         assert app.job_id == job.id
         assert app.user_id == TEST_USER_ID
-        assert app.status == ApplicationStatus.QUEUED
+        # Review mode is created waiting for the owner, never QUEUED-then-corrected: a worker
+        # polling in that gap could submit an application nobody approved.
+        assert app.status == ApplicationStatus.PENDING_REVIEW
         assert app.apply_mode == "review"
         assert app.resume_id is None
 
@@ -96,8 +98,10 @@ class TestListApplications:
         )
         await app_service.approve_application(db_session, app_obj.id)
 
-        queued = await app_service.list_applications(db_session, status=ApplicationStatus.QUEUED)
-        assert queued.total == 2
+        waiting = await app_service.list_applications(
+            db_session, status=ApplicationStatus.PENDING_REVIEW
+        )
+        assert waiting.total == 2
 
         approved = await app_service.list_applications(db_session, status=ApplicationStatus.APPROVED)
         assert approved.total == 1
@@ -125,10 +129,13 @@ class TestApproveApplication:
         created = await app_service.create_application(
             db_session, ApplicationCreate(job_id=job.id), TEST_USER_ID
         )
-        assert created.status == ApplicationStatus.QUEUED
+        assert created.status == ApplicationStatus.PENDING_REVIEW
 
         approved = await app_service.approve_application(db_session, created.id)
         assert approved.status == ApplicationStatus.APPROVED
+        # A second click is a no-op, not an error.
+        again = await app_service.approve_application(db_session, created.id)
+        assert again.status == ApplicationStatus.APPROVED
 
 
 class TestUpdateStatus:
@@ -198,3 +205,18 @@ class TestUpdateStatus:
         updated = await app_service.update_status(db_session, created.id, update)
 
         assert updated.resume_id == resume.id
+
+
+
+async def test_an_omitted_apply_mode_uses_the_owners_setting(db_session, sample_job_data):
+    """Every screen used to send "review", so choosing Autonomous in Settings did nothing."""
+    from app.models.user_settings import UserSettings
+
+    db_session.add(UserSettings(user_id=TEST_USER_ID, apply_mode="autonomous"))
+    await db_session.commit()
+    job = await _create_job(db_session, sample_job_data)
+    app = await app_service.create_application(
+        db_session, ApplicationCreate(job_id=job.id), TEST_USER_ID
+    )
+    assert app.apply_mode == "autonomous"
+    assert app.status == ApplicationStatus.QUEUED

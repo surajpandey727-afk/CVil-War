@@ -23,14 +23,17 @@ export default function SettingsPage() {
   const [params] = useSearchParams();
   const platformsRef = useRef<HTMLDivElement>(null);
 
-  // Deep link: arriving from Sources -> Manage should put the platform section in front of
-  // the operator, not drop them at the top of a long settings page to hunt for it.
-  useEffect(() => {
-    if (params.get('section') !== 'platforms') return;
-    platformsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [params]);
   const update = useUpdateSettings();
   const [draft, setDraft] = useState<Settings | null>(null);
+
+  // Deep link: arriving from "Connect LinkedIn" or Sources -> Manage should put the platform
+  // section in front of the operator. Re-run once the page has loaded: on first render the
+  // skeleton is showing and the section does not exist yet, so the scroll used to do nothing.
+  const sectionReady = draft != null;
+  useEffect(() => {
+    if (params.get('section') !== 'platforms' || !sectionReady) return;
+    platformsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [params, sectionReady]);
 
   useEffect(() => {
     if (data) setDraft(data);

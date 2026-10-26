@@ -8,6 +8,8 @@ export interface ServiceState {
   /** In-app route that lets the user act on a non-connected service, when one exists. */
   action_path: string;
   action_label: string;
+  /** Informational only: shown, but not counted as "to connect". */
+  optional?: boolean;
 }
 
 /** The whole system status, mirrors the backend SystemStatusResponse. */

@@ -8,9 +8,9 @@ Usage (two steps, so the schema is in place before data loads):
 
     export DATABASE_URL='postgresql+asyncpg://postgres.<ref>:<pw>@aws-1-<region>.pooler.supabase.com:6543/postgres'
     alembic upgrade head                      # from backend/, creates the current schema
-    python scripts/restore_from_backup.py --backup <file> --load
+    python ../scripts/restore_from_backup.py --backup <file> --load      # still from backend/
 
-    python scripts/restore_from_backup.py --backup <file> --parse-only   # dry run, no DB
+    python ../scripts/restore_from_backup.py --backup <file> --parse-only   # dry run, no DB
 
 It loads tables in foreign-key-dependency order and loads self-referential tables (résumés
 reference a base résumé) parent-rows-first, so a plain ordered COPY satisfies every constraint

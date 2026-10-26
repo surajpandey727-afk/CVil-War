@@ -62,3 +62,32 @@ class TestSystemStatus:
     async def test_requires_auth(self, anon_client):
         resp = await anon_client.get(f"{API}/status")
         assert resp.status_code in (401, 403)
+
+
+class TestStatusIsActionable:
+    async def test_review_mode_is_a_choice_not_something_to_connect(self, client, db_session):
+        """The agent row read an `automation.mode` key nothing writes, so it was "pending"
+        forever and the pill could never say "All connected"."""
+        from app.models.user_settings import UserSettings
+        from tests.conftest import TEST_USER_ID
+
+        db_session.add(UserSettings(user_id=TEST_USER_ID, apply_mode="autonomous"))
+        await db_session.commit()
+        by_key = {s["key"]: s for s in (await client.get(f"{API}/status")).json()["services"]}
+        assert by_key["ai_agent"]["status"] == "connected"
+        assert "Autonomous" in by_key["ai_agent"]["detail"]
+
+    async def test_server_email_is_informational_and_not_counted(self, client):
+        body = (await client.get(f"{API}/status")).json()
+        email = next(s for s in body["services"] if s["key"] == "email")
+        assert email["optional"] is True
+        assert email["action_path"] == ""  # there is nothing in the app that could fix it
+        counted = [
+            s for s in body["services"]
+            if not s["optional"] and s["status"] in ("pending", "unavailable", "not_configured")
+        ]
+        assert body["attention"] == len(counted)
+
+    async def test_job_board_connect_goes_to_the_platform_section(self, client):
+        by_key = {s["key"]: s for s in (await client.get(f"{API}/status")).json()["services"]}
+        assert by_key["job_boards"]["action_path"] == "/settings?section=platforms"

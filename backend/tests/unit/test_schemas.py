@@ -190,7 +190,7 @@ class TestApplicationCreate:
         app = ApplicationCreate(job_id="job1")
         assert app.job_id == "job1"
         assert app.resume_id is None
-        assert app.apply_mode == "review"
+        assert app.apply_mode is None  # "use my Apply mode setting"
 
     def test_explicit_fields(self):
         app = ApplicationCreate(job_id="job1", resume_id="res1", apply_mode="autonomous")
